@@ -60,9 +60,7 @@ type CDPResponse = {
 
 export class CDPRelayServer {
   private _wsHost: string;
-  private _browserChannel: string;
-  private _userDataDir?: string;
-  private _executablePath?: string;
+
   private _cdpPath: string;
   private _extensionPath: string;
   private _wss: WebSocketServer;
@@ -76,11 +74,9 @@ export class CDPRelayServer {
   private _nextSessionId: number = 1;
   private _extensionConnectionPromise!: ManualPromise<void>;
 
-  constructor(server: http.Server, browserChannel: string, userDataDir?: string, executablePath?: string) {
+  constructor(server: http.Server, ) {
     this._wsHost = httpAddressToString(server.address()).replace(/^http/, 'ws');
-    this._browserChannel = browserChannel;
-    this._userDataDir = userDataDir;
-    this._executablePath = executablePath;
+
 
     const uuid = crypto.randomUUID();
     this._cdpPath = `/cdp/${uuid}`;
@@ -99,62 +95,6 @@ export class CDPRelayServer {
     return `${this._wsHost}${this._extensionPath}`;
   }
 
-  async ensureExtensionConnectionForMCPContext(clientInfo: ClientInfo, abortSignal: AbortSignal, toolName: string | undefined) {
-    debugLogger('Ensuring extension connection for MCP context');
-    if (this._extensionConnection)
-      return;
-    this._connectBrowser(clientInfo, toolName);
-    debugLogger('Waiting for incoming extension connection');
-    await Promise.race([
-      this._extensionConnectionPromise,
-      new Promise((_, reject) => setTimeout(() => {
-        reject(new Error(`Extension connection timeout. Make sure the "Playwright MCP Bridge" extension is installed. See https://github.com/microsoft/playwright-mcp/blob/main/extension/README.md for installation instructions.`));
-      }, process.env.PWMCP_TEST_CONNECTION_TIMEOUT ? parseInt(process.env.PWMCP_TEST_CONNECTION_TIMEOUT, 10) : 5_000)),
-      new Promise((_, reject) => abortSignal.addEventListener('abort', reject))
-    ]);
-    debugLogger('Extension connection established');
-  }
-
-  private _connectBrowser(clientInfo: ClientInfo, toolName: string | undefined) {
-    const mcpRelayEndpoint = `${this._wsHost}${this._extensionPath}`;
-    // Need to specify "key" in the manifest.json to make the id stable when loading from file.
-    const url = new URL('chrome-extension://jakfalbnbhgkpmoaakfflhflbfpkailf/connect.html');
-    url.searchParams.set('mcpRelayUrl', mcpRelayEndpoint);
-    const client = {
-      name: clientInfo.name,
-      version: clientInfo.version,
-    };
-    url.searchParams.set('client', JSON.stringify(client));
-    url.searchParams.set('protocolVersion', process.env.PWMCP_TEST_PROTOCOL_VERSION ?? protocol.VERSION.toString());
-    if (toolName)
-      url.searchParams.set('newTab', String(toolName === 'browser_navigate'));
-    const token = process.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN;
-    if (token)
-      url.searchParams.set('token', token);
-    const href = url.toString();
-
-    let executablePath = this._executablePath;
-    if (!executablePath) {
-      const executableInfo = registry.findExecutable(this._browserChannel);
-      if (!executableInfo)
-        throw new Error(`Unsupported channel: "${this._browserChannel}"`);
-      executablePath = executableInfo.executablePath('javascript');
-      if (!executablePath)
-        throw new Error(`"${this._browserChannel}" executable not found. Make sure it is installed at a standard location.`);
-    }
-
-    const args: string[] = [];
-    if (this._userDataDir)
-      args.push(`--user-data-dir=${this._userDataDir}`);
-    args.push(href);
-
-    spawn(executablePath, args, {
-      windowsHide: true,
-      detached: true,
-      shell: false,
-      stdio: 'ignore',
-    });
-  }
 
   stop(): void {
     this.closeConnections('Server stopped');

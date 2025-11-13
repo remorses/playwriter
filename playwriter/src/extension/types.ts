@@ -13,8 +13,5 @@ export interface BrowserContextFactory {
 export type ClientInfo = {
   name: string;
   version: string;
-  roots: Root[];
   timestamp: number;
 };
-
-type Root = never // something mcp

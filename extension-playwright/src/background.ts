@@ -16,207 +16,165 @@
 
 import { RelayConnection, debugLog } from './relayConnection';
 
-type PageMessage = {
-  type: 'connectToMCPRelay';
-  mcpRelayUrl: string;
-} | {
-  type: 'getTabs';
-} | {
-  type: 'connectToTab';
-  tabId?: number;
-  windowId?: number;
-  mcpRelayUrl: string;
-} | {
-  type: 'getConnectionStatus';
-} | {
-  type: 'disconnect';
-};
+// Relay URL - fixed port for MCP bridge
+const RELAY_URL = 'ws://localhost:9988';
 
-class TabShareExtension {
-  private _activeConnection: RelayConnection | undefined;
+class SimplifiedExtension {
+  private _connection: RelayConnection | undefined;
   private _connectedTabId: number | null = null;
-  private _pendingTabSelection = new Map<number, { connection: RelayConnection, timerId?: number }>();
 
   constructor() {
+    debugLog(`Using relay URL: ${RELAY_URL}`);
     chrome.tabs.onRemoved.addListener(this._onTabRemoved.bind(this));
-    chrome.tabs.onUpdated.addListener(this._onTabUpdated.bind(this));
     chrome.tabs.onActivated.addListener(this._onTabActivated.bind(this));
-    chrome.runtime.onMessage.addListener(this._onMessage.bind(this));
     chrome.action.onClicked.addListener(this._onActionClicked.bind(this));
   }
 
-  // Promise-based message handling is not supported in Chrome: https://issues.chromium.org/issues/40753031
-  private _onMessage(message: PageMessage, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) {
-    switch (message.type) {
-      case 'connectToMCPRelay':
-        this._connectToRelay(sender.tab!.id!, message.mcpRelayUrl).then(
-            () => sendResponse({ success: true }),
-            (error: any) => sendResponse({ success: false, error: error.message }));
-        return true;
-      case 'getTabs':
-        this._getTabs().then(
-            tabs => sendResponse({ success: true, tabs, currentTabId: sender.tab?.id }),
-            (error: any) => sendResponse({ success: false, error: error.message }));
-        return true;
-      case 'connectToTab':
-        const tabId = message.tabId || sender.tab?.id!;
-        const windowId = message.windowId || sender.tab?.windowId!;
-        this._connectTab(sender.tab!.id!, tabId, windowId, message.mcpRelayUrl!).then(
-            () => sendResponse({ success: true }),
-            (error: any) => sendResponse({ success: false, error: error.message }));
-        return true; // Return true to indicate that the response will be sent asynchronously
-      case 'getConnectionStatus':
-        sendResponse({
-          connectedTabId: this._connectedTabId
-        });
-        return false;
-      case 'disconnect':
-        this._disconnect().then(
-            () => sendResponse({ success: true }),
-            (error: any) => sendResponse({ success: false, error: error.message }));
-        return true;
+  private async _onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
+    if (!tab.id) {
+      debugLog('No tab ID available');
+      return;
     }
-    return false;
+
+    // Toggle: if connected to this tab, disconnect; otherwise connect
+    if (this._connectedTabId === tab.id) {
+      await this._disconnect();
+    } else {
+      await this._connect(tab.id);
+    }
   }
 
-  private async _connectToRelay(selectorTabId: number, mcpRelayUrl: string): Promise<void> {
+  private async _connect(tabId: number): Promise<void> {
     try {
-      debugLog(`Connecting to relay at ${mcpRelayUrl}`);
-      const socket = new WebSocket(mcpRelayUrl);
+      debugLog(`Connecting to tab ${tabId}`);
+
+      // Disconnect from any existing connection
+      if (this._connection) {
+        this._connection.close('Switching to new tab');
+        this._connection = undefined;
+      }
+
+      // Update icon to show connecting state
+      await this._updateIcon(tabId, 'connecting');
+
+      // Connect to WebSocket relay
+      const socket = new WebSocket(RELAY_URL);
       await new Promise<void>((resolve, reject) => {
         socket.onopen = () => resolve();
-        socket.onerror = () => reject(new Error('WebSocket error'));
+        socket.onerror = () => reject(new Error('WebSocket connection failed'));
         setTimeout(() => reject(new Error('Connection timeout')), 5000);
       });
 
-      const connection = new RelayConnection(socket);
-      connection.onclose = () => {
+      // Create relay connection
+      this._connection = new RelayConnection(socket);
+      this._connection.onclose = () => {
         debugLog('Connection closed');
-        this._pendingTabSelection.delete(selectorTabId);
-        // TODO: show error in the selector tab?
-      };
-      this._pendingTabSelection.set(selectorTabId, { connection });
-      debugLog(`Connected to MCP relay`);
-    } catch (error: any) {
-      const message = `Failed to connect to MCP relay: ${error.message}`;
-      debugLog(message);
-      throw new Error(message);
-    }
-  }
-
-  private async _connectTab(selectorTabId: number, tabId: number, windowId: number, mcpRelayUrl: string): Promise<void> {
-    try {
-      debugLog(`Connecting tab ${tabId} to relay at ${mcpRelayUrl}`);
-      try {
-        this._activeConnection?.close('Another connection is requested');
-      } catch (error: any) {
-        debugLog(`Error closing active connection:`, error);
-      }
-      await this._setConnectedTabId(null);
-
-      this._activeConnection = this._pendingTabSelection.get(selectorTabId)?.connection;
-      if (!this._activeConnection)
-        throw new Error('No active MCP relay connection');
-      this._pendingTabSelection.delete(selectorTabId);
-
-      this._activeConnection.setTabId(tabId);
-      this._activeConnection.onclose = () => {
-        debugLog('MCP connection closed');
-        this._activeConnection = undefined;
+        this._connection = undefined;
         void this._setConnectedTabId(null);
       };
 
-      await Promise.all([
-        this._setConnectedTabId(tabId),
-        chrome.tabs.update(tabId, { active: true }),
-        chrome.windows.update(windowId, { focused: true }),
-      ]);
-      debugLog(`Connected to MCP bridge`);
+      // Set the tab ID (this will attach debugger)
+      this._connection.setTabId(tabId);
+
+      // Update state
+      await this._setConnectedTabId(tabId);
+
+      debugLog(`Successfully connected to tab ${tabId}`);
     } catch (error: any) {
-      await this._setConnectedTabId(null);
-      debugLog(`Failed to connect tab ${tabId}:`, error.message);
-      throw error;
+      debugLog(`Failed to connect: ${error.message}`);
+      await this._updateIcon(tabId, 'disconnected');
+      
+      // Show error notification
+      chrome.action.setBadgeText({ tabId, text: '!' });
+      chrome.action.setBadgeBackgroundColor({ tabId, color: '#f44336' });
+      chrome.action.setTitle({ tabId, title: `Error: ${error.message}` });
+      
+      // Clear error after 3 seconds
+      setTimeout(() => {
+        if (this._connectedTabId !== tabId) {
+          chrome.action.setBadgeText({ tabId, text: '' });
+          chrome.action.setTitle({ tabId, title: 'Click to attach debugger' });
+        }
+      }, 3000);
+    }
+  }
+
+  private async _disconnect(): Promise<void> {
+    debugLog('Disconnecting');
+    
+    const tabId = this._connectedTabId;
+    
+    this._connection?.close('User disconnected');
+    this._connection = undefined;
+    
+    await this._setConnectedTabId(null);
+    
+    if (tabId) {
+      await this._updateIcon(tabId, 'disconnected');
     }
   }
 
   private async _setConnectedTabId(tabId: number | null): Promise<void> {
     const oldTabId = this._connectedTabId;
     this._connectedTabId = tabId;
-    if (oldTabId && oldTabId !== tabId)
-      await this._updateBadge(oldTabId, { text: '' });
-    if (tabId)
-      await this._updateBadge(tabId, { text: '✓', color: '#4CAF50', title: 'Connected to MCP client' });
+
+    // Clear old tab icon
+    if (oldTabId && oldTabId !== tabId) {
+      await this._updateIcon(oldTabId, 'disconnected');
+    }
+
+    // Set new tab icon
+    if (tabId) {
+      await this._updateIcon(tabId, 'connected');
+    }
   }
 
-  private async _updateBadge(tabId: number, { text, color, title }: { text: string; color?: string, title?: string }): Promise<void> {
+  private async _updateIcon(tabId: number, state: 'connected' | 'disconnected' | 'connecting'): Promise<void> {
     try {
-      await chrome.action.setBadgeText({ tabId, text });
-      await chrome.action.setTitle({ tabId, title: title || '' });
-      if (color)
-        await chrome.action.setBadgeBackgroundColor({ tabId, color });
+      switch (state) {
+        case 'connected':
+          await chrome.action.setBadgeText({ tabId, text: '✓' });
+          await chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' });
+          await chrome.action.setTitle({ tabId, title: 'Connected - Click to disconnect' });
+          break;
+        
+        case 'connecting':
+          await chrome.action.setBadgeText({ tabId, text: '...' });
+          await chrome.action.setBadgeBackgroundColor({ tabId, color: '#FF9800' });
+          await chrome.action.setTitle({ tabId, title: 'Connecting...' });
+          break;
+        
+        case 'disconnected':
+        default:
+          await chrome.action.setBadgeText({ tabId, text: '' });
+          await chrome.action.setTitle({ tabId, title: 'Click to attach debugger' });
+          break;
+      }
     } catch (error: any) {
-      // Ignore errors as the tab may be closed already.
+      // Ignore errors (tab may be closed)
+      debugLog(`Error updating icon: ${error.message}`);
     }
   }
 
   private async _onTabRemoved(tabId: number): Promise<void> {
-    const pendingConnection = this._pendingTabSelection.get(tabId)?.connection;
-    if (pendingConnection) {
-      this._pendingTabSelection.delete(tabId);
-      pendingConnection.close('Browser tab closed');
+    if (this._connectedTabId !== tabId) {
       return;
     }
-    if (this._connectedTabId !== tabId)
-      return;
-    this._activeConnection?.close('Browser tab closed');
-    this._activeConnection = undefined;
+    
+    debugLog(`Connected tab ${tabId} was closed`);
+    this._connection?.close('Browser tab closed');
+    this._connection = undefined;
     this._connectedTabId = null;
   }
 
-  private _onTabActivated(activeInfo: chrome.tabs.TabActiveInfo) {
-    for (const [tabId, pending] of this._pendingTabSelection) {
-      if (tabId === activeInfo.tabId) {
-        if (pending.timerId) {
-          clearTimeout(pending.timerId);
-          pending.timerId = undefined;
-        }
-        continue;
-      }
-      if (!pending.timerId) {
-        pending.timerId = setTimeout(() => {
-          const existed = this._pendingTabSelection.delete(tabId);
-          if (existed) {
-            pending.connection.close('Tab has been inactive for 5 seconds');
-            chrome.tabs.sendMessage(tabId, { type: 'connectionTimeout' });
-          }
-        }, 5000);
-        return;
-      }
+  private async _onTabActivated(activeInfo: chrome.tabs.TabActiveInfo): Promise<void> {
+    // Update icon for the newly active tab
+    if (this._connectedTabId === activeInfo.tabId) {
+      await this._updateIcon(activeInfo.tabId, 'connected');
+    } else {
+      await this._updateIcon(activeInfo.tabId, 'disconnected');
     }
-  }
-
-  private _onTabUpdated(tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) {
-    if (this._connectedTabId === tabId)
-      void this._setConnectedTabId(tabId);
-  }
-
-  private async _getTabs(): Promise<chrome.tabs.Tab[]> {
-    const tabs = await chrome.tabs.query({});
-    return tabs.filter(tab => tab.url && !['chrome:', 'edge:', 'devtools:'].some(scheme => tab.url!.startsWith(scheme)));
-  }
-
-  private async _onActionClicked(): Promise<void> {
-    await chrome.tabs.create({
-      url: chrome.runtime.getURL('status.html'),
-      active: true
-    });
-  }
-
-  private async _disconnect(): Promise<void> {
-    this._activeConnection?.close('User disconnected');
-    this._activeConnection = undefined;
-    await this._setConnectedTabId(null);
   }
 }
 
-new TabShareExtension();
+new SimplifiedExtension();
