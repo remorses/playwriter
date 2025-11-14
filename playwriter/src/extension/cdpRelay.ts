@@ -40,6 +40,12 @@ import type { CDPCommand, CDPResponse, CDPEvent, Protocol } from '../cdp-types.j
 
 const debugLogger = debug('pw:mcp:relay');
 
+interface ConnectedTarget {
+  sessionId: string;
+  targetId: string;
+  targetInfo: Protocol.Target.TargetInfo;
+}
+
 export class CDPRelayServer {
   private _wsHost: string;
 
@@ -48,12 +54,7 @@ export class CDPRelayServer {
   private _wss: WebSocketServer;
   private _playwrightConnection: WebSocket | null = null;
   private _extensionConnection: ExtensionConnection | null = null;
-  private _connectedTabInfo: {
-    targetInfo: any;
-    // Page sessionId that should be used by this connection.
-    sessionId: string;
-  } | undefined;
-  private _nextSessionId: number = 1;
+  private _connectedTargets: Map<string, ConnectedTarget> = new Map();
   private _extensionConnectionPromise!: ManualPromise<void>;
 
   constructor(server: http.Server, ) {
@@ -119,8 +120,7 @@ export class CDPRelayServer {
       if (this._playwrightConnection !== ws)
         return;
       this._playwrightConnection = null;
-      this._closeExtensionConnection('Playwright client disconnected');
-      debugLogger('Playwright WebSocket closed');
+      debugLogger('Playwright WebSocket closed - extension stays connected');
     });
     ws.on('error', error => {
       debugLogger('Playwright WebSocket error:', error);
@@ -135,7 +135,7 @@ export class CDPRelayServer {
   }
 
   private _resetExtensionConnection() {
-    this._connectedTabInfo = undefined;
+    this._connectedTargets.clear();
     this._extensionConnection = null;
     this._extensionConnectionPromise = new ManualPromise();
     void this._extensionConnectionPromise.catch(logUnhandledError);
@@ -167,23 +167,52 @@ export class CDPRelayServer {
 
   private _handleExtensionMessage(message: ExtensionEventMessage) {
     if (message.method === 'forwardCDPEvent') {
-      const sessionId = message.params.sessionId || this._connectedTabInfo?.sessionId;
-      this._sendToPlaywright({
-        sessionId,
-        method: message.params.method,
-        params: message.params.params
-      } as CDPEvent);
+      const { method, params, sessionId } = message.params;
+      
+      if (method === 'Target.attachedToTarget') {
+        const targetParams = params as Protocol.Target.AttachedToTargetEvent;
+        this._connectedTargets.set(targetParams.sessionId, {
+          sessionId: targetParams.sessionId,
+          targetId: targetParams.targetInfo.targetId,
+          targetInfo: targetParams.targetInfo
+        });
+        
+        debugLogger('\x1b[33m← Extension:\x1b[0m', `Target.attachedToTarget sessionId=${targetParams.sessionId}, targetId=${targetParams.targetInfo.targetId}`);
+        
+        this._sendToPlaywright({
+          method: 'Target.attachedToTarget',
+          params: targetParams
+        } as CDPEvent);
+        
+      } else if (method === 'Target.detachedFromTarget') {
+        const detachParams = params as Protocol.Target.DetachedFromTargetEvent;
+        this._connectedTargets.delete(detachParams.sessionId);
+        
+        debugLogger('\x1b[33m← Extension:\x1b[0m', `Target.detachedFromTarget sessionId=${detachParams.sessionId}`);
+        
+        this._sendToPlaywright({
+          method: 'Target.detachedFromTarget',
+          params: detachParams
+        } as CDPEvent);
+        
+      } else {
+        this._sendToPlaywright({
+          sessionId,
+          method,
+          params
+        } as CDPEvent);
+      }
     }
   }
 
   private async _handlePlaywrightMessage(message: CDPCommand): Promise<void> {
-    debugLogger('← Playwright:', `${message.method} (id=${message.id})`);
+    debugLogger('\x1b[36m← Playwright:\x1b[0m', `${message.method} (id=${message.id})`);
     const { id, sessionId, method, params } = message;
     try {
       const result = await this._handleCDPCommand(method, params, sessionId);
       this._sendToPlaywright({ id, sessionId, result });
     } catch (e) {
-      debugLogger('Error in the extension:', e);
+      debugLogger('\x1b[31mError in the extension:\x1b[0m', e);
       this._sendToPlaywright({
         id,
         sessionId,
@@ -207,33 +236,61 @@ export class CDPRelayServer {
         return { };
       }
       case 'Target.setAutoAttach': {
-        // Forward child session handling.
-        if (sessionId)
+        if (sessionId) {
           break;
-        // Simulate auto-attach behavior with real target info
-        if (!this._extensionConnection)
-          throw new Error('Extension not connected. Please ensure the Chrome extension is installed and connected to the extension endpoint before connecting Playwright.');
-        const { targetInfo } = await this._extensionConnection.send({ method: 'attachToTab' });
-        this._connectedTabInfo = {
-          targetInfo,
-          sessionId: `pw-tab-${this._nextSessionId++}`,
-        };
-        debugLogger('Simulating auto-attach');
-        this._sendToPlaywright({
-          method: 'Target.attachedToTarget',
-          params: {
-            sessionId: this._connectedTabInfo.sessionId,
-            targetInfo: {
-              ...this._connectedTabInfo.targetInfo,
-              attached: true,
-            },
-            waitingForDebugger: false
-          }
-        } satisfies CDPEvent);
-        return { };
+        }
+        
+        debugLogger('Target.setAutoAttach received (manual attach mode)');
+        debugLogger('Sending Target.attachedToTarget events for existing targets:', this._connectedTargets.size);
+        
+        for (const target of this._connectedTargets.values()) {
+          debugLogger('Sending Target.attachedToTarget for sessionId:', target.sessionId, 'targetId:', target.targetId);
+          this._sendToPlaywright({
+            method: 'Target.attachedToTarget',
+            params: {
+              sessionId: target.sessionId,
+              targetInfo: {
+                ...target.targetInfo,
+                attached: true
+              },
+              waitingForDebugger: false
+            }
+          } as CDPEvent);
+        }
+        
+        return {};
       }
       case 'Target.getTargetInfo': {
-        return this._connectedTabInfo?.targetInfo;
+        const targetId = params?.targetId;
+        
+        if (targetId) {
+          for (const target of this._connectedTargets.values()) {
+            if (target.targetId === targetId) {
+              return { targetInfo: target.targetInfo };
+            }
+          }
+        }
+        
+        if (sessionId) {
+          const target = this._connectedTargets.get(sessionId);
+          if (target) {
+            return { targetInfo: target.targetInfo };
+          }
+        }
+        
+        const firstTarget = this._connectedTargets.values().next().value;
+        return { targetInfo: firstTarget?.targetInfo };
+      }
+      case 'Target.getTargets': {
+        return {
+          targetInfos: Array.from(this._connectedTargets.values()).map(t => ({
+            ...t.targetInfo,
+            attached: true,
+          }))
+        };
+      }
+      case 'Target.closeTarget': {
+        break;
       }
     }
     return await this._forwardToExtension(method, params, sessionId);
@@ -242,9 +299,7 @@ export class CDPRelayServer {
   private async _forwardToExtension(method: string, params: any, sessionId: string | undefined): Promise<any> {
     if (!this._extensionConnection)
       throw new Error('Extension not connected');
-    // Top level sessionId is only passed between the relay and the client.
-    if (this._connectedTabInfo?.sessionId === sessionId)
-      sessionId = undefined;
+    
     return await this._extensionConnection.send({ 
       method: 'forwardCDPCommand', 
       params: { sessionId, method, params } 
@@ -255,7 +310,7 @@ export class CDPRelayServer {
     const logMessage = 'method' in message && message.method 
       ? message.method 
       : `response(id=${'id' in message ? message.id : 'unknown'})`;
-    debugLogger('→ Playwright:', logMessage);
+    debugLogger('\x1b[32m→ Playwright:\x1b[0m', logMessage);
     this._playwrightConnection?.send(JSON.stringify(message));
   }
 }

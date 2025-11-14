@@ -25,62 +25,156 @@ export function debugLog(...args: unknown[]): void {
   }
 }
 
+interface AttachedTab {
+  debuggee: chrome.debugger.Debuggee;
+  targetId: string;
+  sessionId: string;
+  targetInfo: Protocol.Target.TargetInfo;
+}
+
 export class RelayConnection {
-  private _debuggee: chrome.debugger.Debuggee;
+  private _attachedTabs: Map<number, AttachedTab> = new Map();
+  private _nextSessionId: number = 1;
   private _ws: WebSocket;
   private _eventListener: (source: chrome.debugger.DebuggerSession, method: string, params: any) => void;
   private _detachListener: (source: chrome.debugger.Debuggee, reason: string) => void;
-  private _tabPromise: Promise<void>;
-  private _tabPromiseResolve!: () => void;
   private _closed = false;
 
   onclose?: () => void;
 
   constructor(ws: WebSocket) {
-    this._debuggee = { };
-    this._tabPromise = new Promise(resolve => this._tabPromiseResolve = resolve);
     this._ws = ws;
     this._ws.onmessage = this._onMessage.bind(this);
-    this._ws.onclose = () => this._onClose();
-    // Store listeners for cleanup
+    this._ws.onclose = (event) => {
+      debugLog('WebSocket onclose event:', {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean
+      });
+      this._onClose();
+    };
+    this._ws.onerror = (event) => {
+      debugLog('WebSocket onerror event:', event);
+    };
     this._eventListener = this._onDebuggerEvent.bind(this);
     this._detachListener = this._onDebuggerDetach.bind(this);
     chrome.debugger.onEvent.addListener(this._eventListener);
     chrome.debugger.onDetach.addListener(this._detachListener);
+    debugLog('RelayConnection created, WebSocket readyState:', this._ws.readyState);
   }
 
-  // Either setTabId or close is called after creating the connection.
-  setTabId(tabId: number): void {
-    this._debuggee = { tabId };
-    this._tabPromiseResolve();
+  async attachTab(tabId: number): Promise<Protocol.Target.TargetInfo> {
+    const debuggee = { tabId };
+    
+    debugLog('Attaching debugger to tab:', tabId, 'WebSocket state:', this._ws.readyState);
+    
+    try {
+      await chrome.debugger.attach(debuggee, '1.3');
+      debugLog('Debugger attached successfully to tab:', tabId);
+    } catch (error: any) {
+      debugLog('ERROR attaching debugger to tab:', tabId, error);
+      throw error;
+    }
+    
+    debugLog('Sending Target.getTargetInfo command for tab:', tabId);
+    const result = await chrome.debugger.sendCommand(
+      debuggee, 
+      'Target.getTargetInfo'
+    ) as Protocol.Target.GetTargetInfoResponse;
+    
+    debugLog('Received targetInfo for tab:', tabId, result.targetInfo);
+    
+    const targetInfo = result.targetInfo;
+    const sessionId = `pw-tab-${this._nextSessionId++}`;
+    
+    this._attachedTabs.set(tabId, {
+      debuggee,
+      targetId: targetInfo.targetId,
+      sessionId,
+      targetInfo
+    });
+    
+    debugLog('Sending Target.attachedToTarget event, WebSocket state:', this._ws.readyState);
+    this._sendMessage({
+      method: 'forwardCDPEvent',
+      params: {
+        method: 'Target.attachedToTarget',
+        params: {
+          sessionId,
+          targetInfo: {
+            ...targetInfo,
+            attached: true
+          },
+          waitingForDebugger: false
+        }
+      }
+    });
+    
+    debugLog('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId);
+    return targetInfo;
+  }
+
+  detachTab(tabId: number): void {
+    const tab = this._attachedTabs.get(tabId);
+    if (!tab) return;
+    
+    debugLog('Detaching tab:', tabId, 'sessionId:', tab.sessionId);
+    
+    this._sendMessage({
+      method: 'forwardCDPEvent',
+      params: {
+        method: 'Target.detachedFromTarget',
+        params: {
+          sessionId: tab.sessionId,
+          targetId: tab.targetId
+        }
+      }
+    });
+    
+    chrome.debugger.detach(tab.debuggee).catch(() => {});
+    this._attachedTabs.delete(tabId);
   }
 
   close(message: string): void {
+    debugLog('Closing RelayConnection, reason:', message, 'current state:', this._ws.readyState);
     this._ws.close(1000, message);
-    // ws.onclose is called asynchronously, so we call it here to avoid forwarding
-    // CDP events to the closed connection.
     this._onClose();
   }
 
   private _onClose() {
-    if (this._closed)
+    if (this._closed) {
+      debugLog('_onClose called but already closed');
       return;
+    }
+    
+    debugLog('Connection closing, attached tabs count:', this._attachedTabs.size);
     this._closed = true;
+    
     chrome.debugger.onEvent.removeListener(this._eventListener);
     chrome.debugger.onDetach.removeListener(this._detachListener);
-    chrome.debugger.detach(this._debuggee).catch(() => {});
+    
+    for (const [tabId, tab] of this._attachedTabs) {
+      debugLog('Detaching debugger from tab:', tabId);
+      chrome.debugger.detach(tab.debuggee).catch((err) => {
+        debugLog('Error detaching debugger from tab:', tabId, err);
+      });
+    }
+    this._attachedTabs.clear();
+    
+    debugLog('Connection closed, calling onclose callback');
     this.onclose?.();
   }
 
   private _onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string, params: any): void {
-    if (source.tabId !== this._debuggee.tabId)
-      return;
-    debugLog('Forwarding CDP event:', method, params);
-    const sessionId = source.sessionId;
+    const tab = this._attachedTabs.get(source.tabId!);
+    if (!tab) return;
+    
+    debugLog('Forwarding CDP event:', method, 'from tab:', source.tabId);
+    
     this._sendMessage({
       method: 'forwardCDPEvent',
       params: {
-        sessionId,
+        sessionId: source.sessionId || tab.sessionId,
         method,
         params,
       },
@@ -88,10 +182,16 @@ export class RelayConnection {
   }
 
   private _onDebuggerDetach(source: chrome.debugger.Debuggee, reason: string): void {
-    if (source.tabId !== this._debuggee.tabId)
+    const tabId = source.tabId;
+    debugLog('_onDebuggerDetach called for tab:', tabId, 'reason:', reason, 'isAttached:', tabId ? this._attachedTabs.has(tabId) : false);
+    
+    if (!tabId || !this._attachedTabs.has(tabId)) {
+      debugLog('Ignoring debugger detach event for untracked tab:', tabId);
       return;
-    this.close(`Debugger detached: ${reason}`);
-    this._debuggee = { };
+    }
+    
+    debugLog(`Debugger detached from tab ${tabId}: ${reason}`);
+    this.detachTab(tabId);
   }
 
   private _onMessage(event: MessageEvent): void {
@@ -125,28 +225,52 @@ export class RelayConnection {
 
   private async _handleCommand(message: ExtensionCommandMessage): Promise<any> {
     if (message.method === 'attachToTab') {
-      await this._tabPromise;
-      debugLog('Attaching debugger to tab:', this._debuggee);
-      await chrome.debugger.attach(this._debuggee, '1.3');
-      const result = await chrome.debugger.sendCommand(this._debuggee, 'Target.getTargetInfo') as Protocol.Target.GetTargetInfoResponse;
-      return {
-        targetInfo: result?.targetInfo,
-      };
+      return {};
     }
-    if (!this._debuggee.tabId)
-      throw new Error('No tab is connected. Please go to the Playwright MCP extension and select the tab you want to connect to.');
+    
     if (message.method === 'forwardCDPCommand') {
-      const forwardParams = message.params as { sessionId?: string; method: string; params?: any };
-      const { sessionId, method, params } = forwardParams;
-      debugLog('CDP command:', method, params);
+      const { sessionId, method, params } = message.params;
+      
+      if (method === 'Target.closeTarget' && params?.targetId) {
+        for (const [tabId, tab] of this._attachedTabs) {
+          if (tab.targetId === params.targetId) {
+            await chrome.tabs.remove(tabId);
+            return { success: true };
+          }
+        }
+        throw new Error(`Target not found: ${params.targetId}`);
+      }
+      
+      let targetTab: AttachedTab | undefined;
+      
+      for (const [tabId, tab] of this._attachedTabs) {
+        if (tab.sessionId === sessionId) {
+          targetTab = tab;
+          break;
+        }
+      }
+      
+      if (!targetTab) {
+        if (method === 'Browser.getVersion' || method === 'Target.getTargets') {
+          targetTab = this._attachedTabs.values().next().value;
+        }
+        
+        if (!targetTab) {
+          throw new Error(`No tab found for sessionId: ${sessionId}`);
+        }
+      }
+      
+      debugLog('CDP command:', method, 'for tab:', targetTab.debuggee.tabId);
+      
       const debuggerSession: chrome.debugger.DebuggerSession = {
-        ...this._debuggee,
-        sessionId,
+        ...targetTab.debuggee,
+        sessionId: sessionId !== targetTab.sessionId ? sessionId : undefined,
       };
+      
       return await chrome.debugger.sendCommand(
-          debuggerSession,
-          method,
-          params
+        debuggerSession,
+        method,
+        params
       );
     }
   }
@@ -161,7 +285,15 @@ export class RelayConnection {
   }
 
   private _sendMessage(message: any): void {
-    if (this._ws.readyState === WebSocket.OPEN)
-      this._ws.send(JSON.stringify(message));
+    if (this._ws.readyState === WebSocket.OPEN) {
+      try {
+        this._ws.send(JSON.stringify(message));
+        debugLog('Message sent successfully, type:', message.method || 'response');
+      } catch (error: any) {
+        debugLog('ERROR sending message:', error, 'message type:', message.method || 'response');
+      }
+    } else {
+      debugLog('Cannot send message, WebSocket not open. State:', this._ws.readyState, 'message type:', message.method || 'response');
+    }
   }
 }

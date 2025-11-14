@@ -7,6 +7,8 @@ async function main() {
     const contexts = browser.contexts();
     console.log(`Found ${contexts.length} browser context(s)`);
 
+    // Sleep 200 ms
+    await new Promise(resolve => setTimeout(resolve, 200));
     for (const context of contexts) {
         const pages = context.pages();
         console.log(`Context has ${pages.length} page(s):`);
@@ -26,6 +28,7 @@ async function main() {
                 console.log(`Browser log: [${msg.type()}] ${msg.text()}`);
             });
 
+            console.log(`running eval`)
             // Evaluate a sum in the browser and log something from inside the browser context
             const sumResult = await page.evaluate(() => {
                 console.log('Logging from inside browser context!');
@@ -35,7 +38,6 @@ async function main() {
         }
     }
 
-    await browser.close();
 }
 
 main()

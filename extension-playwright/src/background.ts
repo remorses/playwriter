@@ -21,7 +21,7 @@ const RELAY_URL = 'ws://localhost:9988/extension';
 
 class SimplifiedExtension {
   private _connection: RelayConnection | undefined;
-  private _connectedTabId: number | null = null;
+  private _connectedTabs: Map<number, string> = new Map();
 
   constructor() {
     debugLog(`Using relay URL: ${RELAY_URL}`);
@@ -36,31 +36,22 @@ class SimplifiedExtension {
       return;
     }
 
-    // Toggle: if connected to this tab, disconnect; otherwise connect
-    if (this._connectedTabId === tab.id) {
-      await this._disconnect();
+    if (this._connectedTabs.has(tab.id)) {
+      await this._disconnectTab(tab.id);
     } else {
-      await this._connect(tab.id);
+      await this._connectTab(tab.id);
     }
   }
 
-  private async _waitForServer(): Promise<WebSocket> {
+  private async _waitForServer(): Promise<void> {
     const httpUrl = 'http://localhost:9988';
 
     while (true) {
       try {
         debugLog('Checking if relay server is available...');
         await fetch(httpUrl, { method: 'HEAD' });
-        debugLog('Server is available, connecting WebSocket...');
-
-        const socket = new WebSocket(RELAY_URL);
-        await new Promise<void>((resolve, reject) => {
-          socket.onopen = () => resolve();
-          socket.onerror = (e) => reject(e);
-          setTimeout(() => reject(new Error('Connection timeout')), 2000);
-        });
-        debugLog('Connected to relay server');
-        return socket;
+        debugLog('Server is available');
+        return;
       } catch (error: any) {
         debugLog(`Server not available, retrying in 1 second...`);
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -68,55 +59,103 @@ class SimplifiedExtension {
     }
   }
 
-  private async _connect(tabId: number): Promise<void> {
+  private async _connectTab(tabId: number): Promise<void> {
     try {
-      debugLog(`Connecting to tab ${tabId}`);
-
-      // Disconnect from any existing connection
-      if (this._connection) {
-        this._connection.close('Switching to new tab');
-        this._connection = undefined;
-      }
-
-      // Update icon to show connecting state
+      debugLog(`=== Starting connection to tab ${tabId} ===`);
       await this._updateIcon(tabId, 'connecting');
 
-      await this._waitForServer()
-      // Connect to WebSocket relay
-      const socket = new WebSocket(RELAY_URL);
-      await new Promise<void>((resolve, reject) => {
-        socket.onopen = () => resolve();
-        socket.onerror = () => reject(new Error('WebSocket connection failed'));
-        setTimeout(() => reject(new Error('Connection timeout')), 5000);
-      });
+      if (!this._connection) {
+        debugLog('No existing connection, creating new relay connection');
+        debugLog('Waiting for server at http://localhost:9988...');
+        await this._waitForServer();
+        
+        debugLog('Server is ready, creating WebSocket connection to:', RELAY_URL);
+        const socket = new WebSocket(RELAY_URL);
+        debugLog('WebSocket created, initial readyState:', socket.readyState, '(0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)');
+        
+        await new Promise<void>((resolve, reject) => {
+          let timeoutFired = false;
+          const timeout = setTimeout(() => {
+            timeoutFired = true;
+            debugLog('=== WebSocket connection TIMEOUT after 5 seconds ===');
+            debugLog('Final WebSocket readyState:', socket.readyState);
+            debugLog('WebSocket URL:', socket.url);
+            debugLog('Socket protocol:', socket.protocol);
+            reject(new Error('Connection timeout'));
+          }, 5000);
+          
+          socket.onopen = () => {
+            if (timeoutFired) {
+              debugLog('WebSocket opened but timeout already fired!');
+              return;
+            }
+            debugLog('WebSocket onopen fired! readyState:', socket.readyState);
+            clearTimeout(timeout);
+            resolve();
+          };
+          
+          socket.onerror = (error) => {
+            debugLog('WebSocket onerror during connection:', error);
+            debugLog('Error type:', error.type);
+            debugLog('Current readyState:', socket.readyState);
+            if (!timeoutFired) {
+              clearTimeout(timeout);
+              reject(new Error('WebSocket connection failed'));
+            }
+          };
+          
+          socket.onclose = (event) => {
+            debugLog('WebSocket onclose during connection setup:', {
+              code: event.code,
+              reason: event.reason,
+              wasClean: event.wasClean,
+              readyState: socket.readyState
+            });
+            if (!timeoutFired) {
+              clearTimeout(timeout);
+              reject(new Error(`WebSocket closed: ${event.reason || event.code}`));
+            }
+          };
+          
+          debugLog('Event handlers set, waiting for connection...');
+        });
 
-      // Create relay connection
-      this._connection = new RelayConnection(socket);
-      this._connection.onclose = () => {
-        debugLog('Connection closed');
-        this._connection = undefined;
-        void this._setConnectedTabId(null);
-      };
+        debugLog('WebSocket connected successfully, creating RelayConnection instance');
+        this._connection = new RelayConnection(socket);
+        this._connection.onclose = () => {
+          debugLog('=== Relay connection onclose callback triggered ===');
+          debugLog('Connected tabs before clearing:', Array.from(this._connectedTabs.keys()));
+          this._connection = undefined;
+          for (const tabId of this._connectedTabs.keys()) {
+            debugLog('Updating icon to disconnected for tab:', tabId);
+            void this._updateIcon(tabId, 'disconnected');
+          }
+          this._connectedTabs.clear();
+          debugLog('All tabs cleared');
+        };
+      } else {
+        debugLog('Reusing existing connection');
+      }
 
-      // Set the tab ID (this will attach debugger)
-      this._connection.setTabId(tabId);
-
-      // Update state
-      await this._setConnectedTabId(tabId);
-
-      debugLog(`Successfully connected to tab ${tabId}`);
+      debugLog('Calling attachTab for tab:', tabId);
+      const targetInfo = await this._connection.attachTab(tabId);
+      debugLog('attachTab completed, storing in connectedTabs map');
+      this._connectedTabs.set(tabId, targetInfo.targetId);
+      
+      await this._updateIcon(tabId, 'connected');
+      debugLog(`=== Successfully connected to tab ${tabId} ===`);
     } catch (error: any) {
-      debugLog(`Failed to connect: ${error.message}`);
+      debugLog(`=== Failed to connect to tab ${tabId} ===`);
+      debugLog('Error details:', error);
+      debugLog('Error stack:', error.stack);
       await this._updateIcon(tabId, 'disconnected');
 
-      // Show error notification
       chrome.action.setBadgeText({ tabId, text: '!' });
       chrome.action.setBadgeBackgroundColor({ tabId, color: '#f44336' });
       chrome.action.setTitle({ tabId, title: `Error: ${error.message}` });
 
-      // Clear error after 3 seconds
       setTimeout(() => {
-        if (this._connectedTabId !== tabId) {
+        if (!this._connectedTabs.has(tabId)) {
           chrome.action.setBadgeText({ tabId, text: '' });
           chrome.action.setTitle({ tabId, title: 'Click to attach debugger' });
         }
@@ -124,33 +163,26 @@ class SimplifiedExtension {
     }
   }
 
-  private async _disconnect(): Promise<void> {
-    debugLog('Disconnecting');
-
-    const tabId = this._connectedTabId;
-
-    this._connection?.close('User disconnected');
-    this._connection = undefined;
-
-    await this._setConnectedTabId(null);
-
-    if (tabId) {
-      await this._updateIcon(tabId, 'disconnected');
+  private async _disconnectTab(tabId: number): Promise<void> {
+    debugLog(`=== Disconnecting tab ${tabId} ===`);
+    
+    if (!this._connectedTabs.has(tabId)) {
+      debugLog('Tab not in connectedTabs map, ignoring disconnect');
+      return;
     }
-  }
-
-  private async _setConnectedTabId(tabId: number | null): Promise<void> {
-    const oldTabId = this._connectedTabId;
-    this._connectedTabId = tabId;
-
-    // Clear old tab icon
-    if (oldTabId && oldTabId !== tabId) {
-      await this._updateIcon(oldTabId, 'disconnected');
-    }
-
-    // Set new tab icon
-    if (tabId) {
-      await this._updateIcon(tabId, 'connected');
+    
+    debugLog('Calling detachTab on connection');
+    this._connection?.detachTab(tabId);
+    this._connectedTabs.delete(tabId);
+    debugLog('Tab removed from connectedTabs map');
+    
+    await this._updateIcon(tabId, 'disconnected');
+    
+    debugLog('Connected tabs remaining:', this._connectedTabs.size);
+    if (this._connectedTabs.size === 0 && this._connection) {
+      debugLog('No tabs remaining, closing relay connection');
+      this._connection.close('All tabs disconnected');
+      this._connection = undefined;
     }
   }
 
@@ -208,23 +240,17 @@ class SimplifiedExtension {
   }
 
   private async _onTabRemoved(tabId: number): Promise<void> {
-    if (this._connectedTabId !== tabId) {
-      return;
-    }
-
-    debugLog(`Connected tab ${tabId} was closed`);
-    this._connection?.close('Browser tab closed');
-    this._connection = undefined;
-    this._connectedTabId = null;
+    debugLog('Tab removed event for tab:', tabId, 'is connected:', this._connectedTabs.has(tabId));
+    if (!this._connectedTabs.has(tabId)) return;
+    
+    debugLog(`Connected tab ${tabId} was closed, disconnecting`);
+    await this._disconnectTab(tabId);
   }
 
   private async _onTabActivated(activeInfo: chrome.tabs.TabActiveInfo): Promise<void> {
-    // Update icon for the newly active tab
-    if (this._connectedTabId === activeInfo.tabId) {
-      await this._updateIcon(activeInfo.tabId, 'connected');
-    } else {
-      await this._updateIcon(activeInfo.tabId, 'disconnected');
-    }
+    const isConnected = this._connectedTabs.has(activeInfo.tabId);
+    debugLog('Tab activated:', activeInfo.tabId, 'is connected:', isConnected);
+    await this._updateIcon(activeInfo.tabId, isConnected ? 'connected' : 'disconnected');
   }
 }
 
