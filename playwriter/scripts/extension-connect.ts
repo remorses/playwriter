@@ -16,9 +16,11 @@ async function main() {
             console.log(`\nPage URL: ${url}`);
 
             const html = await page.content();
-            const chars = html.slice(0, 30);
-            console.log('First chars of HTML:');
-            console.log(chars)
+            const lines = html.split('\n').slice(0, 3);
+            console.log('First 3 lines of HTML:');
+            lines.forEach((line, i) => {
+                console.log(`  ${i + 1}: ${line}`);
+            });
         }
     }
 
