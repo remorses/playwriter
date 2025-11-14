@@ -1,0 +1,1 @@
+now see where attachToTab is sent and received. see that we basically attach to the tab as soon as the playwright instance connects. I want to change this: instead attach to the tab when we click on the extension icon, meaning inside onClicked. when this happens we should also send a
