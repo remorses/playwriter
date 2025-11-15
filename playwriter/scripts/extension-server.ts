@@ -5,11 +5,6 @@ async function main() {
 
   console.log('Server running. Press Ctrl+C to stop.')
 
-  process.on('SIGINT', () => {
-    console.log('\nShutting down...')
-    server.close()
-    process.exit(0)
-  })
 }
 
 main().catch(console.error)
