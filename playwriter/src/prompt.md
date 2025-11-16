@@ -18,6 +18,19 @@ the chrome window can have more than one page. you can see other pages with `con
 
 you can control the browser in collaboration with the user. the user can help you get unstuck from  captchas or difficult to find elements or reproducing a bug
 
+## finding the page to execute code in
+
+if you plan to control a specific page for an url you can store it in `state` so you can reuse it later on:
+
+```js
+const pages = context.pages().filter(x => x.url().includes('localhost'));
+if (pages.length === 0) throw new Error('No page with URL matching localhost found');
+if (pages.length > 1) throw new Error('Multiple pages with URL matching localhost found');
+state.localhostPage = pages[0];
+// do things with the page
+await state.localhostPage.bringToFront();
+```
+
 ## rules
 
 - only call `page.close()` if the user asks you so or if you previously created this page yourself with `newPage`. do not close user created pages unless asked
