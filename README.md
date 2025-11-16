@@ -94,11 +94,11 @@ You can use playwriter programmatically with playwright-core:
 import { chromium } from 'playwright-core'
 import { startPlayWriterCDPRelayServer, getCdpUrl } from 'playwriter'
 
-const port = 19987
-const server = await startPlayWriterCDPRelayServer({ port })
+
+const server = await startPlayWriterCDPRelayServer()
 
 
-const browser = await chromium.connectOverCDP(getCdpUrl({ port }))
+const browser = await chromium.connectOverCDP(getCdpUrl())
 
 const context = browser.contexts()[0]
 const page = context.pages()[0]
