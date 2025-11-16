@@ -1,18 +1,27 @@
-execute tool let you run playwright code to control user Chrome window
+playwriter execute is a tool to control the user browser instance via extension also called playwriter MCP.
 
-it will control an existing user Chrome window. The execute command will be executed in a sandbox with some variables in context:
+if you get an error Extension not running tell user to install and enable the playwriter extension first, clicking on the extension icon on the tab the user wants to control
 
-- context: the playwright browser context. you can do things like `await context.pages()`
+execute tool let you run playwright js code snippets to control user Chrome window, these js code snippets are preferred to be in a single line to make them more readable in agent interface. separating statements with semicolons
+
+it will control an existing user Chrome window. The js code  will be run in a sandbox with some variables in context:
+
+- state: an object shared between runs that you can mutate to persist functions and objects. for example `state.requests = []` to monitor network requests between runs
+- context: the playwright browser context. you can do things like `await context.pages()` to see user connected pages
 - page, the first page the user opened and made it accessible to this MCP. do things like `page.url()` to see current url. assume the user wants you to use this page for your playwright code
 
-the window can have more than one page. you can see other pages with `context.pages().find((p) => p.url().includes('localhost'))`
+the chrome window can have more than one page. you can see other pages with `context.pages().find((p) => p.url().includes('localhost'))`. you can also open and close pages: `state.newPage = await context.newPage()`. store the page in state so that you can reuse it later
 
-you can control the browser in collaboration with the user. for example the user can help you get unstuck for things like captchas or difficult to find elements or reproducing a bug
+you can control the browser in collaboration with the user. the user can help you get unstuck from  captchas or difficult to find elements or reproducing a bug
 
 ## rules
 
 - only call `page.close()` if the user asks you so or if you previously created this page yourself with `newPage`. do not close user created pages unless asked
--
+- try to never sleep or run `page.waitForTimeout` unless you have to. there are better ways to wait for an element
+
+## event listeners
+
+always detach event listener you create at the end of a message using `page.removeAllListeners()` or similar so that you never leak them in future messages
 
 ## utility functions
 
@@ -52,7 +61,7 @@ Then you can use `page.locator(`aria-ref=${ref}`)` to get an element with a spec
 
 ## getting outputs of code execution
 
-You can use `console.log` to print values you want to see in the tool call result
+You can use `console.log` to print values you want to see in the tool call result. For seeing logs across runs you can store then in `state.logs` and then print them later, filtering and paginating them too.
 
 ## using page.evaluate
 
@@ -71,12 +80,10 @@ const pageInfo = await page.evaluate(() => ({
     buttonCount: document.querySelectorAll('button').length,
     readyState: document.readyState,
 }))
-console.log('Page URL:', pageInfo.url)
-console.log('Number of buttons:', pageInfo.buttonCount)
-console.log('Page ready state:', pageInfo.readyState)
+console.log(pageInfo)
 ```
 
-## read for logs during interactions
+## read logs during interactions
 
 you can see logs during interactions with `page.on('console', msg => console.log(`Browser log: [${msg.type()}] ${msg.text()}`))`
 

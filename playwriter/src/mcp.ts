@@ -152,11 +152,24 @@ server.tool(
         },
       }
 
+      const accessibilitySnapshot = async (targetPage: Page) => {
+        if ((targetPage as any)._snapshotForAI) {
+          const snapshot = await (targetPage as any)._snapshotForAI()
+          const snapshotStr =
+            typeof snapshot === 'string'
+              ? snapshot
+              : JSON.stringify(snapshot, null, 2)
+          return snapshotStr
+        }
+        throw new Error('accessibilitySnapshot is not available on this page')
+      }
+
       const vmContext = vm.createContext({
         page,
         context,
         state,
         console: customConsole,
+        accessibilitySnapshot,
       })
 
       const wrappedCode = `(async () => { ${code} })()`
