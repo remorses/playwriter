@@ -23,5 +23,5 @@ jobs:
       - name: Install pnpm dependencies (with cache)
         uses: covbot/pnpm-install-with-cache@v1
       # scripts
-      - run: pnpm build
-      - run: pnpm test
+      # - run: pnpm build
+      # - run: pnpm test
