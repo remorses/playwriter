@@ -133,6 +133,7 @@ async function getCurrentPage() {
 
       if (pages.length > 0) {
         const page = pages[0]
+        page.waitForEvent('load', {timeout})
         await page.emulateMedia({ colorScheme: null })
         return page
       }

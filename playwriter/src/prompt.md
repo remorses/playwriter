@@ -40,6 +40,15 @@ await state.localhostPage.bringToFront();
 - try to never sleep or run `page.waitForTimeout` unless you have to. there are better ways to wait for an element
 - never close browser or context. NEVER call `browser.close()`
 
+## always check the current page state after an action
+
+after you click a button or submit a form you ALWAYS have to then check what is the current state of the page. you cannot assume what happened after doing an action. instead run the following code to know what happened after the action:
+
+`console.log('url:', page.url()); console.log(await accessibilitySnapshot(page).then(x => x.slice(0, 1000)));`
+
+if nothing happened you may need to wait before the action completes, using something like `page.waitForNavigation({timeout: 3000})` or `await page.waitForLoadState('networkidle', {timeout: 3000})`
+
+
 ## event listeners
 
 always detach event listener you create at the end of a message using `page.removeAllListeners()` or similar so that you never leak them in future messages
