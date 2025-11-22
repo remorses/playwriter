@@ -3,6 +3,7 @@ this codebase has the codebase for playwriter
 the extension uses chrome.debugger to manage the user browser
 
 read ./README.md for an overview of how this extension and mcp work
+read playwriter/src/prompt.md to understand how the MCP works
 
 ## architecture
 
