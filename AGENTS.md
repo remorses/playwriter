@@ -17,6 +17,39 @@ read ./README.md for an overview of how this extension and mcp work
   - a few more events need custom handling
 - tabs are identified by sessionId or targetId (CDP concepts) or tabId (chrome debugger concept only)
 
+## development
+
+extension/ contains the chrome extension code. you need to run `pnpm build` to make it ready to be loaded in chrome. the extension folder chrome will use is extension/dist
+
+playwriter contains the ws server and MCP code. also the tests for the mcp are there. playwriter/src/prompt.md contains the docs for the MCP the agent will use. you should add there important sections that help the agent control the browser well with the MCP interface 
+
+playwriter/src/resource.md is for more generic knowledge about playwright that the agent can use when necessary, for things like best practices for selecting locators on the page
+
+## CDP docs
+
+here are some commands you can run to fetch does about CDP various domains (events and commands namespaces)
+
+```
+curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Target.pdl # manage “targets”: pages, iframes, workers, etc., and attach/detach sessions
+curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Browser.pdl # top-level browser control: version info, window management, permission settings, etc.
+curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Page.pdl – navigate, reload, screenshot, PDF, frame management, dialogs, and page lifecycle events.
+curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Emulation.pdl # emulate device metrics, viewport, timezone, locale, geolocation, media type, CPU, etc.
+```
+
+you can list other files in that folder on github to read more if you need to control things like DOM, performance, etc
+
+## testing
+
+run `cd playwriter && pnpm test` to test the extension and mcp and CDP directly in a chrome instance automated. with the extension loaded too.
+
+the test script will also pass -u to update some inline snapshots used
+
+you can run singular tests with `-t "testname"`
+
+each test() block should reset the extension connection to make sure tests are independent.
+
+NEVER call browser.close() in the tests
+
 # core guidelines
 
 when summarizing changes at the end of the message, be super short, a few words and in bullet points, use bold text to highlight important keywords. use markdown.
@@ -298,62 +331,7 @@ sometimes tests work directly on database data, using prisma. to run these tests
 
 never write tests yourself that call prisma or interact with database or emails. for these, ask the user to write them for you.
 
-# changelog
-
-## 1.1.3
-
-### Patch Changes
-
-- vitest.md instructions update
-
-## 1.1.2
-
-### Patch Changes
-
-- Header comment in generated AGENTS.md instructing not to edit directly
-- Instructions to create ./MY_AGENTS.md for custom instructions
-
-after you make a change that is noteworthy, add an entry in the CHANGELOG.md file in the root of the package. there are 2 kinds of packages, public and private packages. private packages have a private: true field in package.json, public packages do not and instead have a version field in package.json. public packages are the ones that are published to npm.
-
-If the current package has a version field and it is not private then include the version in the changelog too like in the examples, otherwise use the current date and time.
-
-If you use the version you MUST use a bumped version compared to the current package.json version, and you should update the package.json version field to that version. But do not publish. I will handle that myself.
-
-to write a changelog.md file for a public package, use the following format, add a heading with the new version and a bullet list of your changes, like this:
-
-```md
-## 0.1.3
-
-### Patch Changes
-
-- bug fixes
-
-## 0.1.2
-
-### Patch Changes
-
-- add support for githubPath
-```
-
-for private packages, which do not have versions, you must instead use the current date and time, for example:
-
-```md
-# Changelog
-
-## 2025-01-24 19:50
-
-- Added a feature to improve user experience
-- Fixed a bug that caused the app to crash on startup
-```
-
-these are just examples. be clear and concise in your changelog entries.
-
-use present tense. be detailed but concise, omit useless verbs like "implement", "added", just put the subject there instead, so it is shorter. it's implicit we are adding features or fixes. do not use nested bullet points. always show example code snippets if applicable, and use proper markdown formatting.
-
-```
-
-the website package has a dependency on docs-website. instead of duplicating code that is needed both in website and docs-website keep a file in docs-website instead and import from there for the website package.
-
+changelogs.md
 # writing docs
 
 when generating a .md or .mdx file to document things, always add a frontmatter with title and description. also add a prompt field with the exact prompt used to generate the doc. use @ to reference files and urls and provide any context necessary to be able to recreate this file from scratch using a model. if you used urls also reference them. reference all files you had to read to create the doc. use yaml | syntax to add this prompt and never go over the column width of 80
