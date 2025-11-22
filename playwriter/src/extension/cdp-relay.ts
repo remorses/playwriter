@@ -440,6 +440,24 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
               } as CDPEvent,
               source: 'extension'
             })
+          } else if (method === 'Target.targetInfoChanged') {
+            const infoParams = params as Protocol.Target.TargetInfoChangedEvent
+            const target = connectedTargets.get(sessionId ||'')
+            if (target) {
+              target.targetInfo = infoParams.targetInfo
+              // Update targetId mapping if needed, though usually targetId doesn't change
+              if (target.targetId !== infoParams.targetInfo.targetId) {
+                 target.targetId = infoParams.targetInfo.targetId
+              }
+            }
+
+            sendToPlaywright({
+              message: {
+                method: 'Target.targetInfoChanged',
+                params: infoParams
+              } as CDPEvent,
+              source: 'extension'
+            })
           } else {
             sendToPlaywright({
               message: {
