@@ -73,7 +73,7 @@ globalThis.disconnectEverything = disconnectEverything
 
 async function disconnectEverything() {
   const { connectedTabs, connection } = useExtensionStore.getState()
-  
+
   // Disconnect all tabs
   for (const tabId of connectedTabs.keys()) {
     await disconnectTab(tabId)
@@ -83,11 +83,11 @@ async function disconnectEverything() {
   const state = useExtensionStore.getState()
   if (state.connection) {
     state.connection.close('Manual full disconnect')
-    useExtensionStore.setState({ 
-      connection: undefined, 
+    useExtensionStore.setState({
+      connection: undefined,
       connectionState: 'disconnected',
       connectedTabs: new Map(),
-      errorText: undefined
+      errorText: undefined,
     })
   }
 }
@@ -169,8 +169,8 @@ const icons = {
   },
 } as const
 
-useExtensionStore.subscribe(async (state, prevState) => {
-  logger.log(state)
+async function updateIcons() {
+  const state = useExtensionStore.getState()
   const { connectionState, connectedTabs, errorText } = state
 
   const tabs = await chrome.tabs.query({})
@@ -213,6 +213,11 @@ useExtensionStore.subscribe(async (state, prevState) => {
     if (iconConfig.badgeColor) void chrome.action.setBadgeBackgroundColor({ tabId, color: iconConfig.badgeColor })
     void chrome.action.setBadgeText({ tabId, text: iconConfig.badgeText })
   }
+}
+
+useExtensionStore.subscribe(async (state, prevState) => {
+  logger.log(state)
+  await updateIcons()
 })
 
 async function ensureConnection(): Promise<void> {
@@ -239,7 +244,11 @@ async function ensureConnection(): Promise<void> {
 
   logger.debug('Server is ready, creating WebSocket connection to:', RELAY_URL)
   const socket = new WebSocket(RELAY_URL)
-  logger.debug('WebSocket created, initial readyState:', socket.readyState, '(0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)')
+  logger.debug(
+    'WebSocket created, initial readyState:',
+    socket.readyState,
+    '(0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)',
+  )
 
   await new Promise<void>((resolve, reject) => {
     let timeoutFired = false
@@ -549,3 +558,6 @@ logger.debug(`Using relay URL: ${RELAY_URL}`)
 chrome.tabs.onRemoved.addListener(onTabRemoved)
 chrome.tabs.onActivated.addListener(onTabActivated)
 chrome.action.onClicked.addListener(onActionClicked)
+chrome.tabs.onUpdated.addListener(() => {
+  void updateIcons()
+})
