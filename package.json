@@ -6,7 +6,7 @@
         "watch": "pnpm -r watch",
         "build": "pnpm -r build",
         "agents.md": "agentsdotmd ./PLAYWRITER_AGENTS.md core.md typescript.md pnpm.md vitest.md changelog.md docs-writing.md github.md playwright.md zod.md gitchamber.md",
-        "release": "pnpm build && "
+        "release": "pnpm build && rm -f extension.zip && cd extension && zip -r ../extension.zip dist"
     },
     "devDependencies": {
         "@changesets/cli": "^2.29.7",
