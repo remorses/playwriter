@@ -339,6 +339,17 @@ async function ensureConnection(): Promise<void> {
       }
       logger.debug('Removed tab from _connectedTabs map')
     },
+    onTabAttached: (tabId, targetId) => {
+      // logger.debug('=== Tab attached callback for tab:', tabId, '===')
+      useExtensionStore.setState((state) => {
+        const newTabs = new Map(state.connectedTabs)
+        newTabs.set(tabId, {
+          targetId,
+          state: 'connected',
+        })
+        return { connectedTabs: newTabs, connectionState: 'connected' }
+      })
+    },
   })
 
   useExtensionStore.setState({ connection: newConnection })

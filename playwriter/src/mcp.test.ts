@@ -203,6 +203,55 @@ describe('MCP Server Tests', () => {
         expect(result.content).toBeDefined()
     }, 30000)
 
+    it('should show extension as connected for pages created via newPage()', async () => {
+        if (!browserContext) throw new Error('Browser not initialized')
+        const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+        // Create a page via MCP (which uses context.newPage())
+        await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+          const newPage = await context.newPage();
+          state.testPage = newPage;
+          await newPage.goto('https://example.com/mcp-test');
+          return newPage.url();
+        `,
+            },
+        })
+
+        // Get extension state to verify the page is marked as connected
+        const extensionState = await serviceWorker.evaluate(async () => {
+            const state = globalThis.getExtensionState()
+            const chrome = globalThis.chrome
+            const tabs = await chrome.tabs.query({})
+            const testTab = tabs.find((t: any) => t.url?.includes('mcp-test'))
+            return {
+                connected: !!testTab && state.connectedTabs.has(testTab.id),
+                tabId: testTab?.id,
+                tabInfo: testTab ? state.connectedTabs.get(testTab.id) : null,
+                connectionState: state.connectionState
+            }
+        })
+
+        expect(extensionState.connected).toBe(true)
+        expect(extensionState.tabInfo?.state).toBe('connected')
+        expect(extensionState.connectionState).toBe('connected')
+
+        // Clean up
+        await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+          if (state.testPage) {
+            await state.testPage.close();
+            delete state.testPage;
+          }
+        `,
+            },
+        })
+    }, 30000)
+
     it('should get accessibility snapshot of hacker news', async () => {
         await client.callTool({
             name: 'execute',

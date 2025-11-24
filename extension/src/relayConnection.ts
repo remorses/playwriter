@@ -95,15 +95,18 @@ export class RelayConnection {
   private _closed = false;
   private _onCloseCallback?: (reason: string, code: number) => void;
   private _onTabDetachedCallback?: (tabId: number, reason: `${chrome.debugger.DetachReason}`) => void
+  private _onTabAttachedCallback?: (tabId: number, targetId: string) => void
 
-  constructor({ ws, onClose, onTabDetached }: {
+  constructor({ ws, onClose, onTabDetached, onTabAttached }: {
     ws: WebSocket;
     onClose?: (reason: string, code: number) => void;
     onTabDetached?: (tabId: number, reason: `${chrome.debugger.DetachReason}`) => void;
+    onTabAttached?: (tabId: number, targetId: string) => void;
   }) {
     this._ws = ws;
     this._onCloseCallback = onClose;
     this._onTabDetachedCallback = onTabDetached;
+    this._onTabAttachedCallback = onTabAttached;
     this._ws.onmessage = async (event: MessageEvent) => {
       let message: ExtensionCommandMessage;
       try {
@@ -208,6 +211,7 @@ export class RelayConnection {
     });
 
     logger.debug('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId);
+    this._onTabAttachedCallback?.(tabId, targetInfo.targetId);
     return targetInfo;
   }
 
