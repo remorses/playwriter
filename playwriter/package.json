@@ -40,6 +40,7 @@
     "@modelcontextprotocol/sdk": "^1.21.1",
     "chalk": "^5.6.2",
     "devtools-protocol": "^0.0.1543509",
+    "diff": "^8.0.2",
     "hono": "^4.10.6",
     "playwright-core": "^1.56.1",
     "string-dedent": "^3.0.2",

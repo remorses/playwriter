@@ -1,13 +1,16 @@
-import { RelayConnection, logger } from './relayConnection'
 import { createStore } from 'zustand/vanilla'
 import type { ExtensionState, ConnectionState, TabState, TabInfo } from './types'
+import type { CDPEvent, Protocol } from 'playwriter/src/cdp-types'
+import type { ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/extension/protocol'
 
-// Relay URL - fixed port for MCP bridge
 const RELAY_URL = 'ws://localhost:19988/extension'
 
-const useExtensionStore = createStore<ExtensionState>((set) => ({
-  connection: undefined,
-  connectedTabs: new Map(),
+let ws: WebSocket | null = null
+let childSessions: Map<string, number> = new Map()
+let nextSessionId = 1
+
+const store = createStore<ExtensionState>(() => ({
+  tabs: new Map(),
   connectionState: 'disconnected',
   currentTabId: undefined,
   errorText: undefined,
@@ -15,6 +18,563 @@ const useExtensionStore = createStore<ExtensionState>((set) => ({
 
 // @ts-ignore
 globalThis.toggleExtensionForActiveTab = toggleExtensionForActiveTab
+// @ts-ignore
+globalThis.disconnectEverything = disconnectEverything
+// @ts-ignore
+globalThis.getExtensionState = () => store.getState()
+
+declare global {
+  var toggleExtensionForActiveTab: () => Promise<{ isConnected: boolean; state: ExtensionState }>
+  var getExtensionState: () => ExtensionState
+  var disconnectEverything: () => Promise<void>
+}
+
+function safeSerialize(arg: any): string {
+  if (arg === undefined) return 'undefined'
+  if (arg === null) return 'null'
+  if (typeof arg === 'function') return `[Function: ${arg.name || 'anonymous'}]`
+  if (typeof arg === 'symbol') return String(arg)
+  if (arg instanceof Error) return arg.stack || arg.message || String(arg)
+  if (typeof arg === 'object') {
+    try {
+      const seen = new WeakSet()
+      return JSON.stringify(arg, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) return '[Circular]'
+          seen.add(value)
+          if (value instanceof Map) return { dataType: 'Map', value: Array.from(value.entries()) }
+          if (value instanceof Set) return { dataType: 'Set', value: Array.from(value.values()) }
+        }
+        return value
+      })
+    } catch {
+      return String(arg)
+    }
+  }
+  return String(arg)
+}
+
+function sendLog(level: string, args: any[]) {
+  sendMessage({
+    method: 'log',
+    params: { level, args: args.map(safeSerialize) },
+  })
+}
+
+const logger = {
+  log: (...args: any[]) => {
+    console.log(...args)
+    sendLog('log', args)
+  },
+  debug: (...args: any[]) => {
+    console.debug(...args)
+    sendLog('debug', args)
+  },
+  info: (...args: any[]) => {
+    console.info(...args)
+    sendLog('info', args)
+  },
+  warn: (...args: any[]) => {
+    console.warn(...args)
+    sendLog('warn', args)
+  },
+  error: (...args: any[]) => {
+    console.error(...args)
+    sendLog('error', args)
+  },
+}
+
+function sendMessage(message: any): void {
+  if (ws?.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(message))
+    } catch (error: any) {
+      console.debug('ERROR sending message:', error, 'message type:', message.method || 'response')
+    }
+  }
+}
+
+function getTabBySessionId(sessionId: string): { tabId: number; tab: TabInfo } | undefined {
+  for (const [tabId, tab] of store.getState().tabs) {
+    if (tab.sessionId === sessionId) {
+      return { tabId, tab }
+    }
+  }
+  return undefined
+}
+
+function getTabByTargetId(targetId: string): { tabId: number; tab: TabInfo } | undefined {
+  for (const [tabId, tab] of store.getState().tabs) {
+    if (tab.targetId === targetId) {
+      return { tabId, tab }
+    }
+  }
+  return undefined
+}
+
+async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
+  if (msg.method !== 'forwardCDPCommand') return
+
+  let targetTabId: number | undefined
+  let targetTab: TabInfo | undefined
+
+  if (msg.params.sessionId) {
+    const found = getTabBySessionId(msg.params.sessionId)
+    if (found) {
+      targetTabId = found.tabId
+      targetTab = found.tab
+    }
+  }
+
+  if (!targetTab && msg.params.sessionId) {
+    const parentTabId = childSessions.get(msg.params.sessionId)
+    if (parentTabId) {
+      targetTabId = parentTabId
+      targetTab = store.getState().tabs.get(parentTabId)
+      logger.debug('Found parent tab for child session:', msg.params.sessionId, 'tabId:', parentTabId)
+    }
+  }
+
+  if (!targetTab && msg.params.params && 'targetId' in msg.params.params && msg.params.params.targetId) {
+    const found = getTabByTargetId(msg.params.params.targetId as string)
+    if (found) {
+      targetTabId = found.tabId
+      targetTab = found.tab
+      logger.debug('Found tab for targetId:', msg.params.params.targetId, 'tabId:', targetTabId)
+    }
+  }
+
+  const debuggee = targetTabId ? { tabId: targetTabId } : undefined
+
+  switch (msg.params.method) {
+    case 'Runtime.enable': {
+      if (!debuggee) {
+        throw new Error(`No debuggee found for Runtime.enable (sessionId: ${msg.params.sessionId})`)
+      }
+      try {
+        await chrome.debugger.sendCommand(debuggee, 'Runtime.disable')
+        await new Promise((resolve) => setTimeout(resolve, 200))
+      } catch (e) {
+        logger.debug('Error disabling Runtime (ignoring):', e)
+      }
+      return await chrome.debugger.sendCommand(debuggee, 'Runtime.enable', msg.params.params)
+    }
+
+    case 'Target.createTarget': {
+      const url = msg.params.params?.url || 'about:blank'
+      logger.debug('Creating new tab with URL:', url)
+      const tab = await chrome.tabs.create({ url, active: false })
+      if (!tab.id) throw new Error('Failed to create tab')
+      logger.debug('Created tab:', tab.id, 'waiting for it to load...')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const targetInfo = await attachTab(tab.id)
+      return { targetId: targetInfo.targetId } satisfies Protocol.Target.CreateTargetResponse
+    }
+
+    case 'Target.closeTarget': {
+      if (!targetTabId) {
+        logger.log(`Target not found: ${msg.params.params?.targetId}`)
+        return { success: false } satisfies Protocol.Target.CloseTargetResponse
+      }
+      await chrome.tabs.remove(targetTabId)
+      return { success: true } satisfies Protocol.Target.CloseTargetResponse
+    }
+  }
+
+  if (!debuggee || !targetTab) {
+    throw new Error(
+      `No tab found for method ${msg.params.method} sessionId: ${msg.params.sessionId} params: ${JSON.stringify(msg.params.params || null)}`,
+    )
+  }
+
+  logger.debug('CDP command:', msg.params.method, 'for tab:', targetTabId)
+
+  const debuggerSession: chrome.debugger.DebuggerSession = {
+    ...debuggee,
+    sessionId: msg.params.sessionId !== targetTab.sessionId ? msg.params.sessionId : undefined,
+  }
+
+  return await chrome.debugger.sendCommand(debuggerSession, msg.params.method, msg.params.params)
+}
+
+function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string, params: any): void {
+  const tab = source.tabId ? store.getState().tabs.get(source.tabId) : undefined
+  if (!tab) return
+
+  logger.debug('Forwarding CDP event:', method, 'from tab:', source.tabId)
+
+  if (method === 'Target.attachedToTarget' && params?.sessionId) {
+    logger.debug('Child target attached:', params.sessionId, 'for tab:', source.tabId)
+    childSessions.set(params.sessionId, source.tabId!)
+  }
+
+  if (method === 'Target.detachedFromTarget' && params?.sessionId) {
+    logger.debug('Child target detached:', params.sessionId)
+    childSessions.delete(params.sessionId)
+  }
+
+  sendMessage({
+    method: 'forwardCDPEvent',
+    params: {
+      sessionId: source.sessionId || tab.sessionId,
+      method,
+      params,
+    },
+  })
+}
+
+function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.debugger.DetachReason}`): void {
+  const tabId = source.tabId
+  if (!tabId || !store.getState().tabs.has(tabId)) {
+    logger.debug('Ignoring debugger detach event for untracked tab:', tabId)
+    return
+  }
+
+  logger.debug(`Manual debugger detachment detected for tab ${tabId}: ${reason}`)
+
+  const tab = store.getState().tabs.get(tabId)
+  if (tab) {
+    sendMessage({
+      method: 'forwardCDPEvent',
+      params: {
+        method: 'Target.detachedFromTarget',
+        params: { sessionId: tab.sessionId, targetId: tab.targetId },
+      },
+    })
+  }
+
+  for (const [childSessionId, parentTabId] of childSessions.entries()) {
+    if (parentTabId === tabId) {
+      logger.debug('Cleaning up child session:', childSessionId, 'for tab:', tabId)
+      childSessions.delete(childSessionId)
+    }
+  }
+
+  store.setState((state) => {
+    const newTabs = new Map(state.tabs)
+    newTabs.delete(tabId)
+    return { tabs: newTabs }
+  })
+
+  if (reason === chrome.debugger.DetachReason.CANCELED_BY_USER) {
+    store.setState({ connectionState: 'disconnected' })
+  }
+}
+
+async function attachTab(tabId: number): Promise<Protocol.Target.TargetInfo> {
+  const debuggee = { tabId }
+
+  logger.debug('Attaching debugger to tab:', tabId)
+  await chrome.debugger.attach(debuggee, '1.3')
+  logger.debug('Debugger attached successfully to tab:', tabId)
+
+  const result = (await chrome.debugger.sendCommand(
+    debuggee,
+    'Target.getTargetInfo',
+  )) as Protocol.Target.GetTargetInfoResponse
+
+  const targetInfo = result.targetInfo
+  const sessionId = `pw-tab-${nextSessionId++}`
+
+  store.setState((state) => {
+    const newTabs = new Map(state.tabs)
+    newTabs.set(tabId, {
+      sessionId,
+      targetId: targetInfo.targetId,
+      state: 'connected',
+    })
+    return { tabs: newTabs, connectionState: 'connected' }
+  })
+
+  sendMessage({
+    method: 'forwardCDPEvent',
+    params: {
+      method: 'Target.attachedToTarget',
+      params: {
+        sessionId,
+        targetInfo: { ...targetInfo, attached: true },
+        waitingForDebugger: false,
+      },
+    },
+  })
+
+  logger.debug('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId)
+  return targetInfo
+}
+
+function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
+  const tab = store.getState().tabs.get(tabId)
+  if (!tab) {
+    logger.debug('detachTab: tab not found in map:', tabId)
+    return
+  }
+
+  logger.debug('Detaching tab:', tabId, 'sessionId:', tab.sessionId, 'shouldDetach:', shouldDetachDebugger)
+
+  sendMessage({
+    method: 'forwardCDPEvent',
+    params: {
+      method: 'Target.detachedFromTarget',
+      params: { sessionId: tab.sessionId, targetId: tab.targetId },
+    },
+  })
+
+  store.setState((state) => {
+    const newTabs = new Map(state.tabs)
+    newTabs.delete(tabId)
+    return { tabs: newTabs }
+  })
+
+  for (const [childSessionId, parentTabId] of childSessions.entries()) {
+    if (parentTabId === tabId) {
+      logger.debug('Cleaning up child session:', childSessionId, 'for tab:', tabId)
+      childSessions.delete(childSessionId)
+    }
+  }
+
+  if (shouldDetachDebugger) {
+    chrome.debugger.detach({ tabId }).catch((err) => {
+      logger.debug('Error detaching debugger from tab:', tabId, err.message)
+    })
+  }
+}
+
+function closeConnection(reason: string): void {
+  logger.debug('Closing connection, reason:', reason)
+
+  chrome.debugger.onEvent.removeListener(onDebuggerEvent)
+  chrome.debugger.onDetach.removeListener(onDebuggerDetach)
+
+  for (const [tabId] of store.getState().tabs) {
+    chrome.debugger.detach({ tabId }).catch((err) => {
+      logger.debug('Error detaching from tab:', tabId, err.message)
+    })
+  }
+
+  store.setState({ tabs: new Map() })
+  childSessions.clear()
+
+  if (ws) {
+    ws.close(1000, reason)
+    ws = null
+  }
+}
+
+function handleConnectionClose(reason: string, code: number): void {
+  logger.debug('Connection closed:', { reason, code })
+
+  chrome.debugger.onEvent.removeListener(onDebuggerEvent)
+  chrome.debugger.onDetach.removeListener(onDebuggerDetach)
+
+  const { tabs } = store.getState()
+
+  for (const [tabId] of tabs) {
+    chrome.debugger.detach({ tabId }).catch((err) => {
+      logger.debug('Error detaching from tab:', tabId, err.message)
+    })
+  }
+
+  childSessions.clear()
+  ws = null
+
+  if (reason === 'Extension Replaced' || code === 4001) {
+    logger.debug('Connection replaced by another extension instance')
+    store.setState({
+      connectionState: 'error',
+      errorText: 'Disconnected: Replaced by another extension',
+    })
+    return
+  }
+
+  store.setState({ connectionState: 'disconnected' })
+
+  if (tabs.size > 0) {
+    logger.debug('Tabs still connected, triggering reconnection')
+    void reconnect()
+  }
+}
+
+async function ensureConnection(): Promise<void> {
+  if (ws?.readyState === WebSocket.OPEN) {
+    logger.debug('Connection already exists, reusing')
+    return
+  }
+
+  logger.debug('Waiting for server at http://localhost:19988...')
+  store.setState({ connectionState: 'reconnecting' })
+
+  while (true) {
+    try {
+      await fetch('http://localhost:19988', { method: 'HEAD' })
+      logger.debug('Server is available')
+      break
+    } catch {
+      logger.debug('Server not available, retrying in 1 second...')
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+  }
+
+  logger.debug('Creating WebSocket connection to:', RELAY_URL)
+  const socket = new WebSocket(RELAY_URL)
+
+  await new Promise<void>((resolve, reject) => {
+    let timeoutFired = false
+    const timeout = setTimeout(() => {
+      timeoutFired = true
+      logger.debug('WebSocket connection TIMEOUT after 5 seconds')
+      reject(new Error('Connection timeout'))
+    }, 5000)
+
+    socket.onopen = () => {
+      if (timeoutFired) return
+      logger.debug('WebSocket connected')
+      clearTimeout(timeout)
+      resolve()
+    }
+
+    socket.onerror = (error) => {
+      logger.debug('WebSocket error during connection:', error)
+      if (!timeoutFired) {
+        clearTimeout(timeout)
+        reject(new Error('WebSocket connection failed'))
+      }
+    }
+
+    socket.onclose = (event) => {
+      logger.debug('WebSocket closed during connection:', { code: event.code, reason: event.reason })
+      if (!timeoutFired) {
+        clearTimeout(timeout)
+        reject(new Error(`WebSocket closed: ${event.reason || event.code}`))
+      }
+    }
+  })
+
+  ws = socket
+
+  ws.onmessage = async (event: MessageEvent) => {
+    let message: ExtensionCommandMessage
+    try {
+      message = JSON.parse(event.data)
+    } catch (error: any) {
+      logger.debug('Error parsing message:', error)
+      sendMessage({ error: { code: -32700, message: `Error parsing message: ${error.message}` } })
+      return
+    }
+
+    const response: ExtensionResponseMessage = { id: message.id }
+    try {
+      response.result = await handleCommand(message)
+    } catch (error: any) {
+      logger.debug('Error handling command:', error)
+      response.error = error.message
+    }
+    logger.debug('Sending response:', response)
+    sendMessage(response)
+  }
+
+  ws.onclose = (event: CloseEvent) => {
+    handleConnectionClose(event.reason, event.code)
+  }
+
+  ws.onerror = (event: Event) => {
+    logger.debug('WebSocket error:', event)
+  }
+
+  chrome.debugger.onEvent.addListener(onDebuggerEvent)
+  chrome.debugger.onDetach.addListener(onDebuggerDetach)
+
+  logger.debug('Connection established')
+}
+
+async function connectTab(tabId: number): Promise<void> {
+  try {
+    logger.debug(`Starting connection to tab ${tabId}`)
+
+    store.setState((state) => {
+      const newTabs = new Map(state.tabs)
+      newTabs.set(tabId, { state: 'connecting' })
+      return { tabs: newTabs }
+    })
+
+    await ensureConnection()
+    await attachTab(tabId)
+
+    logger.debug(`Successfully connected to tab ${tabId}`)
+  } catch (error: any) {
+    logger.debug(`Failed to connect to tab ${tabId}:`, error)
+
+    store.setState((state) => {
+      const newTabs = new Map(state.tabs)
+      newTabs.set(tabId, { state: 'error', errorText: `Error: ${error.message}` })
+      const nextConnectionState = state.connectionState === 'reconnecting' ? 'disconnected' : state.connectionState
+      return { tabs: newTabs, connectionState: nextConnectionState }
+    })
+  }
+}
+
+async function disconnectTab(tabId: number): Promise<void> {
+  logger.debug(`Disconnecting tab ${tabId}`)
+
+  const { tabs } = store.getState()
+  if (!tabs.has(tabId)) {
+    logger.debug('Tab not in tabs map, ignoring disconnect')
+    return
+  }
+
+  detachTab(tabId, true)
+
+  const { tabs: updatedTabs } = store.getState()
+  if (updatedTabs.size === 0 && ws) {
+    logger.debug('No tabs remaining, closing connection')
+    closeConnection('All tabs disconnected')
+    store.setState({ connectionState: 'disconnected' })
+  }
+}
+
+async function reconnect(): Promise<void> {
+  logger.debug('Starting reconnection')
+  const { tabs } = store.getState()
+  const tabsToReconnect = Array.from(tabs.keys())
+  logger.debug('Tabs to reconnect:', tabsToReconnect)
+
+  try {
+    await ensureConnection()
+
+    for (const tabId of tabsToReconnect) {
+      if (!store.getState().tabs.has(tabId)) {
+        logger.debug('Tab', tabId, 'was manually disconnected during reconnection, skipping')
+        continue
+      }
+
+      try {
+        await chrome.tabs.get(tabId)
+        await attachTab(tabId)
+        logger.debug('Successfully re-attached tab:', tabId)
+      } catch (error: any) {
+        logger.debug('Failed to re-attach tab:', tabId, error.message)
+        store.setState((state) => {
+          const newTabs = new Map(state.tabs)
+          newTabs.delete(tabId)
+          return { tabs: newTabs }
+        })
+      }
+    }
+
+    const { tabs: finalTabs } = store.getState()
+    if (finalTabs.size > 0) {
+      store.setState({ connectionState: 'connected' })
+    } else {
+      store.setState({ connectionState: 'disconnected' })
+    }
+  } catch (error: any) {
+    logger.debug('Reconnection failed:', error)
+    store.setState({
+      tabs: new Map(),
+      connectionState: 'error',
+      errorText: 'Reconnection failed - Click to retry',
+    })
+  }
+}
 
 async function toggleExtensionForActiveTab(): Promise<{ isConnected: boolean; state: ExtensionState }> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -23,88 +583,49 @@ async function toggleExtensionForActiveTab(): Promise<{ isConnected: boolean; st
 
   await onActionClicked(tab)
 
-  // Wait for state to settle
   await new Promise<void>((resolve) => {
     const check = () => {
-      const state = useExtensionStore.getState()
-      const tabInfo = state.connectedTabs.get(tab.id!)
-
-      // If we are connecting, wait
-      if (tabInfo?.state === 'connecting') {
+      const state = store.getState()
+      const tabInfo = state.tabs.get(tab.id!)
+      if (tabInfo?.state === 'connecting' || state.connectionState === 'reconnecting') {
         setTimeout(check, 100)
         return
       }
-
-      // Also wait if global connection is reconnecting
-      if (state.connectionState === 'reconnecting') {
-        setTimeout(check, 100)
-        return
-      }
-
       resolve()
     }
     check()
   })
 
-  const state = useExtensionStore.getState()
-  const isConnected = state.connectedTabs.has(tab.id) && state.connectedTabs.get(tab.id)?.state === 'connected'
-
+  const state = store.getState()
+  const isConnected = state.tabs.has(tab.id) && state.tabs.get(tab.id)?.state === 'connected'
   return { isConnected, state }
 }
 
-// @ts-ignore
-globalThis.disconnectEverything = disconnectEverything
+async function disconnectEverything(): Promise<void> {
+  const { tabs } = store.getState()
 
-async function disconnectEverything() {
-  const { connectedTabs, connection } = useExtensionStore.getState()
-
-  // Disconnect all tabs
-  for (const tabId of connectedTabs.keys()) {
+  for (const tabId of tabs.keys()) {
     await disconnectTab(tabId)
   }
 
-  // Force close connection if it still exists
-  const state = useExtensionStore.getState()
-  if (state.connection) {
-    state.connection.close('Manual full disconnect')
-    useExtensionStore.setState({
-      connection: undefined,
+  if (ws) {
+    closeConnection('Manual full disconnect')
+    store.setState({
       connectionState: 'disconnected',
-      connectedTabs: new Map(),
+      tabs: new Map(),
       errorText: undefined,
     })
   }
 }
 
-// @ts-ignore
-globalThis.getExtensionState = () => useExtensionStore.getState()
-
-declare global {
-  var state: typeof useExtensionStore
-  var toggleExtensionForActiveTab: () => Promise<{ isConnected: boolean; state: ExtensionState }>
-  var getExtensionState: () => ExtensionState
-  var disconnectEverything: () => Promise<void>
-}
-
-async function resetDebugger() {
+async function resetDebugger(): Promise<void> {
   let targets = await chrome.debugger.getTargets()
   targets = targets.filter((x) => x.tabId && x.attached)
   logger.log(`found ${targets.length} existing debugger targets. detaching them before background script starts`)
-  logger.log(targets)
   for (const target of targets) {
     await chrome.debugger.detach({ tabId: target.tabId })
   }
 }
-resetDebugger()
-
-chrome.runtime.onInstalled.addListener((details) => {
-  if (import.meta.env.TESTING) {
-    return
-  }
-  if (details.reason === 'install') {
-    void chrome.tabs.create({ url: 'welcome.html' })
-  }
-})
 
 const icons = {
   connected: {
@@ -153,42 +674,28 @@ const icons = {
   },
 } as const
 
-async function updateIcons() {
-  const state = useExtensionStore.getState()
-  const { connectionState, connectedTabs, errorText } = state
+async function updateIcons(): Promise<void> {
+  const state = store.getState()
+  const { connectionState, tabs, errorText } = state
 
-  const tabs = await chrome.tabs.query({})
-  const allTabIds = [undefined, ...tabs.map((tab) => tab.id).filter((id): id is number => id !== undefined)]
+  const allTabs = await chrome.tabs.query({})
+  const allTabIds = [undefined, ...allTabs.map((tab) => tab.id).filter((id): id is number => id !== undefined)]
 
   for (const tabId of allTabIds) {
-    const tabInfo = tabId !== undefined ? connectedTabs.get(tabId) : undefined
+    const tabInfo = tabId !== undefined ? tabs.get(tabId) : undefined
 
     const iconConfig = (() => {
-      if (connectionState === 'error') {
-        return icons.error
-      }
-      if (connectionState === 'reconnecting') {
-        return icons.connecting
-      }
-      if (tabInfo?.state === 'error') {
-        return icons.error
-      }
-      if (tabInfo?.state === 'connecting') {
-        return icons.connecting
-      }
-      if (tabInfo?.state === 'connected') {
-        return icons.connected
-      }
+      if (connectionState === 'error') return icons.error
+      if (connectionState === 'reconnecting') return icons.connecting
+      if (tabInfo?.state === 'error') return icons.error
+      if (tabInfo?.state === 'connecting') return icons.connecting
+      if (tabInfo?.state === 'connected') return icons.connected
       return icons.disconnected
     })()
 
     const title = (() => {
-      if (connectionState === 'error' && errorText) {
-        return errorText
-      }
-      if (tabInfo?.errorText) {
-        return tabInfo.errorText
-      }
+      if (connectionState === 'error' && errorText) return errorText
+      if (tabInfo?.errorText) return tabInfo.errorText
       return iconConfig.title
     })()
 
@@ -199,308 +706,15 @@ async function updateIcons() {
   }
 }
 
-useExtensionStore.subscribe(async (state, prevState) => {
-  logger.log(state)
-  await updateIcons()
-})
-
-async function ensureConnection(): Promise<void> {
-  const { connection } = useExtensionStore.getState()
-  if (connection) {
-    logger.debug('Connection already exists, reusing')
-    return
-  }
-
-  logger.debug('No existing connection, creating new relay connection')
-  logger.debug('Waiting for server at http://localhost:19988...')
-
-  useExtensionStore.setState({ connectionState: 'reconnecting' })
-  while (true) {
-    try {
-      await fetch('http://localhost:19988', { method: 'HEAD' })
-      logger.debug('Server is available')
-      break
-    } catch (error: any) {
-      logger.debug('Server not available, retrying in 1 second...')
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-    }
-  }
-
-  logger.debug('Server is ready, creating WebSocket connection to:', RELAY_URL)
-  const socket = new WebSocket(RELAY_URL)
-  logger.debug(
-    'WebSocket created, initial readyState:',
-    socket.readyState,
-    '(0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)',
-  )
-
-  await new Promise<void>((resolve, reject) => {
-    let timeoutFired = false
-    const timeout = setTimeout(() => {
-      timeoutFired = true
-      logger.debug('=== WebSocket connection TIMEOUT after 5 seconds ===')
-      logger.debug('Final WebSocket readyState:', socket.readyState)
-      logger.debug('WebSocket URL:', socket.url)
-      logger.debug('Socket protocol:', socket.protocol)
-      reject(new Error('Connection timeout'))
-    }, 5000)
-
-    socket.onopen = () => {
-      if (timeoutFired) {
-        logger.debug('WebSocket opened but timeout already fired!')
-        return
-      }
-      logger.debug('WebSocket onopen fired! readyState:', socket.readyState)
-      clearTimeout(timeout)
-      resolve()
-    }
-
-    socket.onerror = (error) => {
-      logger.debug('WebSocket onerror during connection:', error)
-      logger.debug('Error type:', error.type)
-      logger.debug('Current readyState:', socket.readyState)
-      if (!timeoutFired) {
-        clearTimeout(timeout)
-        reject(new Error('WebSocket connection failed'))
-      }
-    }
-
-    socket.onclose = (event) => {
-      logger.debug('WebSocket onclose during connection setup:', {
-        code: event.code,
-        reason: event.reason,
-        wasClean: event.wasClean,
-        readyState: socket.readyState,
-      })
-      if (!timeoutFired) {
-        clearTimeout(timeout)
-        reject(new Error(`WebSocket closed: ${event.reason || event.code}`))
-      }
-    }
-
-    logger.debug('Event handlers set, waiting for connection...')
-  })
-
-  logger.debug('WebSocket connected successfully, creating RelayConnection instance')
-  const newConnection = new RelayConnection({
-    ws: socket,
-    onClose: (reason, code) => {
-      logger.debug('=== Relay connection onClose callback triggered ===', { reason, code })
-      const { connectedTabs } = useExtensionStore.getState()
-      logger.debug('Connected tabs before potential reconnection:', Array.from(connectedTabs.keys()))
-
-      if (reason === 'Extension Replaced' || code === 4001) {
-        logger.debug('Connection replaced by another extension instance. Not reconnecting.')
-        useExtensionStore.setState({
-          connection: undefined,
-          connectionState: 'error',
-          errorText: 'Disconnected: Replaced by another extension',
-        })
-        return
-      }
-
-      useExtensionStore.setState({ connection: undefined, connectionState: 'disconnected' })
-
-      if (connectedTabs.size > 0) {
-        logger.debug('Tabs still connected, triggering reconnection')
-        void reconnect()
-      } else {
-        logger.debug('No tabs to reconnect')
-      }
-    },
-    onTabDetached: (tabId, reason) => {
-      logger.debug('=== Manual tab detachment detected for tab:', tabId, '===')
-      logger.debug('User closed debugger via Chrome automation bar')
-
-      useExtensionStore.setState((state) => {
-        const newTabs = new Map(state.connectedTabs)
-        newTabs.delete(tabId)
-        return { connectedTabs: newTabs }
-      })
-      if (reason === chrome.debugger.DetachReason.CANCELED_BY_USER) {
-        // if user cancels debugger. disconnect everything
-        useExtensionStore.setState({ connectionState: 'disconnected' })
-      }
-      logger.debug('Removed tab from _connectedTabs map')
-    },
-    onTabAttached: (tabId, targetId) => {
-      // logger.debug('=== Tab attached callback for tab:', tabId, '===')
-      useExtensionStore.setState((state) => {
-        const newTabs = new Map(state.connectedTabs)
-        newTabs.set(tabId, {
-          targetId,
-          state: 'connected',
-        })
-        return { connectedTabs: newTabs, connectionState: 'connected' }
-      })
-    },
-  })
-
-  useExtensionStore.setState({ connection: newConnection })
-  logger.debug('Connection established, WebSocket open (caller should set connectionState)')
-}
-
-async function connectTab(tabId: number): Promise<void> {
-  try {
-    logger.debug(`=== Starting connection to tab ${tabId} ===`)
-
-    useExtensionStore.setState((state) => {
-      const newTabs = new Map(state.connectedTabs)
-      newTabs.set(tabId, {
-        targetId: '',
-        state: 'connecting',
-      })
-      return { connectedTabs: newTabs }
-    })
-
-    await ensureConnection()
-
-    logger.debug('Calling attachTab for tab:', tabId)
-    const { connection } = useExtensionStore.getState()
-    if (!connection) return
-    const targetInfo = await connection.attachTab(tabId)
-    logger.debug('attachTab completed, updating targetId in connectedTabs map')
-    useExtensionStore.setState((state) => {
-      const newTabs = new Map(state.connectedTabs)
-      newTabs.set(tabId, {
-        targetId: targetInfo?.targetId,
-        state: 'connected',
-      })
-      return { connectedTabs: newTabs, connectionState: 'connected' }
-    })
-
-    logger.debug(`=== Successfully connected to tab ${tabId} ===`)
-  } catch (error: any) {
-    logger.debug(`=== Failed to connect to tab ${tabId} ===`)
-    logger.debug('Error details:', error)
-    logger.debug('Error stack:', error.stack)
-
-    useExtensionStore.setState((state) => {
-      const newTabs = new Map(state.connectedTabs)
-      newTabs.set(tabId, {
-        targetId: '',
-        state: 'error',
-        errorText: `Error: ${error.message}`,
-      })
-
-      // If we were trying to establish a connection and failed, reset the global state
-      // so we don't get stuck in 'reconnecting' which triggers destructive click behavior
-      let nextConnectionState = state.connectionState
-      if (state.connectionState === 'reconnecting') {
-        nextConnectionState = 'disconnected'
-      }
-
-      return { connectedTabs: newTabs, connectionState: nextConnectionState }
-    })
-  }
-}
-
-async function disconnectTab(tabId: number): Promise<void> {
-  logger.debug(`=== Disconnecting tab ${tabId} ===`)
-
-  const { connectedTabs, connection } = useExtensionStore.getState()
-  if (!connectedTabs.has(tabId)) {
-    logger.debug('Tab not in connectedTabs map, ignoring disconnect')
-    return
-  }
-
-  logger.debug('Calling detachTab on connection')
-  connection?.detachTab(tabId)
-  useExtensionStore.setState((state) => {
-    const newTabs = new Map(state.connectedTabs)
-    newTabs.delete(tabId)
-    return { connectedTabs: newTabs }
-  })
-  logger.debug('Tab removed from connectedTabs map')
-
-  const { connectedTabs: updatedTabs, connection: updatedConnection } = useExtensionStore.getState()
-  logger.debug('Connected tabs remaining:', updatedTabs.size)
-  if (updatedTabs.size === 0 && updatedConnection) {
-    logger.debug('No tabs remaining, closing relay connection')
-    updatedConnection.close('All tabs disconnected')
-    useExtensionStore.setState({ connection: undefined, connectionState: 'disconnected' })
-  }
-}
-
-async function reconnect(): Promise<void> {
-  logger.debug('=== Starting reconnection ===')
-  const { connectedTabs } = useExtensionStore.getState()
-  logger.debug('Tabs to reconnect:', Array.from(connectedTabs.keys()))
-
-  try {
-    await ensureConnection()
-
-    const tabsToReconnect = Array.from(connectedTabs.keys())
-    logger.debug('Re-attaching', tabsToReconnect.length, 'tabs')
-
-    for (const tabId of tabsToReconnect) {
-      const { connectedTabs: currentTabs } = useExtensionStore.getState()
-      if (!currentTabs.has(tabId)) {
-        logger.debug('Tab', tabId, 'was manually disconnected during reconnection, skipping')
-        continue
-      }
-
-      try {
-        logger.debug('Checking if tab', tabId, 'still exists')
-        await chrome.tabs.get(tabId)
-
-        logger.debug('Re-attaching tab:', tabId)
-        const { connection } = useExtensionStore.getState()
-        if (!connection) return
-        const targetInfo = await connection.attachTab(tabId)
-        useExtensionStore.setState((state) => {
-          const newTabs = new Map(state.connectedTabs)
-          newTabs.set(tabId, {
-            targetId: targetInfo.targetId,
-            state: 'connected',
-          })
-          return { connectedTabs: newTabs }
-        })
-        logger.debug('Successfully re-attached tab:', tabId)
-      } catch (error: any) {
-        logger.debug('Failed to re-attach tab:', tabId, error.message)
-        useExtensionStore.setState((state) => {
-          const newTabs = new Map(state.connectedTabs)
-          newTabs.delete(tabId)
-          return { connectedTabs: newTabs }
-        })
-      }
-    }
-
-    const { connectedTabs: finalTabs } = useExtensionStore.getState()
-    logger.debug('=== Reconnection complete ===')
-    logger.debug('Successfully reconnected tabs:', finalTabs.size)
-
-    if (finalTabs.size > 0) {
-      useExtensionStore.setState({ connectionState: 'connected' })
-      logger.debug('Set connectionState to connected')
-    } else {
-      logger.debug('No tabs successfully reconnected, staying in reconnecting state')
-      useExtensionStore.setState({ connectionState: 'disconnected' })
-    }
-  } catch (error: any) {
-    logger.debug('=== Reconnection failed ===', error)
-
-    useExtensionStore.setState({
-      connectedTabs: new Map(),
-      connectionState: 'error',
-      errorText: 'Reconnection failed - Click to retry',
-    })
-  }
-}
-
 async function onTabRemoved(tabId: number): Promise<void> {
-  const { connectedTabs } = useExtensionStore.getState()
-  logger.debug('Tab removed event for tab:', tabId, 'is connected:', connectedTabs.has(tabId))
-  if (!connectedTabs.has(tabId)) return
-
+  const { tabs } = store.getState()
+  if (!tabs.has(tabId)) return
   logger.debug(`Connected tab ${tabId} was closed, disconnecting`)
   await disconnectTab(tabId)
 }
 
 async function onTabActivated(activeInfo: chrome.tabs.TabActiveInfo): Promise<void> {
-  logger.debug('Tab activated:', activeInfo.tabId)
-  useExtensionStore.setState({ currentTabId: activeInfo.tabId })
+  store.setState({ currentTabId: activeInfo.tabId })
 }
 
 async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
@@ -509,8 +723,8 @@ async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
     return
   }
 
-  const { connectedTabs, connectionState, connection } = useExtensionStore.getState()
-  const tabInfo = connectedTabs.get(tab.id)
+  const { tabs, connectionState } = store.getState()
+  const tabInfo = tabs.get(tab.id)
 
   if (connectionState === 'error') {
     logger.debug('Global error state - retrying reconnection')
@@ -520,19 +734,14 @@ async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
 
   if (connectionState === 'reconnecting') {
     logger.debug('User clicked during reconnection, canceling and disconnecting all tabs')
-
-    const tabsToDisconnect = Array.from(connectedTabs.keys())
-
-    for (const tabId of tabsToDisconnect) {
-      connection?.detachTab(tabId)
+    for (const tabId of tabs.keys()) {
+      detachTab(tabId, true)
     }
-
-    useExtensionStore.setState({ connectionState: 'disconnected', connectedTabs: new Map(), errorText: undefined })
-
-    if (connection) {
-      connection.close('User cancelled reconnection')
+    store.setState({ connectionState: 'disconnected', tabs: new Map(), errorText: undefined })
+    if (ws) {
+      ws.close(1000, 'User cancelled reconnection')
+      ws = null
     }
-
     return
   }
 
@@ -548,6 +757,20 @@ async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
     await connectTab(tab.id)
   }
 }
+
+resetDebugger()
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (import.meta.env.TESTING) return
+  if (details.reason === 'install') {
+    void chrome.tabs.create({ url: 'welcome.html' })
+  }
+})
+
+store.subscribe(async () => {
+  logger.log(store.getState())
+  await updateIcons()
+})
 
 logger.debug(`Using relay URL: ${RELAY_URL}`)
 chrome.tabs.onRemoved.addListener(onTabRemoved)

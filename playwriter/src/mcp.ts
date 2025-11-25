@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import dedent from 'string-dedent'
+import { createPatch } from 'diff'
 import { getCdpUrl } from './utils.js'
 
 const require = createRequire(import.meta.url)
@@ -51,6 +52,7 @@ interface VMContext {
     page: Page
     search?: string | RegExp
     contextLines?: number
+    showDiffSinceLastCall?: boolean
   }) => Promise<string>
   getLocatorStringForElement: (element: any) => Promise<string>
   resetPlaywright: () => Promise<{ page: Page; context: BrowserContext }>
@@ -76,6 +78,9 @@ const userState: Record<string, any> = {}
 // Store logs per page targetId
 const browserLogs: Map<string, string[]> = new Map()
 const MAX_LOGS_PER_PAGE = 5000
+
+// Store last accessibility snapshot per page for diff feature
+const lastSnapshots: WeakMap<Page, string> = new WeakMap()
 
 const RELAY_PORT = 19988
 const NO_TABS_ERROR = `No browser tabs are connected. Please install and enable the Playwriter extension on at least one tab: https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe`
@@ -390,11 +395,29 @@ server.tool(
         page: Page
         search?: string | RegExp
         contextLines?: number
+        showDiffSinceLastCall?: boolean
       }) => {
-        const { page: targetPage, search, contextLines = 10 } = options
+        const { page: targetPage, search, contextLines = 10, showDiffSinceLastCall = false } = options
         if ((targetPage as any)._snapshotForAI) {
           const snapshot = await (targetPage as any)._snapshotForAI()
           const snapshotStr = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot, null, 2)
+
+          if (showDiffSinceLastCall) {
+            const previousSnapshot = lastSnapshots.get(targetPage)
+            lastSnapshots.set(targetPage, snapshotStr)
+
+            if (!previousSnapshot) {
+              return 'No previous snapshot available. This is the first call for this page. Full snapshot stored for next diff.'
+            }
+
+            const patch = createPatch('snapshot', previousSnapshot, snapshotStr, 'previous', 'current')
+            if (patch.split('\n').length <= 4) {
+              return 'No changes detected since last snapshot'
+            }
+            return patch
+          }
+
+          lastSnapshots.set(targetPage, snapshotStr)
 
           if (!search) {
             return snapshotStr

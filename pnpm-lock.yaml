@@ -75,6 +75,9 @@ importers:
       devtools-protocol:
         specifier: ^0.0.1543509
         version: 0.0.1543509
+      diff:
+        specifier: ^8.0.2
+        version: 8.0.2
       hono:
         specifier: ^4.10.6
         version: 4.10.6
@@ -930,6 +933,10 @@ packages:
 
   devtools-protocol@0.0.1543509:
     resolution: {integrity: sha512-JlHmIPtgDeqcL2uwPA7xryDNSb1ug9h11IexYQUG98vcyV6/L3taLRECgUk/B/7yQhXC/sgBzKj9kaB+bxmdWg==}
+
+  diff@8.0.2:
+    resolution: {integrity: sha512-sSuxWU5j5SR9QQji/o2qMvqRNYRDOcBTgsJ/DeCf4iSN4gW+gNMXM7wFIP+fdXZxoNiAnHUTGjCr+TSWXdRDKg==}
+    engines: {node: '>=0.3.1'}
 
   dir-glob@3.0.1:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
@@ -2652,6 +2659,8 @@ snapshots:
   detect-indent@6.1.0: {}
 
   devtools-protocol@0.0.1543509: {}
+
+  diff@8.0.2: {}
 
   dir-glob@3.0.1:
     dependencies:

@@ -226,9 +226,9 @@ describe('MCP Server Tests', () => {
             const tabs = await chrome.tabs.query({})
             const testTab = tabs.find((t: any) => t.url?.includes('mcp-test'))
             return {
-                connected: !!testTab && !!testTab.id && state.connectedTabs.has(testTab.id),
+                connected: !!testTab && !!testTab.id && state.tabs.has(testTab.id),
                 tabId: testTab?.id,
-                tabInfo: testTab?.id ? state.connectedTabs.get(testTab.id) : null,
+                tabInfo: testTab?.id ? state.tabs.get(testTab.id) : null,
                 connectionState: state.connectionState
             }
         })
@@ -581,8 +581,8 @@ describe('MCP Server Tests', () => {
              const tabA = tabs.find((t: any) => t.url?.includes('tab-a'))
              const tabB = tabs.find((t: any) => t.url?.includes('tab-b'))
              return {
-                 idA: state.connectedTabs.get(tabA?.id ?? -1)?.targetId,
-                 idB: state.connectedTabs.get(tabB?.id ?? -1)?.targetId
+                 idA: state.tabs.get(tabA?.id ?? -1)?.targetId,
+                 idB: state.tabs.get(tabB?.id ?? -1)?.targetId
              }
         })
 
@@ -667,8 +667,8 @@ describe('MCP Server Tests', () => {
              const tabA = tabs.find((t: any) => t.url?.includes('tab-a'))
              const tabB = tabs.find((t: any) => t.url?.includes('tab-b'))
              return {
-                 idA: state.connectedTabs.get(tabA?.id ?? -1)?.targetId,
-                 idB: state.connectedTabs.get(tabB?.id ?? -1)?.targetId
+                 idA: state.tabs.get(tabA?.id ?? -1)?.targetId,
+                 idB: state.tabs.get(tabB?.id ?? -1)?.targetId
              }
         })
 
@@ -961,7 +961,7 @@ describe('MCP Server Tests', () => {
             name: 'execute',
             arguments: {
                 code: js`
-          const logs = await getLatestLogs({ searchFilter: 'error' });
+          const logs = await getLatestLogs({ search: 'error' });
           logs.forEach(log => console.log(log));
         `,
             },

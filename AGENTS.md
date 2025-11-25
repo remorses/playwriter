@@ -55,7 +55,7 @@ remember that every time the extension is activated in a tab that tab gets added
 
 to debug server or extension issues you can also inspect the file @playwriter/relay-server.log to see both extension and server logs. with all cdp events sent. to see if there are events missing or something broken. this file is recreated every time the server is started and appended in real time. use rg to only read relevant lines and parts because it can get quite long
 
-tests will take about 30 seconds, so set a timeout of at least 60 seconds when running the test bash command
+IMPORTANT: `pnpm test` will take about 30 seconds so set a timeout of at least 3600ms when running the pnpm test bash command
 
 ## changelogs
 
