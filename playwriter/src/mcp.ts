@@ -620,6 +620,40 @@ server.tool(
   },
 )
 
+server.tool(
+  'reset',
+  `Recreates the CDP connection and resets the browser/page/context. Use this when the MCP stops responding, you get connection errors, assertion failures, page closed, or timeout issues.
+
+After calling this tool, the page and context variables are automatically updated in the execution environment.
+
+IMPORTANT: this completely resets the execution context, removing any custom properties you may have added to the global scope AND clearing all keys from the \`state\` object. Only \`page\`, \`context\`, \`state\` (empty), \`console\`, and utility functions will remain.`,
+  {},
+  async () => {
+    try {
+      const { page, context } = await resetConnection()
+      const pagesCount = context.pages().length
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Connection reset successfully. ${pagesCount} page(s) available. Current page URL: ${page.url()}`,
+          },
+        ],
+      }
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Failed to reset connection: ${error.message}`,
+          },
+        ],
+        isError: true,
+      }
+    }
+  },
+)
+
 // Start the server
 async function main() {
   await ensureRelayServer()

@@ -42,6 +42,7 @@
     "devtools-protocol": "^0.0.1543509",
     "hono": "^4.10.6",
     "playwright-core": "^1.56.1",
+    "string-dedent": "^3.0.2",
     "user-agents": "^1.1.669",
     "ws": "^8.18.3",
     "zod": "^3"

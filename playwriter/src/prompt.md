@@ -76,7 +76,6 @@ you have access to some functions in addition to playwright methods:
     - `page`: the page object to snapshot
     - `searchString`: (optional) a string or regex to filter the snapshot. If provided, returns the first 10 matches with surrounding context
     - `contextLines`: (optional) number of lines of context to show around each match (default: 10)
-- `async resetPlaywright()`: recreates the CDP connection and resets the browser/page/context. Use this when the MCP stops responding, you get connection errors, assertion failures, page closed, or timeout issues. After calling this, the page and context variables are automatically updated in the execution environment. IMPORTANT: this completely resets the execution context, removing any custom properties you may have added to the global scope AND clearing all keys from the `state` object. Only `page`, `context`, `state` (empty), `console`, and utility functions will remain
 - `getLatestLogs({ page, count, searchFilter })`: retrieves browser console logs. The system automatically captures and stores up to 5000 logs per page. Logs are cleared when a page reloads or navigates.
     - `page`: (optional) filter logs by a specific page instance. Only returns logs from that page
     - `count`: (optional) limit number of logs to return. If not specified, returns all available logs
