@@ -658,7 +658,7 @@ const icons = {
     },
     title: 'Click to attach debugger',
     badgeText: '',
-    badgeColor: undefined,
+    badgeColor: '#333333',
   },
   error: {
     path: {
