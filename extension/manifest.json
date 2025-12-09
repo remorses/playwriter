@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Playwriter MCP",
   "version": "0.0.52",
-  "description": "Playwright MCP. 90% less context window. 10x more capable (full playwright API)",
+  "description": "Automate your Browser using Cursor, Claude, VS Code. More capable Playwright MCP alternative.",
   "permissions": ["debugger"],
   "host_permissions": ["<all_urls>"],
   "background": {
