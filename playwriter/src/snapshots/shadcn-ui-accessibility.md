@@ -18,124 +18,127 @@ Return value:
             - /url: /charts/area
           - link "Directory" [ref=e13] [cursor=pointer]:
             - /url: /docs/directory
-          - link "Themes" [ref=e14] [cursor=pointer]:
-            - /url: /themes
-          - link "Colors" [ref=e15] [cursor=pointer]:
-            - /url: /colors
-        - generic [ref=e16]:
-          - button "Search documentation... ⌘ K" [ref=e18]:
-            - generic [ref=e19]: Search documentation...
-            - generic [ref=e21]:
-              - generic: ⌘
-              - generic: K
-          - link "100.5k" [ref=e22] [cursor=pointer]:
+          - link "Create" [ref=e14] [cursor=pointer]:
+            - /url: /create
+        - generic [ref=e15]:
+          - button "Search documentation... ⌘K" [ref=e17]:
+            - generic [ref=e18]: Search documentation...
+            - generic [ref=e19]:
+              - generic: ⌘K
+          - link "102k" [ref=e20] [cursor=pointer]:
             - /url: https://github.com/shadcn-ui/ui
             - img
-            - generic [ref=e23]: 100.5k
-          - button "Toggle theme" [ref=e24]:
+            - generic [ref=e21]: 102k
+          - button "Toggle theme" [ref=e22]:
             - img
-            - generic [ref=e25]: Toggle theme
-    - main [ref=e26]:
-      - generic [ref=e27]:
-        - generic [ref=e30]:
-          - 'link "New New Components: Field, Input Group, Item and more" [ref=e31] [cursor=pointer]':
+            - generic [ref=e23]: Toggle theme
+          - link "New Project" [ref=e24] [cursor=pointer]:
+            - /url: /create
+            - img
+            - text: New Project
+    - main [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e29]:
+          - link "New npx shadcn create" [ref=e30] [cursor=pointer]:
             - /url: /docs/changelog
-            - generic "New" [ref=e32]
-            - text: "New Components: Field, Input Group, Item and more"
+            - generic "New" [ref=e31]
+            - text: npx shadcn create
             - img
-          - heading "The Foundation for your Design System" [level=1] [ref=e33]
-          - paragraph [ref=e34]: A set of beautifully designed components that you can customize, extend, and build on. Start here then make it your own. Open Source. Open Code.
-          - generic [ref=e35]:
-            - link "Get Started" [ref=e36] [cursor=pointer]:
-              - /url: /docs/installation
-            - link "View Components" [ref=e37] [cursor=pointer]:
+          - heading "The Foundation for your Design System" [level=1] [ref=e32]
+          - paragraph [ref=e33]: A set of beautifully designed components that you can customize, extend, and build on. Start here then make it your own. Open Source. Open Code.
+          - generic [ref=e34]:
+            - link "New Project" [ref=e35] [cursor=pointer]:
+              - /url: /create
+              - img
+              - text: New Project
+            - link "View Components" [ref=e36] [cursor=pointer]:
               - /url: /docs/components
-        - generic [ref=e39]:
-          - generic [ref=e44]:
-            - link "Examples" [ref=e45] [cursor=pointer]:
+        - generic [ref=e38]:
+          - generic [ref=e43]:
+            - link "Examples" [ref=e44] [cursor=pointer]:
               - /url: /
-            - link "Dashboard" [ref=e46] [cursor=pointer]:
+            - link "Dashboard" [ref=e45] [cursor=pointer]:
               - /url: /examples/dashboard
-            - link "Tasks" [ref=e47] [cursor=pointer]:
+            - link "Tasks" [ref=e46] [cursor=pointer]:
               - /url: /examples/tasks
-            - link "Playground" [ref=e48] [cursor=pointer]:
+            - link "Playground" [ref=e47] [cursor=pointer]:
               - /url: /examples/playground
-            - link "Authentication" [ref=e49] [cursor=pointer]:
+            - link "Authentication" [ref=e48] [cursor=pointer]:
               - /url: /examples/authentication
-          - generic [ref=e50]:
-            - generic [ref=e51]: Theme
-            - combobox "Theme" [ref=e52]:
-              - generic [ref=e53]: "Theme:"
+          - generic [ref=e49]:
+            - generic [ref=e50]: Theme
+            - combobox "Theme" [ref=e51]:
+              - generic [ref=e52]: "Theme:"
               - generic: Neutral
               - img
-            - button "Copy Code" [ref=e54]:
+            - button "Copy Code" [ref=e53]:
               - img
-              - generic [ref=e55]: Copy Code
-        - generic [ref=e59]:
-          - generic [ref=e63]:
-            - group "Payment Method" [ref=e64]:
-              - generic [ref=e65]: Payment Method
-              - paragraph [ref=e66]: All transactions are secure and encrypted
-              - generic [ref=e67]:
-                - group [ref=e68]:
-                  - generic [ref=e69]: Name on Card
-                  - textbox "Name on Card" [ref=e70]:
+              - generic [ref=e54]: Copy Code
+        - generic [ref=e58]:
+          - generic [ref=e62]:
+            - group "Payment Method" [ref=e63]:
+              - generic [ref=e64]: Payment Method
+              - paragraph [ref=e65]: All transactions are secure and encrypted
+              - generic [ref=e66]:
+                - group [ref=e67]:
+                  - generic [ref=e68]: Name on Card
+                  - textbox "Name on Card" [ref=e69]:
                     - /placeholder: John Doe
-                - generic [ref=e71]:
-                  - group [ref=e72]:
-                    - generic [ref=e73]: Card Number
-                    - textbox "Card Number" [ref=e74]:
+                - generic [ref=e70]:
+                  - group [ref=e71]:
+                    - generic [ref=e72]: Card Number
+                    - textbox "Card Number" [ref=e73]:
                       - /placeholder: 1234 5678 9012 3456
-                    - paragraph [ref=e75]: Enter your 16-digit number.
-                  - group [ref=e76]:
-                    - generic [ref=e77]: CVV
-                    - textbox "CVV" [ref=e78]:
+                    - paragraph [ref=e74]: Enter your 16-digit number.
+                  - group [ref=e75]:
+                    - generic [ref=e76]: CVV
+                    - textbox "CVV" [ref=e77]:
                       - /placeholder: "123"
-                - generic [ref=e79]:
-                  - group [ref=e80]:
-                    - generic [ref=e81]: Month
-                    - combobox "Month" [ref=e82]:
+                - generic [ref=e78]:
+                  - group [ref=e79]:
+                    - generic [ref=e80]: Month
+                    - combobox "Month" [ref=e81]:
                       - generic: MM
                       - img
-                    - combobox [ref=e83]
-                  - group [ref=e84]:
-                    - generic [ref=e85]: Year
-                    - combobox "Year" [ref=e86]:
+                    - combobox [ref=e82]
+                  - group [ref=e83]:
+                    - generic [ref=e84]: Year
+                    - combobox "Year" [ref=e85]:
                       - generic: YYYY
                       - img
-                    - combobox [ref=e87]
-            - group "Billing Address" [ref=e89]:
-              - generic [ref=e90]: Billing Address
-              - paragraph [ref=e91]: The billing address associated with your payment method
-              - group [ref=e93]:
-                - checkbox "Same as shipping address" [checked] [ref=e94]:
+                    - combobox [ref=e86]
+            - group "Billing Address" [ref=e88]:
+              - generic [ref=e89]: Billing Address
+              - paragraph [ref=e90]: The billing address associated with your payment method
+              - group [ref=e92]:
+                - checkbox "Same as shipping address" [checked] [ref=e93]:
                   - generic:
                     - img
                 - checkbox [checked]
-                - generic [ref=e95]: Same as shipping address
-            - group [ref=e97]:
-              - group [ref=e99]:
-                - generic [ref=e100]: Comments
-                - textbox "Comments" [ref=e101]:
+                - generic [ref=e94]: Same as shipping address
+            - group [ref=e96]:
+              - group [ref=e98]:
+                - generic [ref=e99]: Comments
+                - textbox "Comments" [ref=e100]:
                   - /placeholder: Add any additional comments
-            - group [ref=e102]:
-              - button "Submit" [ref=e103]
-              - button "Cancel" [ref=e104]
-          - generic [ref=e105]:
-            - generic [ref=e106]:
-              - generic [ref=e107]:
-                - generic [ref=e109]:
-                  - img "@shadcn" [ref=e111]
-                  - img "@maxleiter" [ref=e113]
-                  - img "@evilrabbit" [ref=e115]
-                - generic [ref=e116]: No Team Members
-                - generic [ref=e117]: Invite your team to collaborate on this project.
-              - button "Invite Members" [ref=e119]:
+            - group [ref=e101]:
+              - button "Submit" [ref=e102]
+              - button "Cancel" [ref=e103]
+          - generic [ref=e104]:
+            - generic [ref=e105]:
+              - generic [ref=e106]:
+                - generic [ref=e108]:
+                  - img "@shadcn" [ref=e110]
+                  - img "@maxleiter" [ref=e112]
+                  - img "@evilrabbit" [ref=e114]
+                - generic [ref=e115]: No Team Members
+                - generic [ref=e116]: Invite your team to collaborate on this project.
+              - button "Invite Members" [ref=e118]:
                 - img
                 - text: Invite Members
-            - generic [ref=e120]:
-              - generic [ref=e121]:
+            - generic [ref=e119]:
+              - generic [ref=e120]:
                 - status "Loading"
-       
+         
 
 [Truncated to 6000 characters. Better manage your logs or paginate them to read the full logs]

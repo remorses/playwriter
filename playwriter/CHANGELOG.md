@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.18
+
+### Patch Changes
+
+- **Marked project as production ready**: Removed "Still in development" notice from README
+
 ## 0.0.17
 
 ### Patch Changes
