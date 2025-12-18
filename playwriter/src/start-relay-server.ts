@@ -1,25 +1,11 @@
 import { startPlayWriterCDPRelayServer } from './extension/cdp-relay.js'
-import fs from 'node:fs'
-import util from 'node:util'
-import { ensureDataDir, getLogFilePath } from './utils.js'
+import { createFileLogger } from './create-logger.js'
+import { getLogFilePath } from './utils.js'
 
 const logFilePath = getLogFilePath()
-
 process.title = 'playwriter-ws-server'
-ensureDataDir()
-fs.writeFileSync(logFilePath, '')
 
-const log = (...args: any[]) => {
-  const message = args.map(arg =>
-    typeof arg === 'string' ? arg : util.inspect(arg, { depth: null, colors: false })
-  ).join(' ')
-  return fs.promises.appendFile(logFilePath, message + '\n')
-}
-
-const logger = {
-  log,
-  error: log
-}
+const logger = createFileLogger({ logFilePath })
 
 process.on('uncaughtException', async (err) => {
   await logger.error('Uncaught Exception:', err);

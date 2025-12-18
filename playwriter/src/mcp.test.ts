@@ -1,6 +1,6 @@
 import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { exec, spawn } from 'node:child_process'
+import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { chromium, BrowserContext } from 'playwright-core'
 import path from 'node:path'
@@ -11,6 +11,8 @@ import type { ExtensionState } from 'mcp-extension/src/types.js'
 import type { Protocol } from 'devtools-protocol'
 import { imageSize } from 'image-size'
 import { getCDPSessionForPage } from './cdp-session.js'
+import { startPlayWriterCDPRelayServer } from './extension/cdp-relay.js'
+import { createFileLogger } from './create-logger.js'
 
 declare const window: any
 declare const document: any
@@ -63,7 +65,7 @@ async function killProcessOnPort(port: number): Promise<void> {
 interface TestContext {
     browserContext: Awaited<ReturnType<typeof chromium.launchPersistentContext>>
     userDataDir: string
-    relayServerProcess: ReturnType<typeof spawn>
+    relayServer: { close(): void }
 }
 
 async function setupTestContext({ tempDirPrefix }: { tempDirPrefix: string }): Promise<TestContext> {
@@ -74,31 +76,8 @@ async function setupTestContext({ tempDirPrefix }: { tempDirPrefix: string }): P
     console.log('Extension built')
 
     const localLogPath = path.join(process.cwd(), 'relay-server.log')
-    const relayServerProcess = spawn('pnpm', ['tsx', 'src/start-relay-server.ts'], {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        env: { ...process.env, PLAYWRITER_LOG_PATH: localLogPath }
-    })
-
-    await new Promise<void>((resolve, reject) => {
-        let retries = 0
-        const interval = setInterval(async () => {
-            try {
-                const { stdout } = await execAsync('lsof -ti:19988')
-                if (stdout.trim()) {
-                    clearInterval(interval)
-                    resolve()
-                }
-            } catch {
-                // ignore
-            }
-            retries++
-            if (retries > 30) {
-                clearInterval(interval)
-                reject(new Error('Relay server failed to start'))
-            }
-        }, 1000)
-    })
+    const logger = createFileLogger({ logFilePath: localLogPath })
+    const relayServer = await startPlayWriterCDPRelayServer({ port: 19988, logger })
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix))
     const extensionPath = path.resolve('../extension/dist')
@@ -121,17 +100,16 @@ async function setupTestContext({ tempDirPrefix }: { tempDirPrefix: string }): P
         await globalThis.toggleExtensionForActiveTab()
     })
 
-    return { browserContext, userDataDir, relayServerProcess }
+    return { browserContext, userDataDir, relayServer }
 }
 
 async function cleanupTestContext(ctx: TestContext | null, cleanup?: (() => Promise<void>) | null): Promise<void> {
     if (ctx?.browserContext) {
         await ctx.browserContext.close()
     }
-    if (ctx?.relayServerProcess) {
-        ctx.relayServerProcess.kill()
+    if (ctx?.relayServer) {
+        ctx.relayServer.close()
     }
-    await killProcessOnPort(19988)
 
     if (ctx?.userDataDir) {
         try {
@@ -1796,13 +1774,20 @@ describe('CDP Session Tests', () => {
             sampleFunctionNames: functionNames,
         }).toMatchInlineSnapshot(`
           {
-            "durationMicroseconds": 6205,
+            "durationMicroseconds": 12993,
             "hasNodes": true,
-            "nodeCount": 3,
+            "nodeCount": 21,
             "sampleFunctionNames": [
               "(root)",
               "(program)",
               "(idle)",
+              "evaluate",
+              "fibonacci",
+              "fibonacci",
+              "fibonacci",
+              "fibonacci",
+              "fibonacci",
+              "fibonacci",
             ],
           }
         `)
