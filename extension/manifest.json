@@ -3,7 +3,7 @@
   "name": "Playwriter MCP",
   "version": "0.0.52",
   "description": "Automate your Browser using Cursor, Claude, VS Code. More capable and context efficient than Playwright MCP.",
-  "permissions": ["debugger"],
+  "permissions": ["debugger", "tabGroups"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "lib/background.mjs",

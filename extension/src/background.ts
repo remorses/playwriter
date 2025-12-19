@@ -8,6 +8,7 @@ const RELAY_URL = 'ws://localhost:19988/extension'
 let ws: WebSocket | null = null
 let childSessions: Map<string, number> = new Map()
 let nextSessionId = 1
+let playwriterGroupId: number | null = null
 
 const store = createStore<ExtensionState>(() => ({
   tabs: new Map(),
@@ -91,6 +92,46 @@ function sendMessage(message: any): void {
     } catch (error: any) {
       console.debug('ERROR sending message:', error, 'message type:', message.method || 'response')
     }
+  }
+}
+
+async function addTabToGroup(tabId: number): Promise<void> {
+  try {
+    if (playwriterGroupId !== null) {
+      const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
+      if (!existingGroups.some((g) => g.id === playwriterGroupId)) {
+        playwriterGroupId = null
+      }
+    }
+
+    if (playwriterGroupId === null) {
+      playwriterGroupId = await chrome.tabs.group({ tabIds: [tabId] })
+      await chrome.tabGroups.update(playwriterGroupId, { title: 'playwriter', color: 'green' })
+      logger.debug('Created tab group:', playwriterGroupId)
+    } else {
+      await chrome.tabs.group({ tabIds: [tabId], groupId: playwriterGroupId })
+      logger.debug('Added tab to existing group:', tabId)
+    }
+  } catch (error: any) {
+    logger.debug('Failed to add tab to group:', error.message)
+  }
+}
+
+async function removeTabFromGroup(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.ungroup(tabId)
+    logger.debug('Removed tab from group:', tabId)
+
+    if (playwriterGroupId !== null) {
+      const groups = await chrome.tabGroups.query({ title: 'playwriter' })
+      const group = groups.find((g) => g.id === playwriterGroupId)
+      if (!group) {
+        playwriterGroupId = null
+        logger.debug('Tab group was deleted')
+      }
+    }
+  } catch (error: any) {
+    logger.debug('Failed to remove tab from group:', error.message)
   }
 }
 
@@ -299,6 +340,7 @@ async function attachTab(tabId: number): Promise<Protocol.Target.TargetInfo> {
   })
 
   logger.debug('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId)
+  await addTabToGroup(tabId)
   return targetInfo
 }
 
@@ -310,6 +352,8 @@ function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
   }
 
   logger.debug('Detaching tab:', tabId, 'sessionId:', tab.sessionId, 'shouldDetach:', shouldDetachDebugger)
+
+  void removeTabFromGroup(tabId)
 
   sendMessage({
     method: 'forwardCDPEvent',
@@ -353,6 +397,7 @@ function closeConnection(reason: string): void {
 
   store.setState({ tabs: new Map(), connectionState: 'disconnected', errorText: undefined })
   childSessions.clear()
+  playwriterGroupId = null
 
   if (ws) {
     ws.close(1000, reason)
@@ -375,6 +420,7 @@ function handleConnectionClose(reason: string, code: number): void {
   }
 
   childSessions.clear()
+  playwriterGroupId = null
   ws = null
 
   if (reason === 'Extension Replaced' || code === 4001) {
