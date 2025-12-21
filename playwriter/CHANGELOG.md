@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.24
+
+### Patch Changes
+
+- **Auto-restart relay server on version mismatch**: Server now exposes `/version` endpoint, MCP checks and restarts server if versions differ after package update
+- **Simplified logging**: Single `relay-server.log` file instead of timestamped files with symlinks
+- **Cross-platform process killing**: Use `kill-port-process` package for Windows/Mac/Linux compatibility
+- **IPv4 compatibility**: Use `127.0.0.1` instead of `localhost` to avoid IPv6 resolution issues
+- **Reset tabs on disconnect**: Clear connected tabs state when extension disconnects
+
 ## 0.0.23
 
 ### Patch Changes
