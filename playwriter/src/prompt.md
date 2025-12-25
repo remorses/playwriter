@@ -97,14 +97,38 @@ you have access to some functions in addition to playwright methods:
     - Example: `const cdp = await getCDPSession({ page }); const metrics = await cdp.send('Page.getLayoutMetrics');`
 - `createDebugger({ cdp })`: creates a Debugger instance for setting breakpoints, stepping, and inspecting variables. Works with browser JS or Node.js (--inspect).
     - `cdp`: a CDPSession from `getCDPSession`
-    - Methods: `enable()`, `setBreakpoint({ file, line })`, `deleteBreakpoint({ breakpointId })`, `listBreakpoints()`, `listScripts({ search? })`, `evaluate({ expression })`, `inspectVariables({ scope? })`, `getLocation()`, `stepOver()`, `stepInto()`, `stepOut()`, `resume()`, `isPaused()`
+    - Methods: `enable()`, `setBreakpoint({ file, line, condition? })`, `deleteBreakpoint({ breakpointId })`, `listBreakpoints()`, `listScripts({ search? })`, `evaluate({ expression })`, `inspectLocalVariables()`, `getLocation()`, `stepOver()`, `stepInto()`, `stepOut()`, `resume()`, `isPaused()`, `setXHRBreakpoint({ url })`, `removeXHRBreakpoint({ url })`, `listXHRBreakpoints()`, `setBlackboxPatterns({ patterns })`, `addBlackboxPattern({ pattern })`, `removeBlackboxPattern({ pattern })`, `listBlackboxPatterns()`
     - Example:
       ```js
       const cdp = await getCDPSession({ page }); const dbg = createDebugger({ cdp }); await dbg.enable();
       console.log(dbg.listScripts({ search: 'app' }));
       await dbg.setBreakpoint({ file: 'https://example.com/app.js', line: 42 });
+      // conditional breakpoint - only pause when userId is 123
+      await dbg.setBreakpoint({ file: 'app.js', line: 50, condition: 'userId === 123' });
+      // XHR breakpoint - pause when fetch/XHR URL contains '/api'
+      await dbg.setXHRBreakpoint({ url: '/api' });
+      // blackbox framework code when stepping
+      await dbg.setBlackboxPatterns({ patterns: ['node_modules/'] });
       // user triggers the code, then:
-      if (dbg.isPaused()) { console.log(await dbg.getLocation()); console.log(await dbg.inspectVariables()); await dbg.resume(); }
+      if (dbg.isPaused()) { console.log(await dbg.getLocation()); console.log(await dbg.inspectLocalVariables()); await dbg.resume(); }
+      ```
+- `createEditor({ cdp })`: creates an Editor instance for viewing and live-editing page scripts. Provides a Claude Code-like interface.
+    - `cdp`: a CDPSession from `getCDPSession`
+    - Methods: `enable()`, `list({ search? })`, `read({ url, offset?, limit? })`, `edit({ url, oldString, newString, dryRun? })`, `grep({ regex, include? })`, `write({ url, content, dryRun? })`
+    - Inline scripts (no URL) get synthetic URLs like `inline://42` - use grep() to find them by content
+    - Example:
+      ```js
+      const cdp = await getCDPSession({ page }); const editor = createEditor({ cdp }); await editor.enable();
+      // list available scripts (inline scripts have inline:// URLs)
+      console.log(editor.list({ search: 'app' }));
+      // read a script with line numbers (like Claude Code Read tool)
+      const { content, totalLines } = await editor.read({ url: 'https://example.com/app.js', offset: 0, limit: 50 });
+      console.log(content);
+      // edit a script (like Claude Code Edit tool) - exact string replacement
+      await editor.edit({ url: 'https://example.com/app.js', oldString: 'DEBUG = false', newString: 'DEBUG = true' });
+      // search across all scripts (like Grep) - useful for finding inline scripts
+      const matches = await editor.grep({ regex: /myFunction/ });
+      if (matches.length > 0) { await editor.edit({ url: matches[0].url, oldString: 'return false', newString: 'return true' }); }
       ```
 
 example:

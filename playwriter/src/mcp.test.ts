@@ -12,6 +12,7 @@ import type { Protocol } from 'devtools-protocol'
 import { imageSize } from 'image-size'
 import { getCDPSessionForPage } from './cdp-session.js'
 import { Debugger } from './debugger.js'
+import { Editor } from './editor.js'
 import { startPlayWriterCDPRelayServer, type RelayServer } from './extension/cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
 import type { CDPCommand } from './cdp-types.js'
@@ -20,6 +21,7 @@ import { killPortProcess } from 'kill-port-process'
 declare const window: any
 declare const document: any
 
+const TEST_PORT = 19987
 
 const execAsync = promisify(exec)
 
@@ -67,15 +69,15 @@ interface TestContext {
 }
 
 async function setupTestContext({ tempDirPrefix }: { tempDirPrefix: string }): Promise<TestContext> {
-    await killProcessOnPort(19988)
+    await killProcessOnPort(TEST_PORT)
 
     console.log('Building extension...')
-    await execAsync('TESTING=1 pnpm build', { cwd: '../extension' })
+    await execAsync(`TESTING=1 PLAYWRITER_PORT=${TEST_PORT} pnpm build`, { cwd: '../extension' })
     console.log('Extension built')
 
     const localLogPath = path.join(process.cwd(), 'relay-server.log')
     const logger = createFileLogger({ logFilePath: localLogPath })
-    const relayServer = await startPlayWriterCDPRelayServer({ port: 19988, logger })
+    const relayServer = await startPlayWriterCDPRelayServer({ port: TEST_PORT, logger })
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix))
     const extensionPath = path.resolve('../extension/dist')
@@ -136,7 +138,7 @@ describe('MCP Server Tests', () => {
     beforeAll(async () => {
         testCtx = await setupTestContext({ tempDirPrefix: 'pw-test-' })
 
-        const result = await createMCPClient()
+        const result = await createMCPClient({ port: TEST_PORT })
         client = result.client
         cleanup = result.cleanup
     }, 600000)
@@ -165,7 +167,7 @@ describe('MCP Server Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => {
             return p.url().startsWith('about:')
         })
@@ -382,7 +384,7 @@ describe('MCP Server Tests', () => {
 
         // 3. Verify we can connect via direct CDP and see the page
 
-        let directBrowser = await chromium.connectOverCDP(getCdpUrl())
+        let directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         let contexts = directBrowser.contexts()
         let pages = contexts[0].pages()
 
@@ -408,7 +410,7 @@ describe('MCP Server Tests', () => {
         // connecting to relay will succeed, but listing pages should NOT show our page
 
         // Connect to relay again
-        directBrowser = await chromium.connectOverCDP(getCdpUrl())
+        directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         contexts = directBrowser.contexts()
         pages = contexts[0].pages()
 
@@ -426,7 +428,7 @@ describe('MCP Server Tests', () => {
 
         // 7. Verify page is back
 
-        directBrowser = await chromium.connectOverCDP(getCdpUrl())
+        directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         // Wait a bit for targets to populate
         await new Promise(r => setTimeout(r, 500))
 
@@ -454,7 +456,7 @@ describe('MCP Server Tests', () => {
         const serviceWorker = await getExtensionServiceWorker(browserContext)
 
         // Connect once
-        const directBrowser = await chromium.connectOverCDP(getCdpUrl())
+        const directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         // Wait a bit for connection and initial target discovery
         await new Promise(r => setTimeout(r, 500))
 
@@ -536,7 +538,7 @@ describe('MCP Server Tests', () => {
         })
 
         // 3. Connect via CDP
-        const cdpUrl = getCdpUrl()
+        const cdpUrl = getCdpUrl({ port: TEST_PORT })
         const directBrowser = await chromium.connectOverCDP(cdpUrl)
         const connectedPage = directBrowser.contexts()[0].pages().find(p => p.url() === initialUrl)
         expect(connectedPage).toBeDefined()
@@ -617,7 +619,7 @@ describe('MCP Server Tests', () => {
         expect(targetIds.idA).not.toBe(targetIds.idB)
 
         // Verify independent connections
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
 
         const pages = browser.contexts()[0].pages()
 
@@ -673,7 +675,7 @@ describe('MCP Server Tests', () => {
         })
 
         // 3. Verify via CDP that the correct URL is shown
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         // Wait for sync
         await new Promise(r => setTimeout(r, 1000))
 
@@ -1178,7 +1180,7 @@ describe('MCP Server Tests', () => {
 
         await new Promise(r => setTimeout(r, 2000))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const pages = browser.contexts()[0].pages()
         const xPage = pages.find(p => p.url().includes('x.com'))
 
@@ -1204,7 +1206,7 @@ describe('MCP Server Tests', () => {
         })
 
         for (let i = 0; i < 5; i++) {
-            const browser = await chromium.connectOverCDP(getCdpUrl())
+            const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
             const pages = browser.contexts()[0].pages()
             const testPage = pages.find(p => p.url().includes('repeated-test'))
 
@@ -1244,7 +1246,7 @@ describe('MCP Server Tests', () => {
             `,
                 },
             }),
-            chromium.connectOverCDP(getCdpUrl())
+            chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         ])
 
         const mcpOutput = (mcpResult as any).content[0].text
@@ -1274,7 +1276,7 @@ describe('MCP Server Tests', () => {
         await new Promise(r => setTimeout(r, 3000))
 
         for (let i = 0; i < 3; i++) {
-            const browser = await chromium.connectOverCDP(getCdpUrl())
+            const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
             const pages = browser.contexts()[0].pages()
             const ytPage = pages.find(p => p.url().includes('youtube.com'))
 
@@ -1310,7 +1312,7 @@ describe('MCP Server Tests', () => {
         }
         testCtx!.relayServer.on('cdp:command', commandHandler)
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
 
         expect(cdpPage).toBeDefined()
@@ -1439,7 +1441,7 @@ describe('MCP Server Tests', () => {
         }
         testCtx!.relayServer.on('cdp:command', commandHandler)
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         let cdpPage
         for (const p of browser.contexts()[0].pages()) {
             const html = await p.content()
@@ -1546,11 +1548,11 @@ describe('MCP Server Tests', () => {
 
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
 
         const layoutMetrics = await cdpSession.send('Page.getLayoutMetrics')
@@ -1626,11 +1628,11 @@ describe('MCP Server Tests', () => {
 
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const client = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
 
         const layoutMetrics = await client.send('Page.getLayoutMetrics')
@@ -1671,7 +1673,7 @@ describe('MCP Server Tests', () => {
             verbose: 1,
             disablePino: true,
             localBrowserLaunchOptions: {
-                cdpUrl: getCdpUrl(),
+                cdpUrl: getCdpUrl({ port: TEST_PORT }),
             },
         })
 
@@ -1796,11 +1798,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         const dbg = new Debugger({ cdp: cdpSession })
 
@@ -1866,11 +1868,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('news.ycombinator.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         const dbg = new Debugger({ cdp: cdpSession })
 
@@ -1916,7 +1918,7 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         let cdpPage
         for (const p of browser.contexts()[0].pages()) {
             const html = await p.content()
@@ -1927,7 +1929,7 @@ describe('CDP Session Tests', () => {
         }
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         const dbg = new Debugger({ cdp: cdpSession })
 
@@ -1965,11 +1967,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         const dbg = new Debugger({ cdp: cdpSession })
 
@@ -2038,11 +2040,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         await cdpSession.send('Profiler.enable')
         await cdpSession.send('Profiler.start')
@@ -2093,11 +2095,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
 
         const initialTargets = await cdpSession.send('Target.getTargets')
@@ -2144,11 +2146,11 @@ describe('CDP Session Tests', () => {
 
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
 
         const { targetInfos } = await cdpSession.send('Target.getTargets')
@@ -2196,11 +2198,11 @@ describe('CDP Session Tests', () => {
         await page.goto('https://news.ycombinator.com/', { waitUntil: 'networkidle' })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('news.ycombinator.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
 
         const evalResult = await cdpSession.send('Runtime.evaluate', {
@@ -2228,11 +2230,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
 
         const initialEvalResult = await cdpSession.send('Runtime.evaluate', {
@@ -2280,11 +2282,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         const dbg = new Debugger({ cdp: cdpSession })
 
@@ -2356,7 +2358,7 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         let cdpPage
         for (const p of browser.contexts()[0].pages()) {
             const html = await p.content()
@@ -2367,7 +2369,7 @@ describe('CDP Session Tests', () => {
         }
         expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl()
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
         const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
         const dbg = new Debugger({ cdp: cdpSession })
 
@@ -2420,7 +2422,7 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl())
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
         expect(cdpPage).toBeDefined()
 
@@ -2444,6 +2446,74 @@ describe('CDP Session Tests', () => {
         expect(clickedAt.x).toBeGreaterThan(0)
         expect(clickedAt.y).toBeGreaterThan(0)
 
+        await browser.close()
+        await page.close()
+    }, 60000)
+
+    it('should use Editor class to list, read, and edit scripts', async () => {
+        const browserContext = getBrowserContext()
+        const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+        const page = await browserContext.newPage()
+        await page.goto('https://example.com/')
+        await page.bringToFront()
+
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+        await new Promise(r => setTimeout(r, 500))
+
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
+        expect(cdpPage).toBeDefined()
+
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
+        const cdpSession = await getCDPSessionForPage({ page: cdpPage!, wsUrl })
+        const editor = new Editor({ cdp: cdpSession })
+
+        await editor.enable()
+
+        await cdpPage!.addScriptTag({
+            content: `
+                function greetUser(name) {
+                    console.log('Hello, ' + name);
+                    return 'Hello, ' + name;
+                }
+            `,
+        })
+        await new Promise(r => setTimeout(r, 300))
+
+        const scripts = editor.list()
+        expect(scripts.length).toBeGreaterThan(0)
+
+        const matches = await editor.grep({ regex: /greetUser/ })
+        expect(matches.length).toBeGreaterThan(0)
+
+        const match = matches[0]
+        const { content, totalLines } = await editor.read({ url: match.url })
+        expect(content).toContain('greetUser')
+        expect(totalLines).toBeGreaterThan(0)
+
+        await editor.edit({
+            url: match.url,
+            oldString: "console.log('Hello, ' + name);",
+            newString: "console.log('Hello, ' + name); console.log('EDITOR_TEST_MARKER');",
+        })
+
+        const consoleLogs: string[] = []
+        cdpPage!.on('console', msg => {
+            consoleLogs.push(msg.text())
+        })
+
+        await cdpPage!.evaluate(() => {
+            (window as any).greetUser('World')
+        })
+        await new Promise(r => setTimeout(r, 200))
+
+        expect(consoleLogs).toContain('Hello, World')
+        expect(consoleLogs).toContain('EDITOR_TEST_MARKER')
+
+        cdpSession.close()
         await browser.close()
         await page.close()
     }, 60000)

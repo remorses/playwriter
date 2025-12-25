@@ -7,7 +7,9 @@ import fs from 'node:fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const defineEnv: Record<string, string> = {};
+const defineEnv: Record<string, string> = {
+  'process.env.PLAYWRITER_PORT': JSON.stringify(process.env.PLAYWRITER_PORT || '19988'),
+};
 if (process.env.TESTING) {
   defineEnv['import.meta.env.TESTING'] = 'true';
 }

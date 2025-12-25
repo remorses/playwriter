@@ -16,6 +16,7 @@ import { killPortProcess } from 'kill-port-process'
 import { waitForPageLoad, WaitForPageLoadOptions, WaitForPageLoadResult } from './wait-for-page-load.js'
 import { getCDPSessionForPage, CDPSession } from './cdp-session.js'
 import { Debugger } from './debugger.js'
+import { Editor } from './editor.js'
 
 class CodeExecutionTimeoutError extends Error {
   constructor(timeout: number) {
@@ -74,6 +75,7 @@ interface VMContext {
   waitForPageLoad: (options: WaitForPageLoadOptions) => Promise<WaitForPageLoadResult>
   getCDPSession: (options: { page: Page }) => Promise<CDPSession>
   createDebugger: (options: { cdp: CDPSession }) => Debugger
+  createEditor: (options: { cdp: CDPSession }) => Editor
   require: NodeRequire
   import: (specifier: string) => Promise<any>
 }
@@ -101,7 +103,7 @@ const lastSnapshots: WeakMap<Page, string> = new WeakMap()
 // Cache CDP sessions per page
 const cdpSessionCache: WeakMap<Page, CDPSession> = new WeakMap()
 
-const RELAY_PORT = 19988
+const RELAY_PORT = Number(process.env.PLAYWRITER_PORT) || 19988
 const NO_TABS_ERROR = `No browser tabs are connected. Please install and enable the Playwriter extension on at least one tab: https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe`
 
 async function setDeviceScaleFactorForMacOS(context: BrowserContext): Promise<void> {
@@ -426,6 +428,43 @@ server.resource('debugger-api', 'playwriter://debugger-api', { mimeType: 'text/p
   }
 })
 
+server.resource('editor-api', 'playwriter://editor-api', { mimeType: 'text/plain' }, async () => {
+  const packageJsonPath = require.resolve('playwriter/package.json')
+  const distDir = path.join(path.dirname(packageJsonPath), 'dist')
+
+  const editorTypes = fs
+    .readFileSync(path.join(distDir, 'editor.d.ts'), 'utf-8')
+    .replace(/\/\/# sourceMappingURL=.*$/gm, '')
+    .trim()
+  const editorExamples = fs.readFileSync(path.join(distDir, 'editor-examples.ts'), 'utf-8')
+
+  return {
+    contents: [
+      {
+        uri: 'playwriter://editor-api',
+        text: dedent`
+          # Editor API Reference
+
+          The Editor class provides a Claude Code-like interface for viewing and editing web page scripts at runtime.
+
+          ## Types
+
+          \`\`\`ts
+          ${editorTypes}
+          \`\`\`
+
+          ## Examples
+
+          \`\`\`ts
+          ${editorExamples}
+          \`\`\`
+        `,
+        mimeType: 'text/plain',
+      },
+    ],
+  }
+})
+
 server.tool(
   'execute',
   promptContent,
@@ -625,6 +664,10 @@ server.tool(
         return new Debugger(options)
       }
 
+      const createEditor = (options: { cdp: CDPSession }) => {
+        return new Editor(options)
+      }
+
       let vmContextObj: VMContextWithGlobals = {
         page,
         context,
@@ -637,6 +680,7 @@ server.tool(
         waitForPageLoad,
         getCDPSession,
         createDebugger,
+        createEditor,
         resetPlaywright: async () => {
           const { page: newPage, context: newContext } = await resetConnection()
 
@@ -652,6 +696,7 @@ server.tool(
             waitForPageLoad,
             getCDPSession,
             createDebugger,
+            createEditor,
             resetPlaywright: vmContextObj.resetPlaywright,
             require,
             // TODO --experimental-vm-modules is needed to make import work in vm

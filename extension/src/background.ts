@@ -1,9 +1,12 @@
+declare const process: { env: { PLAYWRITER_PORT: string } }
+
 import { createStore } from 'zustand/vanilla'
 import type { ExtensionState, ConnectionState, TabState, TabInfo } from './types'
 import type { CDPEvent, Protocol } from 'playwriter/src/cdp-types'
 import type { ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/extension/protocol'
 
-const RELAY_URL = 'ws://localhost:19988/extension'
+const RELAY_PORT = process.env.PLAYWRITER_PORT
+const RELAY_URL = `ws://localhost:${RELAY_PORT}/extension`
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -462,7 +465,7 @@ function startReplacedRetryLoop(): void {
       return
     }
     try {
-      const response = await fetch('http://localhost:19988/extension/status')
+      const response = await fetch(`http://localhost:${RELAY_PORT}/extension/status`)
       const data = await response.json()
       if (!data.connected) {
         store.setState({ connectionState: 'disconnected', errorText: undefined })
@@ -518,12 +521,12 @@ async function ensureConnection(): Promise<void> {
     return
   }
 
-  logger.debug('Waiting for server at http://localhost:19988...')
+  logger.debug(`Waiting for server at http://localhost:${RELAY_PORT}...`)
   store.setState({ connectionState: 'reconnecting' })
 
   while (true) {
     try {
-      await fetch('http://localhost:19988', { method: 'HEAD' })
+      await fetch(`http://localhost:${RELAY_PORT}`, { method: 'HEAD' })
       logger.debug('Server is available')
       break
     } catch {

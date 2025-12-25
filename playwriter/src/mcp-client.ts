@@ -9,23 +9,28 @@ const __filename = url.fileURLToPath(import.meta.url)
 
 export interface CreateTransportOptions {
   clientName?: string
+  port?: number
 }
 
-export async function createTransport(args: string[]): Promise<{
+export async function createTransport({ args = [], port }: { args?: string[]; port?: number } = {}): Promise<{
   transport: Transport
   stderr: Stream | null
 }> {
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    DEBUG: 'playwriter:mcp:test',
+    DEBUG_COLORS: '0',
+    DEBUG_HIDE_DATE: '1',
+  }
+  if (port) {
+    env.PLAYWRITER_PORT = String(port)
+  }
   const transport = new StdioClientTransport({
     command: 'pnpm',
     args: ['vite-node', path.join(path.dirname(__filename), 'mcp.ts'), ...args],
     cwd: path.join(path.dirname(__filename), '..'),
     stderr: 'pipe',
-    env: {
-      ...process.env,
-      DEBUG: 'playwriter:mcp:test',
-      DEBUG_COLORS: '0',
-      DEBUG_HIDE_DATE: '1',
-    },
+    env,
   })
 
   return {
@@ -44,7 +49,7 @@ export async function createMCPClient(options?: CreateTransportOptions): Promise
     version: '1.0.0',
   })
 
-  const { transport, stderr } = await createTransport([])
+  const { transport, stderr } = await createTransport({ port: options?.port })
 
   let stderrBuffer = ''
   stderr?.on('data', (data) => {
