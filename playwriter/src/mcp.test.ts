@@ -202,7 +202,7 @@ describe('MCP Server Tests', () => {
             name: 'execute',
             arguments: {
                 code: js`
-          await state.page.goto('https://news.ycombinator.com');
+          await state.page.goto('https://example.com');
           const title = await state.page.title();
           console.log('Page title:', title);
           return { url: state.page.url(), title };
@@ -213,12 +213,12 @@ describe('MCP Server Tests', () => {
           [
             {
               "text": "Console output:
-          [log] Page title: Hacker News
+          [log] Page title: Example Domain
 
           Return value:
           {
-            "url": "https://news.ycombinator.com/",
-            "title": "Hacker News"
+            \"url\": \"https://example.com/\",
+            \"title\": \"Example Domain\"
           }",
               "type": "text",
             },
@@ -550,19 +550,19 @@ describe('MCP Server Tests', () => {
         // We use a loop to check if it's still connected because reload might cause temporary disconnect/reconnect events
         // that Playwright handles natively if the session ID stays valid.
         await connectedPage?.reload()
-        await connectedPage?.waitForLoadState('networkidle')
+        await connectedPage?.waitForLoadState('domcontentloaded')
         expect(await connectedPage?.title()).toBe('Example Domain')
 
         // Verify execution after reload
         expect(await connectedPage?.evaluate(() => 2 + 2)).toBe(4)
 
         // 5. Navigate to new URL
-        const newUrl = 'https://news.ycombinator.com/'
+        const newUrl = 'https://example.org/'
         await connectedPage?.goto(newUrl)
-        await connectedPage?.waitForLoadState('networkidle')
+        await connectedPage?.waitForLoadState('domcontentloaded')
 
         expect(connectedPage?.url()).toBe(newUrl)
-        expect(await connectedPage?.title()).toContain('Hacker News')
+        expect(await connectedPage?.title()).toContain('Example Domain')
 
         // Verify execution after navigation
         expect(await connectedPage?.evaluate(() => 3 + 3)).toBe(6)
@@ -667,7 +667,7 @@ describe('MCP Server Tests', () => {
         await page.bringToFront()
 
         // Wait for load
-        await page.waitForLoadState('networkidle')
+        await page.waitForLoadState('domcontentloaded')
 
         // 2. Enable extension for this page
         await serviceWorker.evaluate(async () => {
@@ -697,7 +697,7 @@ describe('MCP Server Tests', () => {
         const page = pages[0]
 
         await page.goto('https://example.com/disconnect-test')
-        await page.waitForLoadState('networkidle')
+        await page.waitForLoadState('domcontentloaded')
         await page.bringToFront()
 
         // Enable extension on this page
@@ -1877,7 +1877,14 @@ describe('CDP Session Tests', () => {
         const serviceWorker = await getExtensionServiceWorker(browserContext)
 
         const page = await browserContext.newPage()
-        await page.goto('https://news.ycombinator.com/')
+        await page.setContent(`
+            <html>
+                <head>
+                    <script src="data:text/javascript,function testScript() { return 42; }"></script>
+                </head>
+                <body><h1>Script Test</h1></body>
+            </html>
+        `)
         await page.bringToFront()
 
         await serviceWorker.evaluate(async () => {
@@ -1886,7 +1893,14 @@ describe('CDP Session Tests', () => {
         await new Promise(r => setTimeout(r, 200))
 
         const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('news.ycombinator.com'))
+        let cdpPage
+        for (const p of browser.contexts()[0].pages()) {
+            const html = await p.content()
+            if (html.includes('Script Test')) {
+                cdpPage = p
+                break
+            }
+        }
         expect(cdpPage).toBeDefined()
 
         const wsUrl = getCdpUrl({ port: TEST_PORT })
@@ -1894,8 +1908,6 @@ describe('CDP Session Tests', () => {
         const dbg = new Debugger({ cdp: cdpSession })
 
         await dbg.enable()
-
-        await cdpPage!.reload({ waitUntil: 'networkidle' })
 
         for (let i = 0; i < 20; i++) {
             if (dbg.listScripts().length > 0) break
@@ -1907,8 +1919,8 @@ describe('CDP Session Tests', () => {
         expect(scripts[0]).toHaveProperty('scriptId')
         expect(scripts[0]).toHaveProperty('url')
 
-        const hnScripts = dbg.listScripts({ search: 'hn' })
-        expect(hnScripts.length).toBeGreaterThan(0)
+        const dataScripts = dbg.listScripts({ search: 'data:' })
+        expect(dataScripts.length).toBeGreaterThan(0)
 
         cdpSession.close()
         await browser.close()
@@ -2123,8 +2135,8 @@ describe('CDP Session Tests', () => {
         const initialPageTarget = initialTargets.targetInfos.find(t => t.type === 'page' && t.url.includes('example.com'))
         expect(initialPageTarget?.url).toBe('https://example.com/')
 
-        await cdpPage!.goto('https://news.ycombinator.com/', { waitUntil: 'networkidle' })
-        await new Promise(r => setTimeout(r, 500))
+        await cdpPage!.goto('https://example.org/', { waitUntil: 'domcontentloaded' })
+        await new Promise(r => setTimeout(r, 300))
 
         const afterNavTargets = await cdpSession.send('Target.getTargets')
         const allPageTargets = afterNavTargets.targetInfos.filter(t => t.type === 'page')
@@ -2135,8 +2147,8 @@ describe('CDP Session Tests', () => {
         const exampleComTargets = allPageTargets.filter(t => t.url.includes('example.com'))
         expect(exampleComTargets).toHaveLength(0)
 
-        const hnTargets = allPageTargets.filter(t => t.url.includes('news.ycombinator.com'))
-        expect(hnTargets).toHaveLength(1)
+        const exampleOrgTargets = allPageTargets.filter(t => t.url.includes('example.org'))
+        expect(exampleOrgTargets).toHaveLength(1)
 
         cdpSession.close()
         await browser.close()
@@ -2155,7 +2167,7 @@ describe('CDP Session Tests', () => {
         })
 
         const page2 = await browserContext.newPage()
-        await page2.goto('https://news.ycombinator.com/')
+        await page2.goto('https://example.org/')
         await page2.bringToFront()
         await serviceWorker.evaluate(async () => {
             await globalThis.toggleExtensionForActiveTab()
@@ -2188,7 +2200,7 @@ describe('CDP Session Tests', () => {
             },
             {
               "type": "page",
-              "url": "https://news.ycombinator.com/",
+              "url": "https://example.org/",
             },
           ]
         `)
@@ -2212,11 +2224,11 @@ describe('CDP Session Tests', () => {
         })
         await new Promise(r => setTimeout(r, 200))
 
-        await page.goto('https://news.ycombinator.com/', { waitUntil: 'networkidle' })
+        await page.goto('https://example.org/', { waitUntil: 'domcontentloaded' })
         await new Promise(r => setTimeout(r, 200))
 
         const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('news.ycombinator.com'))
+        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.org'))
         expect(cdpPage).toBeDefined()
 
         const wsUrl = getCdpUrl({ port: TEST_PORT })
@@ -2226,7 +2238,7 @@ describe('CDP Session Tests', () => {
             expression: 'document.title',
             returnByValue: true,
         })
-        expect(evalResult.result.value).toContain('Hacker News')
+        expect(evalResult.result.value).toContain('Example Domain')
 
         cdpSession.close()
         await browser.close()
@@ -2260,8 +2272,8 @@ describe('CDP Session Tests', () => {
         })
         expect(initialEvalResult.result.value).toBe('Example Domain')
 
-        const newUrl = 'https://news.ycombinator.com/'
-        await cdpPage!.goto(newUrl, { waitUntil: 'networkidle' })
+        const newUrl = 'https://example.org/'
+        await cdpPage!.goto(newUrl, { waitUntil: 'domcontentloaded' })
 
         expect(cdpPage!.url()).toBe(newUrl)
 
@@ -2273,7 +2285,7 @@ describe('CDP Session Tests', () => {
             expression: 'document.title',
             returnByValue: true,
         })
-        expect(afterNavEvalResult.result.value).toContain('Hacker News')
+        expect(afterNavEvalResult.result.value).toContain('Example Domain')
 
         const locationResult = await cdpSession.send('Runtime.evaluate', {
             expression: 'window.location.href',
