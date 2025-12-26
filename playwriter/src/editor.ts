@@ -27,6 +27,9 @@ export interface EditResult {
  * A class for viewing and editing web page scripts via Chrome DevTools Protocol.
  * Provides a Claude Code-like interface: list, read, edit, grep.
  *
+ * Edits are in-memory only and persist until page reload. They modify the running
+ * V8 instance but are not saved to disk or server.
+ *
  * @example
  * ```ts
  * const cdp = await getCDPSession({ page })
