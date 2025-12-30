@@ -271,14 +271,17 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
         const contextCreatedPromise = new Promise<void>((resolve) => {
           const handler = ({ event }: { event: CDPEventBase }) => {
             if (event.method === 'Runtime.executionContextCreated' && event.sessionId === sessionId) {
-              clearTimeout(timeout)
-              emitter.off('cdp:event', handler)
-              resolve()
+              const params = event.params as Protocol.Runtime.ExecutionContextCreatedEvent | undefined
+              if (params?.context?.auxData?.isDefault === true) {
+                clearTimeout(timeout)
+                emitter.off('cdp:event', handler)
+                resolve()
+              }
             }
           }
           const timeout = setTimeout(() => {
             emitter.off('cdp:event', handler)
-            logger?.log(chalk.yellow(`IMPORTANT: Runtime.enable timed out waiting for executionContextCreated (sessionId: ${sessionId}). This may cause pages to not be visible immediately.`))
+            logger?.log(chalk.yellow(`IMPORTANT: Runtime.enable timed out waiting for main frame executionContextCreated (sessionId: ${sessionId}). This may cause pages to not be visible immediately.`))
             resolve()
           }, 3000)
           emitter.on('cdp:event', handler)
