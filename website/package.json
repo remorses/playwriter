@@ -5,7 +5,6 @@
   "scripts": {
     "build": "react-router build",
     "dev": "react-router dev --port 8044",
-    "start": "node ./build/server/server.js",
     "typecheck": "react-router typegen && tsc"
   },
   "exports": {
@@ -17,6 +16,7 @@
     "@react-router/node": "^7.11.0",
     "@sentry/node": "^10.32.1",
     "@tailwindcss/typography": "^0.5.19",
+    "@vercel/react-router": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "isbot": "^5.1.32",
