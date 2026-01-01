@@ -273,7 +273,7 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
       if (!tab.id) throw new Error('Failed to create tab')
       logger.debug('Created tab:', tab.id, 'waiting for it to load...')
       await sleep(100)
-      const targetInfo = await attachTab(tab.id)
+      const { targetInfo } = await attachTab(tab.id)
       return { targetId: targetInfo.targetId } satisfies Protocol.Target.CreateTargetResponse
     }
 
@@ -378,7 +378,12 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
   }
 }
 
-async function attachTab(tabId: number): Promise<Protocol.Target.TargetInfo> {
+type AttachTabResult = {
+  targetInfo: Protocol.Target.TargetInfo
+  sessionId: string
+}
+
+async function attachTab(tabId: number, { skipAttachedEvent = false }: { skipAttachedEvent?: boolean } = {}): Promise<AttachTabResult> {
   const debuggee = { tabId }
 
   logger.debug('Attaching debugger to tab:', tabId)
@@ -415,20 +420,22 @@ async function attachTab(tabId: number): Promise<Protocol.Target.TargetInfo> {
     return { tabs: newTabs, connectionState: 'connected', errorText: undefined }
   })
 
-  sendMessage({
-    method: 'forwardCDPEvent',
-    params: {
-      method: 'Target.attachedToTarget',
+  if (!skipAttachedEvent) {
+    sendMessage({
+      method: 'forwardCDPEvent',
       params: {
-        sessionId,
-        targetInfo: { ...targetInfo, attached: true },
-        waitingForDebugger: false,
+        method: 'Target.attachedToTarget',
+        params: {
+          sessionId,
+          targetInfo: { ...targetInfo, attached: true },
+          waitingForDebugger: false,
+        },
       },
-    },
-  })
+    })
+  }
 
-  logger.debug('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId)
-  return targetInfo
+  logger.debug('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId, 'skipAttachedEvent:', skipAttachedEvent)
+  return { targetInfo, sessionId }
 }
 
 function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
@@ -630,14 +637,32 @@ async function ensureConnection(): Promise<void> {
     }
 
     // Handle createInitialTab - create a new tab when Playwright connects and no tabs exist
+    // We use skipAttachedEvent: true because the relay's Target.setAutoAttach handler will send
+    // Target.attachedToTarget for all targets in connectedTargets. If we also sent it here,
+    // Playwright would receive a duplicate.
+    //
+    // This differs from the normal flow (user clicks extension icon) where:
+    // 1. Extension attaches and sends Target.attachedToTarget to existing Playwright clients
+    // 2. New Playwright clients that connect later get targets via Target.setAutoAttach
+    //
+    // But with createInitialTab, the SAME client that triggered the create is waiting for
+    // Target.setAutoAttach - so we'd send the event twice to the same client.
     if (message.method === 'createInitialTab') {
       try {
         logger.debug('Creating initial tab for Playwright client')
         const tab = await chrome.tabs.create({ url: 'about:blank', active: false })
         if (tab.id) {
-          await connectTab(tab.id)
-          logger.debug('Initial tab created and connected:', tab.id)
-          sendMessage({ id: message.id, result: { success: true, tabId: tab.id } })
+          const { targetInfo, sessionId } = await attachTab(tab.id, { skipAttachedEvent: true })
+          logger.debug('Initial tab created and connected:', tab.id, 'sessionId:', sessionId)
+          sendMessage({
+            id: message.id,
+            result: {
+              success: true,
+              tabId: tab.id,
+              sessionId,
+              targetInfo,
+            }
+          })
         } else {
           throw new Error('Failed to create tab - no tab ID returned')
         }

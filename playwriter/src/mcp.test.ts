@@ -2924,12 +2924,10 @@ describe('Auto-enable Tests', () => {
         // Connect Playwright - this should trigger auto-create
         const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
 
-        // Wait for auto-create to complete (async onOpen may not be fully awaited)
-        await new Promise(r => setTimeout(r, 500))
-
         // Verify a page was auto-created
         const pages = browser.contexts()[0].pages()
         expect(pages.length).toBeGreaterThan(0)
+        expect(pages.length).toBe(1)
 
         const autoCreatedPage = pages[0]
         expect(autoCreatedPage.url()).toBe('about:blank')

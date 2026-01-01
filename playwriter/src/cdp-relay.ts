@@ -193,6 +193,40 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
     })
   }
 
+  // Auto-create initial tab when PLAYWRITER_AUTO_ENABLE is set and no targets exist.
+  // This allows Playwright to connect and immediately have a page to work with.
+  async function maybeAutoCreateInitialTab(): Promise<void> {
+    if (!process.env.PLAYWRITER_AUTO_ENABLE) {
+      return
+    }
+    if (!extensionWs) {
+      return
+    }
+    if (connectedTargets.size > 0) {
+      return
+    }
+
+    try {
+      logger?.log(chalk.blue('Auto-creating initial tab for Playwright client'))
+      const result = await sendToExtension({ method: 'createInitialTab', timeout: 10000 }) as {
+        success: boolean
+        tabId: number
+        sessionId: string
+        targetInfo: Protocol.Target.TargetInfo
+      }
+      if (result.success && result.sessionId && result.targetInfo) {
+        connectedTargets.set(result.sessionId, {
+          sessionId: result.sessionId,
+          targetId: result.targetInfo.targetId,
+          targetInfo: result.targetInfo
+        })
+        logger?.log(chalk.blue(`Auto-created tab, now have ${connectedTargets.size} targets`))
+      }
+    } catch (e) {
+      logger?.error('Failed to auto-create initial tab:', e)
+    }
+  }
+
   async function routeCdpCommand({ method, params, sessionId }: { method: string; params: any; sessionId?: string }) {
     switch (method) {
       case 'Browser.getVersion': {
@@ -209,10 +243,14 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
         return {}
       }
 
+      // Target.setAutoAttach is a CDP command Playwright sends on first connection.
+      // We use it as the hook to auto-create an initial tab. If Playwright changes
+      // its initialization sequence in the future, this could be moved to a different command.
       case 'Target.setAutoAttach': {
         if (sessionId) {
           break
         }
+        await maybeAutoCreateInitialTab()
         return {}
       }
 
@@ -371,30 +409,6 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
         // Add client first so it can receive Target.attachedToTarget events
         playwrightClients.set(clientId, { id: clientId, ws })
         logger?.log(chalk.green(`Playwright client connected: ${clientId} (${playwrightClients.size} total) (extension? ${!!extensionWs}) (${connectedTargets.size} pages)`))
-
-        // Auto-create initial tab if enabled and no targets exist
-        if (process.env.PLAYWRITER_AUTO_ENABLE && extensionWs && connectedTargets.size === 0) {
-          try {
-            logger?.log(chalk.blue('Auto-creating initial tab for Playwright client'))
-            await sendToExtension({ method: 'createInitialTab', timeout: 10000 })
-            // Wait for Target.attachedToTarget event to populate connectedTargets
-            await new Promise((resolve) => {
-              const checkTargets = () => {
-                if (connectedTargets.size > 0) {
-                  resolve(undefined)
-                } else {
-                  setTimeout(checkTargets, 50)
-                }
-              }
-              checkTargets()
-              // Timeout after 5 seconds
-              setTimeout(() => resolve(undefined), 5000)
-            })
-            logger?.log(chalk.blue(`Auto-created tab, now have ${connectedTargets.size} targets`))
-          } catch (e) {
-            logger?.error('Failed to auto-create initial tab:', e)
-          }
-        }
       },
 
       async onMessage(event, ws) {
