@@ -93,6 +93,30 @@ await browser.close()
 server.close()
 ```
 
+### Environment Variables
+
+#### `PLAYWRITER_AUTO_ENABLE`
+
+When set, the MCP will automatically create an initial tab when a Playwright client connects and no tabs are currently enabled. This is useful for fully automated workflows where you don't want to manually click the extension icon.
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["playwriter@latest"],
+      "env": {
+        "PLAYWRITER_AUTO_ENABLE": "1"
+      }
+    }
+  }
+}
+```
+
+With this setting, when your AI agent starts, it will immediately have a page to work with without requiring manual extension activation.
+
+**Note:** The auto-created tab starts at `about:blank`. Your agent can then navigate it to any URL.
+
 ## Comparison
 
 ### vs Playwright MCP

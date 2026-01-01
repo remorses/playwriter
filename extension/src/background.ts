@@ -560,6 +560,21 @@ function handleConnectionClose(reason: string, code: number): void {
 }
 
 async function ensureConnection(): Promise<void> {
+  // If already connecting, wait for that connection to complete instead of creating a new one
+  // This prevents "Extension Replaced" errors when multiple callers race to connect
+  if (ws?.readyState === WebSocket.CONNECTING) {
+    logger.debug('Connection already in progress, waiting for it to complete')
+    const existingWs = ws
+    await new Promise<void>((resolve) => {
+      const checkInterval = setInterval(() => {
+        if (existingWs.readyState !== WebSocket.CONNECTING) {
+          clearInterval(checkInterval)
+          resolve()
+        }
+      }, 100)
+    })
+  }
+
   if (ws?.readyState === WebSocket.OPEN) {
     logger.debug('Connection already exists, reusing')
     return
