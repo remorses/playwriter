@@ -93,6 +93,44 @@ await browser.close()
 server.close()
 ```
 
+### Visual Aria Ref Labels
+
+Playwriter includes Vimium-style visual labels that overlay interactive elements, making it easy for AI agents to identify and click elements from screenshots.
+
+```typescript
+import { showAriaRefLabels, hideAriaRefLabels } from 'playwriter'
+
+// Show labels on all visible interactive elements
+const { snapshot, labelCount } = await showAriaRefLabels({ page })
+
+// Take a screenshot - agent sees labeled elements
+const screenshot = await page.screenshot()
+
+// Agent can click using the aria-ref selector
+await page.locator('aria-ref=e5').click()
+
+// Remove labels when done
+await hideAriaRefLabels({ page })
+```
+
+**Features:**
+- **Role filtering** - Only shows labels for interactive elements (buttons, links, inputs, etc.)
+- **Visibility detection** - Skips elements covered by modals or overlays using `elementsFromPoint()`
+- **Overlap prevention** - Greedy algorithm skips labels that would overlap with already-placed ones
+- **Color-coded by type** - Warm color scheme helps distinguish element types at a glance
+
+**Color legend:**
+
+| Color | Element Types |
+|-------|---------------|
+| Yellow | Links |
+| Orange | Buttons |
+| Coral | Text inputs (textbox, combobox, searchbox) |
+| Pink | Checkboxes, radios, switches |
+| Peach | Sliders |
+| Salmon | Menu items |
+| Amber | Tabs, options |
+
 ### Environment Variables
 
 #### `PLAYWRITER_AUTO_ENABLE`
