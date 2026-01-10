@@ -26,6 +26,7 @@ export async function formatHtmlForPrompt({
     ]
 
     const attributesToKeep = [
+        // Standard descriptive attributes
         'label',
         'title',
         'alt',
@@ -37,10 +38,24 @@ export async function formatHtmlForPrompt({
         'type',
         'role',
         'target',
-        'vimium-label',
+        // Descriptive aria attributes (text content)
+        'aria-label',
+        'aria-placeholder',
+        'aria-valuetext',
+        'aria-roledescription',
+        // Useful aria state attributes
+        'aria-hidden',
+        'aria-expanded',
+        'aria-checked',
+        'aria-selected',
+        'aria-disabled',
+        'aria-pressed',
+        'aria-required',
+        'aria-current',
         // Test IDs (data-testid, data-test, data-cy are covered by data-* prefix)
         'testid',
         'test-id',
+        'vimium-label',
         // Conditionally added: 'style', 'class'
     ]
 
@@ -85,7 +100,6 @@ export async function formatHtmlForPrompt({
                     const newAttrs: typeof node.attrs = {}
                     for (const [attr, value] of Object.entries(node.attrs)) {
                         const shouldKeep =
-                            attr.startsWith('aria-') ||
                             attr.startsWith('data-') ||
                             attributesToKeep.includes(attr)
 
@@ -121,8 +135,63 @@ export async function formatHtmlForPrompt({
         }
     }
 
-    // Plugin to collapse 3+ consecutive empty elements of the same type
-    const collapseEmptyElementsPlugin = () => {
+    // Plugin to unwrap unnecessary nested wrapper elements
+    // e.g., <div><div><div><p>text</p></div></div></div> -> <div><p>text</p></div>
+    const unwrapNestedWrappersPlugin = () => {
+        return (tree) => {
+            const isWhitespaceOnly = (node) => {
+                return typeof node === 'string' && node.trim().length === 0
+            }
+
+            const hasNoAttrs = (node) => {
+                return !node.attrs || Object.keys(node.attrs).length === 0
+            }
+
+            const unwrapNode = (node) => {
+                if (typeof node === 'string') return node
+                if (!node.tag) return node
+
+                // First, recursively process children
+                if (node.content && Array.isArray(node.content)) {
+                    node.content = node.content.map(unwrapNode)
+                }
+
+                // Check if this node is an unnecessary wrapper:
+                // - has no attributes
+                // - has exactly one non-whitespace child that is an element
+                if (hasNoAttrs(node) && node.content && Array.isArray(node.content)) {
+                    const nonWhitespaceChildren = node.content.filter(c => !isWhitespaceOnly(c))
+
+                    if (nonWhitespaceChildren.length === 1) {
+                        const onlyChild = nonWhitespaceChildren[0]
+                        // If the only child is also an element (not text), unwrap
+                        if (typeof onlyChild !== 'string' && onlyChild.tag) {
+                            // Replace this node with its child
+                            return onlyChild
+                        }
+                    }
+                }
+
+                return node
+            }
+
+            // Apply multiple passes until stable (handles deeply nested wrappers)
+            let result = tree.map(unwrapNode)
+            let prevJson = ''
+            let currJson = JSON.stringify(result)
+            while (prevJson !== currJson) {
+                prevJson = currJson
+                result = result.map(unwrapNode)
+                currJson = JSON.stringify(result)
+            }
+
+            return result
+        }
+    }
+
+    // Plugin to remove empty elements (no attrs, no content)
+    // Runs repeatedly until no more empty elements exist
+    const removeEmptyElementsPlugin = () => {
         return (tree) => {
             const isEmptyElement = (node) => {
                 if (typeof node === 'string') return false
@@ -134,63 +203,39 @@ export async function formatHtmlForPrompt({
                 return !hasAttrs && !hasContent
             }
 
-            const isWhitespaceOnly = (node) => {
-                return typeof node === 'string' && node.trim().length === 0
-            }
-
-            const collapseConsecutive = (content) => {
+            const removeEmpty = (content) => {
                 if (!content || !Array.isArray(content)) return content
 
-                const result: typeof content = []
-                let i = 0
-                while (i < content.length) {
-                    const current = content[i]
-
-                    // Process children first (recursive)
-                    if (typeof current !== 'string' && current.content) {
-                        current.content = collapseConsecutive(current.content)
-                    }
-
-                    // Check for consecutive empty elements (skipping whitespace-only strings)
-                    if (isEmptyElement(current)) {
-                        const emptyElements = [current]
-                        let j = i + 1
-
-                        while (j < content.length) {
-                            if (isWhitespaceOnly(content[j])) {
-                                j++
-                                continue
-                            }
-                            if (isEmptyElement(content[j]) && content[j].tag === current.tag) {
-                                emptyElements.push(content[j])
-                                j++
-                                continue
-                            }
-                            break
+                return content
+                    .map(node => {
+                        if (typeof node === 'string') return node
+                        if (node.content) {
+                            node.content = removeEmpty(node.content)
                         }
-
-                        if (emptyElements.length >= 3) {
-                            // Collapse: keep only one element
-                            result.push(current)
-                            i = j
-                            continue
-                        }
-                    }
-
-                    result.push(current)
-                    i++
-                }
-                return result
+                        return node
+                    })
+                    .filter(node => !isEmptyElement(node))
             }
 
-            return collapseConsecutive(tree)
+            // Apply multiple passes until stable
+            let result = removeEmpty(tree)
+            let prevJson = ''
+            let currJson = JSON.stringify(result)
+            while (prevJson !== currJson) {
+                prevJson = currJson
+                result = removeEmpty(result)
+                currJson = JSON.stringify(result)
+            }
+
+            return result
         }
     }
 
     // Process HTML
     const processor = posthtml()
         .use(removeTagsAndAttrsPlugin())
-        .use(collapseEmptyElementsPlugin())
+        .use(removeEmptyElementsPlugin())
+        .use(unwrapNestedWrappersPlugin())
         .use(beautify({
             rules: {
                 indent: 1,          // 1-space indent

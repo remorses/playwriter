@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { readFileSync } from 'fs'
 import { formatHtmlForPrompt } from './htmlrewrite.js'
 
 test('formatHtmlForPrompt', async () => {
@@ -16351,48 +16352,39 @@ test('formatHtmlForPrompt', async () => {
   )
 })
 
-test('collapses 3+ consecutive empty elements of same type', async () => {
+test('removes empty elements', async () => {
   const html = `
     <div>
-      <span></span>
-      <span></span>
       <span></span>
       <span></span>
       <p>content</p>
       <div></div>
-      <div></div>
     </div>
   `
   const result = await formatHtmlForPrompt({ html })
 
-  // Should collapse 4 spans into 1, but keep 2 divs (not >= 3)
+  // All empty elements should be removed
   expect(result).toMatchInlineSnapshot(`
-    "<div>
-     <span></span>
-     <p>content</p>
-     <div></div>
-     <div></div>
-    </div>
+    "<p>content</p>
     "
   `)
 })
 
-test('does not collapse empty elements with attributes', async () => {
+test('keeps empty elements that have attributes', async () => {
   const html = `
     <div>
       <span data-framer-name="a"></span>
       <span data-framer-name="b"></span>
-      <span data-framer-name="c"></span>
+      <span></span>
     </div>
   `
   const result = await formatHtmlForPrompt({ html })
 
-  // All 3 should remain because they have attributes
+  // Empty elements with attributes should remain, empty without attrs removed
   expect(result).toMatchInlineSnapshot(`
     "<div>
      <span data-framer-name="a"></span>
      <span data-framer-name="b"></span>
-     <span data-framer-name="c"></span>
     </div>
     "
   `)
@@ -16480,6 +16472,53 @@ test('always keeps test ID attributes', async () => {
     "<div data-testid="container" data-cy="main">
      <button testid="btn" test-id="submit" data-test="action">Click</button>
     </div>
+    "
+  `)
+})
+
+test('processes x.com.html with size savings', async () => {
+  const html = readFileSync(new URL('./assets/x.com.html', import.meta.url), 'utf-8')
+
+  const result = await formatHtmlForPrompt({ html })
+  const resultWithStyles = await formatHtmlForPrompt({ html, keepStyles: true })
+
+  const originalSize = html.length
+  const originalTokens = Math.ceil(originalSize / 4)
+
+  const processedSize = result.length
+  const processedTokens = Math.ceil(processedSize / 4)
+  const savings = originalSize - processedSize
+  const savingsPercent = ((savings / originalSize) * 100).toFixed(1)
+
+  const withStylesSize = resultWithStyles.length
+  const withStylesTokens = Math.ceil(withStylesSize / 4)
+  const withStylesSavings = originalSize - withStylesSize
+  const withStylesPercent = ((withStylesSavings / originalSize) * 100).toFixed(1)
+
+  console.log(`\n📊 x.com.html processing stats:`)
+  console.log(`   Original:     ${originalSize.toLocaleString()} chars (${originalTokens.toLocaleString()} tokens)`)
+  console.log(`   Without styles: ${processedSize.toLocaleString()} chars (${processedTokens.toLocaleString()} tokens) - ${savingsPercent}% savings`)
+  console.log(`   With styles:    ${withStylesSize.toLocaleString()} chars (${withStylesTokens.toLocaleString()} tokens) - ${withStylesPercent}% savings`)
+
+  await expect(result).toMatchFileSnapshot('./__snapshots__/x.com.processed.html')
+  await expect(resultWithStyles).toMatchFileSnapshot('./__snapshots__/x.com.processed.withStyles.html')
+})
+
+test('unwraps unnecessary nested wrapper divs', async () => {
+  const html = `
+    <div>
+      <div>
+        <div>
+          <p>content</p>
+        </div>
+      </div>
+    </div>
+  `
+  const result = await formatHtmlForPrompt({ html })
+
+  // Should unwrap to a single div containing the p
+  expect(result).toMatchInlineSnapshot(`
+    "<p>content</p>
     "
   `)
 })
