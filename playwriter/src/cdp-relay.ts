@@ -363,6 +363,13 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
   const app = new Hono()
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
 
+  // Helper to build WebSocket URL from request host
+  const getCdpWsUrl = (reqHost: string | undefined) => {
+    const hostHeader = reqHost || `${host}:${port}`
+    const wsUrl = `ws://${hostHeader}/cdp`
+    return token ? `${wsUrl}?token=${token}` : wsUrl
+  }
+
   app.get('/', (c) => {
     return c.text('OK')
   })
@@ -374,6 +381,82 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
   app.get('/extension/status', (c) => {
     return c.json({ connected: extensionWs !== null })
   })
+
+  // CDP Discovery Endpoints - Standard Chrome DevTools Protocol HTTP API
+  // These allow tools like Playwright to discover the WebSocket URL automatically
+  // Spec: https://chromium.googlesource.com/chromium/src/+/main/content/browser/devtools/devtools_http_handler.cc
+
+  app
+    .on(['GET', 'PUT'], '/json/version', (c) => {
+      return c.json({
+        'Browser': `Playwriter/${VERSION}`,
+        'Protocol-Version': '1.3',
+        'webSocketDebuggerUrl': getCdpWsUrl(c.req.header('host'))
+      })
+    })
+    .on(['GET', 'PUT'], '/json/version/', (c) => {
+      return c.json({
+        'Browser': `Playwriter/${VERSION}`,
+        'Protocol-Version': '1.3',
+        'webSocketDebuggerUrl': getCdpWsUrl(c.req.header('host'))
+      })
+    })
+    .on(['GET', 'PUT'], '/json/list', (c) => {
+      const wsUrl = getCdpWsUrl(c.req.header('host'))
+      return c.json(
+        Array.from(connectedTargets.values()).map(t => ({
+          id: t.targetId,
+          type: t.targetInfo.type,
+          title: t.targetInfo.title,
+          description: t.targetInfo.title,
+          url: t.targetInfo.url,
+          webSocketDebuggerUrl: wsUrl,
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
+        }))
+      )
+    })
+    .on(['GET', 'PUT'], '/json/list/', (c) => {
+      const wsUrl = getCdpWsUrl(c.req.header('host'))
+      return c.json(
+        Array.from(connectedTargets.values()).map(t => ({
+          id: t.targetId,
+          type: t.targetInfo.type,
+          title: t.targetInfo.title,
+          description: t.targetInfo.title,
+          url: t.targetInfo.url,
+          webSocketDebuggerUrl: wsUrl,
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
+        }))
+      )
+    })
+    .on(['GET', 'PUT'], '/json', (c) => {
+      const wsUrl = getCdpWsUrl(c.req.header('host'))
+      return c.json(
+        Array.from(connectedTargets.values()).map(t => ({
+          id: t.targetId,
+          type: t.targetInfo.type,
+          title: t.targetInfo.title,
+          description: t.targetInfo.title,
+          url: t.targetInfo.url,
+          webSocketDebuggerUrl: wsUrl,
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
+        }))
+      )
+    })
+    .on(['GET', 'PUT'], '/json/', (c) => {
+      const wsUrl = getCdpWsUrl(c.req.header('host'))
+      return c.json(
+        Array.from(connectedTargets.values()).map(t => ({
+          id: t.targetId,
+          type: t.targetInfo.type,
+          title: t.targetInfo.title,
+          description: t.targetInfo.title,
+          url: t.targetInfo.url,
+          webSocketDebuggerUrl: wsUrl,
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
+        }))
+      )
+    })
 
   app.post('/mcp-log', async (c) => {
     try {

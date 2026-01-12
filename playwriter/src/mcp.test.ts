@@ -2527,6 +2527,65 @@ describe('MCP Server Tests', () => {
         await page.close()
     }, 60000)
 
+    it('should expose CDP discovery endpoints /json/version and /json/list', async () => {
+        const browserContext = getBrowserContext()
+        const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+        // Enable extension on a page
+        const page = await browserContext.newPage()
+        await page.goto('https://example.com')
+        await page.bringToFront()
+
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+        await new Promise(r => setTimeout(r, 200))
+
+        // Test /json/version
+        const versionRes = await fetch(`http://127.0.0.1:${TEST_PORT}/json/version`)
+        expect(versionRes.status).toBe(200)
+        const versionJson = await versionRes.json() as { webSocketDebuggerUrl: string }
+        expect(versionJson).toMatchObject({
+            'Browser': expect.stringContaining('Playwriter/'),
+            'Protocol-Version': '1.3',
+            'webSocketDebuggerUrl': expect.stringContaining('ws://'),
+        })
+        expect(versionJson.webSocketDebuggerUrl).toContain(`127.0.0.1:${TEST_PORT}/cdp`)
+
+        // Test /json/version/ (trailing slash - Playwright uses this)
+        const versionSlashRes = await fetch(`http://127.0.0.1:${TEST_PORT}/json/version/`)
+        expect(versionSlashRes.status).toBe(200)
+
+        // Test /json/list
+        const listRes = await fetch(`http://127.0.0.1:${TEST_PORT}/json/list`)
+        expect(listRes.status).toBe(200)
+        const listJson = await listRes.json() as Array<{ url?: string }>
+        expect(Array.isArray(listJson)).toBe(true)
+        expect(listJson.length).toBeGreaterThan(0)
+        
+        // Find the example.com page (there may be other pages like about:blank)
+        const examplePage = listJson.find((t) => t.url?.includes('example.com'))
+        expect(examplePage).toBeDefined()
+        expect(examplePage).toMatchObject({
+            id: expect.any(String),
+            type: 'page',
+            url: expect.stringContaining('example.com'),
+            webSocketDebuggerUrl: expect.stringContaining('ws://'),
+        })
+
+        // Test /json (alias for /json/list)
+        const jsonRes = await fetch(`http://127.0.0.1:${TEST_PORT}/json`)
+        expect(jsonRes.status).toBe(200)
+        const jsonData = await jsonRes.json()
+        expect(Array.isArray(jsonData)).toBe(true)
+
+        // Test PUT method (Chrome 66+ prefers PUT)
+        const putRes = await fetch(`http://127.0.0.1:${TEST_PORT}/json/version`, { method: 'PUT' })
+        expect(putRes.status).toBe(200)
+
+        await page.close()
+    }, 60000)
+
 })
 
 
@@ -3459,6 +3518,76 @@ describe('CDP Session Tests', () => {
 
         console.log('Component name from fiber:', componentName)
         console.log('Source location (null for UMD React, works on local dev servers with JSX transform):', source)
+
+        await browser.close()
+        await page.close()
+    }, 60000)
+})
+
+describe('Service Worker Target Tests', () => {
+    let testCtx: TestContext | null = null
+
+    beforeAll(async () => {
+        testCtx = await setupTestContext({ tempDirPrefix: 'pw-sw-test-' })
+    }, 600000)
+
+    afterAll(async () => {
+        await cleanupTestContext(testCtx)
+        testCtx = null
+    })
+
+    const getBrowserContext = () => {
+        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+        return testCtx.browserContext
+    }
+
+    it('should not disconnect when page has service worker (issue #14)', async () => {
+        // This test reproduces issue #14: pages with service workers cause disconnection loops.
+        // The problem is that Target.setAutoAttach attaches to service workers, and when
+        // Playwright tries to enable Network/Runtime on the SW session, the extension can't
+        // find a matching tab, causing errors and disconnection.
+
+        const browserContext = getBrowserContext()
+        const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+        // Discord has a service worker - navigate there
+        const page = await browserContext.newPage()
+        await page.goto('https://discord.com/login', { waitUntil: 'load' })
+        await page.bringToFront()
+
+        // Attach extension to the page
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+        await new Promise(r => setTimeout(r, 500))
+
+        // Connect via Playwright CDP - this triggers Target.setAutoAttach which
+        // will also attach to the service worker
+        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+
+        // Track disconnection events
+        let disconnected = false
+        browser.on('disconnected', () => {
+            disconnected = true
+            console.log('Browser disconnected!')
+        })
+
+        // Wait for potential disconnection - issue says ~10s loop
+        // We wait 15 seconds to be sure
+        console.log('Waiting 15 seconds to check for disconnection loop...')
+        await new Promise(r => setTimeout(r, 15000))
+
+        // Should still be connected - this is what we're testing
+        expect(disconnected).toBe(false)
+        expect(browser.isConnected()).toBe(true)
+
+        // Verify we can still interact with the page
+        const pages = browser.contexts()[0].pages()
+        const discordPage = pages.find(p => p.url().includes('discord.com'))
+        expect(discordPage).toBeDefined()
+
+        const url = await discordPage!.evaluate(() => window.location.href)
+        expect(url).toContain('discord.com')
 
         await browser.close()
         await page.close()

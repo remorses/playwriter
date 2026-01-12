@@ -90,6 +90,25 @@ await browser.close()
 server.close()
 ```
 
+### Standard CDP Connection
+
+Start the relay server, then connect with just the HTTP URL:
+
+```bash
+npx -y playwriter serve --host 127.0.0.1
+```
+
+Or programmatically:
+
+```typescript
+import { startPlayWriterCDPRelayServer } from 'playwriter'
+
+await startPlayWriterCDPRelayServer()
+const browser = await chromium.connectOverCDP('http://127.0.0.1:19988')
+```
+
+This works with any CDP-compatible tool - no special configuration needed.
+
 ### Visual Aria Ref Labels
 
 Playwriter includes Vimium-style visual labels that overlay interactive elements, making it easy for AI agents to identify and click elements from screenshots. The `screenshotWithAccessibilityLabels` function is available in the MCP context.

@@ -8,6 +8,14 @@
   - Non-contiguous sections are separated by `---`
   - Provides better context for understanding search results
 
+- **CDP discovery endpoints**: Added standard Chrome DevTools Protocol HTTP discovery endpoints
+  - `/json/version` - Returns browser info and `webSocketDebuggerUrl`
+  - `/json/list` - Returns list of debuggable targets
+  - `/json` - Alias for `/json/list`
+  - Supports both GET and PUT methods (Chrome 66+ compatibility)
+  - Handles trailing slash variants (Playwright compatibility)
+  - Allows `chromium.connectOverCDP('http://127.0.0.1:19988')` without needing to call `getCdpUrl` first
+
 ## 0.0.43
 
 ### Features
