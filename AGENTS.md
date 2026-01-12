@@ -1,4 +1,4 @@
-this codebase has the codebase for playwriter
+this is the playwriter codebase
 
 the extension uses chrome.debugger to manage the user browser
 
@@ -12,7 +12,7 @@ breaking changes to the WS protocol MUST never be made. publishing the extension
 ## architecture
 
 - user installs the extension in chrome. we assume there is only one chrome window for now, the first opened. 
-- extension connects to a websocket server. on 19988. if this server is still not open, it retries connecting in a loop
+- extension connects to a websocket server on port 19988. if this server is not yet open, it retries connecting in a loop
 - the MCP spawns the ws server if not already listening on 19988, in background. the mcp then connects to this same server with a playwright client
 - the server exposes /cdp/client-id which is used by playwright clients to communicate with the extension
 - the extension instead connects to /extension which is used to receive cdp commands and send responses and cdp events.
@@ -38,12 +38,12 @@ playwriter/src/resource.md is for more generic knowledge about playwright that t
 
 ## CDP docs
 
-here are some commands you can run to fetch does about CDP various domains (events and commands namespaces)
+here are some commands you can run to fetch docs about CDP domains (events and commands namespaces)
 
 ```
 curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Target.pdl # manage “targets”: pages, iframes, workers, etc., and attach/detach sessions
 curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Browser.pdl # top-level browser control: version info, window management, permission settings, etc.
-curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Page.pdl – navigate, reload, screenshot, PDF, frame management, dialogs, and page lifecycle events.
+curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Page.pdl # navigate, reload, screenshot, PDF, frame management, dialogs, and page lifecycle events.
 curl -sL https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Emulation.pdl # emulate device metrics, viewport, timezone, locale, geolocation, media type, CPU, etc.
 ```
 
@@ -65,7 +65,7 @@ remember that every time the extension is activated in a tab that tab gets added
 
 to debug server or extension issues you can also inspect the file @playwriter/relay-server.log to see both extension and server logs. with all cdp events sent. to see if there are events missing or something broken. this file is recreated every time the server is started and appended in real time. use rg to only read relevant lines and parts because it can get quite long
 
-IMPORTANT: `pnpm test` will take about 30 seconds so set a timeout of at least 3600ms when running the pnpm test bash command
+IMPORTANT: `pnpm test` will take about 30 seconds so set a timeout of at least 60000ms when running the pnpm test bash command
 
 ## changelogs
 
@@ -107,9 +107,9 @@ if you find code that was not there since the last time you read the file it mea
 
 IMPORTANT: NEVER commit your changes unless clearly and specifically asked to!
 
-## opening me files in zed to show me a specific portion of code
+## opening files in zed
 
-you can open files when i ask me "open in zed the line where ..." using the command `zed path/to/file:line`
+you can open files when i ask "open in zed the line where ..." using the command `zed path/to/file:line`
 
 # typescript
 
@@ -207,7 +207,7 @@ const users: User[] = [];
 
 remember to always add the explicit type to avoid unexpected type inference.
 
-- when using nodejs APIs like fs always import the module and not the named exports. I prefer hacing nodejs APIs accessed on the module namspace like fs, os, path, etc.
+- when using nodejs APIs like fs always import the module and not the named exports. i prefer having nodejs APIs accessed on the module namespace like fs, os, path, etc.
 
 DO `import fs from 'fs'; fs.writeFileSync(...)`
 DO NOT `import { writeFileSync } from 'fs';`
@@ -374,7 +374,6 @@ sometimes tests work directly on database data, using prisma. to run these tests
 
 never write tests yourself that call prisma or interact with database or emails. for these, ask the user to write them for you.
 
-changelogs.md
 # writing docs
 
 when generating a .md or .mdx file to document things, always add a frontmatter with title and description. also add a prompt field with the exact prompt used to generate the doc. use @ to reference files and urls and provide any context necessary to be able to recreate this file from scratch using a model. if you used urls also reference them. reference all files you had to read to create the doc. use yaml | syntax to add this prompt and never go over the column width of 80
@@ -414,7 +413,7 @@ Error: Request timeout at /api/auth/login
 
 ```bash
 gh run list # lists latest actions runs
-gh run watch <id> --exit-status # if workflow is in progress, wait for the run to complete. the actions run is finished when this command exits. Set a tiemout of at least 10 minutes when running this command
+gh run watch <id> --exit-status # if workflow is in progress, wait for the run to complete. the actions run is finished when this command exits. set a timeout of at least 10 minutes when running this command
 gh pr checks --watch --fail-fast # watch for current branch pr ci checks to finish
 gh run view <id> --log-failed | tail -n 300 # read the logs for failed steps in the actions run
 gh run view <id> --log | tail -n 300 # read all logs for a github actions run
@@ -495,4 +494,3 @@ const jsonSchema = toJSONSchema(mySchema, {
 });
 ```
 
-github.md
