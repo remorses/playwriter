@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/marketplace-schema.json",
+  "name": "playwriter",
+  "displayName": "Playwriter",
+  "description": "Browser automation MCP via Chrome extension. Control your browser with full Playwright API - 80% less context window than alternatives.",
+  "publisher": "remorses",
+  "repository": "https://github.com/remorses/playwriter",
+  "license": "MIT",
+  "plugins": [
+    {
+      "name": "playwriter",
+      "displayName": "Playwriter",
+      "description": "Control Chrome tabs with full Playwright API via extension. Features accessibility snapshots, visual labels, debugger access, and more.",
+      "mcpServers": {
+        "playwriter": {
+          "command": "npx",
+          "args": ["playwriter@latest"]
+        }
+      },
+      "userConfig": {
+        "host": {
+          "type": "string",
+          "description": "Remote host for the Playwriter server (e.g., host.docker.internal for devcontainers)",
+          "required": false
+        },
+        "token": {
+          "type": "string",
+          "description": "Authentication token for remote connections",
+          "required": false
+        },
+        "autoEnable": {
+          "type": "boolean",
+          "description": "Automatically create an initial tab when connecting",
+          "required": false
+        }
+      }
+    }
+  ]
+}
