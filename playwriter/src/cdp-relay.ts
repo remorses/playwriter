@@ -16,7 +16,45 @@ type ConnectedTarget = {
   targetInfo: Protocol.Target.TargetInfo
 }
 
+// Our extension IDs - allow attaching to our own extension pages for debugging
+const OUR_EXTENSION_IDS = [
+  'jfeammnjpkecdekppnclgkkffahnhfhe', // Production extension (Chrome Web Store)
+  'elnnakgjclnapgflmidlpobefkdmapdm', // Dev extension (loaded unpacked)
+]
 
+/**
+ * Checks if a target should be filtered out (not exposed to Playwright).
+ * Filters extension pages, service workers, and other restricted targets,
+ * but allows our own extension pages for debugging purposes.
+ */
+function isRestrictedTarget(targetInfo: Protocol.Target.TargetInfo): boolean {
+  const { url, type } = targetInfo
+
+  // Filter by type - only allow 'page' type through
+  // Service workers, web workers, iframes, etc. cause issues when Playwright tries to initialize them
+  // Iframes are accessible via page.frameLocator() on the parent page
+  if (type !== 'page') {
+    return true
+  }
+
+  // Filter by URL - block extension and chrome internal pages
+  if (!url) {
+    return false
+  }
+
+  // Allow our own extension pages
+  if (url.startsWith('chrome-extension://')) {
+    const extensionId = url.replace('chrome-extension://', '').split('/')[0]
+    if (OUR_EXTENSION_IDS.includes(extensionId)) {
+      return false
+    }
+    return true
+  }
+
+  // Block other restricted URLs
+  const blockedPrefixes = ['chrome://', 'devtools://', 'edge://']
+  return blockedPrefixes.some((prefix) => url.startsWith(prefix))
+}
 
 type PlaywrightClient = {
   id: string
@@ -298,10 +336,12 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
 
       case 'Target.getTargets': {
         return {
-          targetInfos: Array.from(connectedTargets.values()).map((t) => ({
-            ...t.targetInfo,
-            attached: true
-          }))
+          targetInfos: Array.from(connectedTargets.values())
+            .filter((t) => !isRestrictedTarget(t.targetInfo))
+            .map((t) => ({
+              ...t.targetInfo,
+              attached: true
+            }))
         }
       }
 
@@ -472,11 +512,6 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
   // Browsers always send Origin header for WebSocket connections, but Node.js clients don't.
   // We only allow our specific extension IDs to prevent malicious websites or extensions
   // from connecting to the local WebSocket server.
-  const ALLOWED_EXTENSION_IDS = [
-    'jfeammnjpkecdekppnclgkkffahnhfhe', // Production extension (Chrome Web Store)
-    'elnnakgjclnapgflmidlpobefkdmapdm', // Dev extension (loaded unpacked)
-  ]
-
   app.get('/cdp/:clientId?', (c, next) => {
     const origin = c.req.header('origin')
     
@@ -484,7 +519,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
     if (origin) {
       if (origin.startsWith('chrome-extension://')) {
         const extensionId = origin.replace('chrome-extension://', '')
-        if (!ALLOWED_EXTENSION_IDS.includes(extensionId)) {
+        if (!OUR_EXTENSION_IDS.includes(extensionId)) {
           logger?.log(chalk.red(`Rejecting /cdp WebSocket from unknown extension: ${extensionId}`))
           return c.text('Forbidden', 403)
         }
@@ -556,6 +591,10 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
 
           if (method === 'Target.setAutoAttach' && !sessionId) {
             for (const target of connectedTargets.values()) {
+              // Skip restricted targets (extensions, chrome:// URLs, non-page types)
+              if (isRestrictedTarget(target.targetInfo)) {
+                continue
+              }
               const attachedPayload = {
                 method: 'Target.attachedToTarget',
                 params: {
@@ -581,6 +620,10 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
 
           if (method === 'Target.setDiscoverTargets' && (params as any)?.discover) {
             for (const target of connectedTargets.values()) {
+              // Skip restricted targets (extensions, chrome:// URLs, non-page types)
+              if (isRestrictedTarget(target.targetInfo)) {
+                continue
+              }
               const targetCreatedPayload = {
                 method: 'Target.targetCreated',
                 params: {
@@ -678,7 +721,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
     }
     
     const extensionId = origin.replace('chrome-extension://', '')
-    if (!ALLOWED_EXTENSION_IDS.includes(extensionId)) {
+    if (!OUR_EXTENSION_IDS.includes(extensionId)) {
       logger?.log(chalk.red(`Rejecting /extension WebSocket from unknown extension: ${extensionId}`))
       return c.text('Forbidden', 403)
     }
@@ -761,13 +804,12 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
 
           if (method === 'Target.attachedToTarget') {
             const targetParams = params as Protocol.Target.AttachedToTargetEvent
-            const targetType = targetParams.targetInfo.type
 
-            // Filter out non-page targets (service workers, web workers, etc.)
+            // Filter out restricted targets (non-page types, extension pages, chrome:// URLs, etc.)
             // These targets can't be properly controlled through chrome.debugger API
             // and cause issues when Playwright tries to initialize them (issue #14)
-            if (targetType !== 'page') {
-              logger?.log(chalk.gray(`[Server] Ignoring non-page target: ${targetType} (${targetParams.targetInfo.url})`))
+            if (isRestrictedTarget(targetParams.targetInfo)) {
+              logger?.log(chalk.gray(`[Server] Ignoring restricted target: ${targetParams.targetInfo.type} (${targetParams.targetInfo.url})`))
               return
             }
 
