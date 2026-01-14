@@ -4,7 +4,7 @@
 
 ## Summary
 
-**Comprehensive Compatibility: 93.8%** (121/129 tests passing)
+**Comprehensive Compatibility: 96.1%** (124/129 tests passing)
 
 All major Playwright APIs work correctly with playwriter's CDP relay when using Node.js (`npx tsx`).
 
@@ -13,10 +13,10 @@ All major Playwright APIs work correctly with playwriter's CDP relay when using 
 | Metric | Value |
 |--------|-------|
 | Total Tests | 130 |
-| Passed | 121 ✅ |
-| Failed | 8 ❌ |
+| Passed | 124 ✅ |
+| Failed | 5 ❌ |
 | Skipped | 1 ⏭️ |
-| Pass Rate | **93.8%** |
+| Pass Rate | **96.1%** |
 
 ---
 
@@ -94,8 +94,8 @@ All major Playwright APIs work correctly with playwriter's CDP relay when using 
 - `page.viewportSize()` returns viewport
 - `page.setViewportSize()` sets viewport
 
-### Section 13: Accessibility (1/1 ✅)
-- `page.accessibility.snapshot()` returns tree
+### Section 13: Accessibility (0/1 ❌)
+- `page.accessibility.snapshot()` - **FAILS** (undefined property)
 
 ### Section 14: Advanced Selectors (6/6 ✅)
 - `getByRole()` finds elements by role
@@ -182,12 +182,12 @@ All major Playwright APIs work correctly with playwriter's CDP relay when using 
 - `context.newCDPSession()` - **FAILS** (no tab found)
 - CDP session `send()` - works when session available
 
-### Section 10: Storage (2/5 - 3 ❌)
+### Section 10: Storage (5/5 ✅)
 - localStorage via `page.evaluate()` ✅
 - sessionStorage via `page.evaluate()` ✅
-- `context.cookies()` - **FAILS** (browser-level access)
-- `context.addCookies()` - **FAILS**
-- `context.clearCookies()` - **FAILS**
+- `context.cookies()` - **WORKS** (via page-level workaround) ✅
+- `context.addCookies()` - **WORKS** (via page-level workaround) ✅
+- `context.clearCookies()` - **WORKS** (via page-level workaround) ✅
 
 ### Section 11: Screenshot Variations (5/5 ✅)
 - clip, scale, omitBackground options
@@ -197,6 +197,16 @@ All major Playwright APIs work correctly with playwriter's CDP relay when using 
 ---
 
 ## Important Notes
+
+### CDP Cookie Workaround
+
+The relay server intercepts `Storage.*` cookie commands and redirects them to `Network.*` commands, enabling support for:
+- `context.cookies()`
+- `context.addCookies()`
+- `context.clearCookies()`
+- `context.storageState()`
+
+This workaround operates at the **page level**, meaning it only accesses cookies relevant to the current page context.
 
 ### page.evaluate() with Multiple Arguments
 

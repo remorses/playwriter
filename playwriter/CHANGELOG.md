@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.48
+
+### Features
+
+- **CDP Cookie Workaround**: Implemented transparent workaround for Playwright cookie methods
+  - `context.cookies()`, `context.addCookies()`, `context.clearCookies()`, `context.storageState()` now work correctly
+  - Intercepts browser-level `Storage.*` CDP commands and redirects to page-level `Network.*` commands
+  - Fixes "Protocol error (Storage.getCookies): No tab found" errors
+
 ## 0.0.47
 
 ### Features

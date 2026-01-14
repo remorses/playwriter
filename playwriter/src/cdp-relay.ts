@@ -194,6 +194,12 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
     })
   }
 
+  function getAnyActiveSessionId(): string | undefined {
+    // Return first available session from connectedTargets
+    const firstTarget = connectedTargets.values().next().value
+    return firstTarget?.sessionId
+  }
+
   // Auto-create initial tab when PLAYWRITER_AUTO_ENABLE is set and no targets exist.
   // This allows Playwright to connect and immediately have a page to work with.
   async function maybeAutoCreateInitialTab(): Promise<void> {
@@ -303,6 +309,75 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
             attached: true
           }))
         }
+      }
+
+      case 'Storage.getCookies': {
+        logger?.log(chalk.yellow(`[Cookie Workaround] Redirecting ${method} → Network.getCookies`))
+        const targetSessionId = sessionId || getAnyActiveSessionId()
+        if (!targetSessionId) {
+          throw new Error('No pages available for cookie operation. Click the playwriter extension icon on a tab first.')
+        }
+        return await sendToExtension({
+          method: 'forwardCDPCommand',
+          params: {
+            sessionId: targetSessionId,
+            method: 'Network.getCookies',
+            params: {}
+          }
+        })
+      }
+
+      case 'Storage.setCookies': {
+        logger?.log(chalk.yellow(`[Cookie Workaround] Redirecting ${method} → Network.setCookies`))
+        const targetSessionId = sessionId || getAnyActiveSessionId()
+        if (!targetSessionId) {
+          throw new Error('No pages available for cookie operation. Click the playwriter extension icon on a tab first.')
+        }
+        return await sendToExtension({
+          method: 'forwardCDPCommand',
+          params: {
+            sessionId: targetSessionId,
+            method: 'Network.setCookies',
+            params: { cookies: params?.cookies || [] }
+          }
+        })
+      }
+
+      case 'Storage.clearCookies': {
+        logger?.log(chalk.yellow(`[Cookie Workaround] Redirecting ${method} → Network.deleteCookies`))
+        const targetSessionId = sessionId || getAnyActiveSessionId()
+        if (!targetSessionId) {
+          throw new Error('No pages available for cookie operation. Click the playwriter extension icon on a tab first.')
+        }
+
+        // Get all cookies first
+        const result = await sendToExtension({
+          method: 'forwardCDPCommand',
+          params: {
+            sessionId: targetSessionId,
+            method: 'Network.getCookies',
+            params: {}
+          }
+        }) as { cookies?: Array<{ name: string; domain: string; path: string }> }
+
+        // Delete each cookie
+        const cookies = result?.cookies || []
+        for (const cookie of cookies) {
+          await sendToExtension({
+            method: 'forwardCDPCommand',
+            params: {
+              sessionId: targetSessionId,
+              method: 'Network.deleteCookies',
+              params: {
+                name: cookie.name,
+                domain: cookie.domain,
+                path: cookie.path
+              }
+            }
+          })
+        }
+
+        return {}
       }
 
       case 'Target.createTarget': {

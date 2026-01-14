@@ -116,14 +116,7 @@ export async function ensurePersistentRelay(options?: {
     path.resolve(__dirname, '../dist/start-relay-server.js'),
   ]
 
-  const existingJsPath = possibleJsPaths.find((p) => {
-    try {
-      require.resolve(p)
-      return true
-    } catch {
-      return false
-    }
-  })
+  const existingJsPath = possibleJsPaths.find((p) => fs.existsSync(p))
 
   if (existingJsPath) {
     // Use node to run compiled .js
