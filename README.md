@@ -16,6 +16,21 @@
     <br/>
 </div>
 
+## HsnSaboor Fork Improvements
+
+This fork includes significant improvements to the **Separate Window Mode** and bug fixes:
+
+- **True Window Separation**: In separate window mode (`PLAYWRITER_SEPARATE_WINDOW=1`), connected tabs are now *moved* to a dedicated worker window instead of just being grouped. This keeps your main browsing window clean.
+- **Cognitive Ease**: The worker window is clearly identified with a green "playwriter" tab group, making it easy to distinguish from your personal windows.
+- **Smart Window Management**: 
+  - Prevents your main window from closing when moving the last tab (creates a placeholder tab automatically).
+  - Cleanly handles worker window creation without leaving extra "New Tab" pages.
+- **Bug Fixes**:
+  - Fixed environment variables not passing correctly to relay server.
+  - Fixed "No tab with id" race conditions during tab grouping.
+  - Fixed unhandled promise rejections in background script.
+  - Added robust tab existence checks before operations.
+
 ## Installation
 
 1. **Install the Chrome Extension**
