@@ -195,6 +195,9 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
   }
 
   function getAnyActiveSessionId(): string | undefined {
+    // TODO: Ideally we should map browserContextId to specific sessions if possible,
+    // but since we lack that mapping, we default to the most recently active or first session.
+    // For single-page automation this is fine.
     // Return first available session from connectedTargets
     const firstTarget = connectedTargets.values().next().value
     return firstTarget?.sessionId
@@ -363,18 +366,22 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
         // Delete each cookie
         const cookies = result?.cookies || []
         for (const cookie of cookies) {
-          await sendToExtension({
-            method: 'forwardCDPCommand',
-            params: {
-              sessionId: targetSessionId,
-              method: 'Network.deleteCookies',
+          try {
+            await sendToExtension({
+              method: 'forwardCDPCommand',
               params: {
-                name: cookie.name,
-                domain: cookie.domain,
-                path: cookie.path
+                sessionId: targetSessionId,
+                method: 'Network.deleteCookies',
+                params: {
+                  name: cookie.name,
+                  domain: cookie.domain,
+                  path: cookie.path
+                }
               }
-            }
-          })
+            })
+          } catch (e) {
+            logger?.error(`Failed to delete cookie ${cookie.name}:`, e)
+          }
         }
 
         return {}
