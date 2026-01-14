@@ -218,9 +218,16 @@ class ConnectionManager {
     childSessions.clear()
     this.ws = null
 
-    const { workerWindowId } = store.getState()
+    const { workerWindowId, separateWindow } = store.getState()
     if (workerWindowId) {
-      chrome.windows.remove(workerWindowId).catch(() => {})
+      // Debug logging: log window state before cleanup
+      logger.debug('handleClose cleanup: workerWindowId =', workerWindowId, 'separateWindow =', separateWindow)
+      chrome.windows.getAll().then(windows => {
+        logger.debug('handleClose: windows before remove:', windows.map(w => ({ id: w.id, tabCount: w.tabs?.length })))
+      }).catch(() => {})
+      chrome.windows.remove(workerWindowId).catch((err) => {
+        logger.debug('handleClose: failed to remove workerWindow:', err.message)
+      })
     }
     store.setState({ workerWindowId: null, separateWindow: false })
 
@@ -440,28 +447,60 @@ function sendMessage(message: any): void {
 
 async function syncTabGroup(): Promise<void> {
   const { separateWindow } = store.getState()
+  
+  // Get connected tabs
+  const connectedTabIds = Array.from(store.getState().tabs.entries())
+    .filter(([_, info]) => info.state === 'connected')
+    .map(([tabId]) => tabId)
+
+  logger.debug('syncTabGroup: separateWindow =', separateWindow, 'connectedTabIds =', connectedTabIds)
+
   if (separateWindow) {
-    try {
-      const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
-      for (const group of existingGroups) {
-        const tabsInGroup = await chrome.tabs.query({ groupId: group.id })
-        const tabIdsToUngroup = tabsInGroup.map((t) => t.id).filter((id): id is number => id !== undefined)
-        if (tabIdsToUngroup.length > 0) {
-          await chrome.tabs.ungroup(tabIdsToUngroup)
-        }
+    // In separateWindow mode: move tabs to worker window AND use playwriter tab group
+    if (connectedTabIds.length > 0) {
+      logger.debug('syncTabGroup: moving tabs to worker window')
+      for (const tabId of connectedTabIds) {
+        await moveTabToWorkerWindow(tabId)
       }
-    } catch (e: any) {
-      logger.debug('Failed to cleanup tab groups:', e.message)
+      
+      // Create/update playwriter tab group in worker window
+      try {
+        const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
+        let groupId: number | undefined = existingGroups[0]?.id
+        
+        if (groupId === undefined) {
+          // Create new group
+          const newGroupId = await chrome.tabs.group({ tabIds: connectedTabIds })
+          await chrome.tabGroups.update(newGroupId, { title: 'playwriter', color: 'green' })
+          logger.debug('syncTabGroup: created playwriter group in worker window:', newGroupId)
+        } else {
+          // Add tabs to existing group
+          await chrome.tabs.group({ tabIds: connectedTabIds, groupId })
+          logger.debug('syncTabGroup: added tabs to playwriter group:', connectedTabIds)
+        }
+      } catch (e: any) {
+        logger.debug('syncTabGroup: failed to create tab group:', e.message)
+      }
+    } else {
+      // No connected tabs - clean up any existing playwriter tab groups
+      try {
+        const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
+        for (const group of existingGroups) {
+          const tabsInGroup = await chrome.tabs.query({ groupId: group.id })
+          const tabIdsToUngroup = tabsInGroup.map((t) => t.id).filter((id): id is number => id !== undefined)
+          if (tabIdsToUngroup.length > 0) {
+            await chrome.tabs.ungroup(tabIdsToUngroup)
+          }
+        }
+      } catch (e: any) {
+        logger.debug('Failed to cleanup tab groups:', e.message)
+      }
     }
     return
   }
-  try {
-    // Only tabs with state 'connected' are in the group.
-    // Tabs in 'connecting' or 'error' state are removed from the group.
-    const connectedTabIds = Array.from(store.getState().tabs.entries())
-      .filter(([_, info]) => info.state === 'connected')
-      .map(([tabId]) => tabId)
 
+  // Non-separateWindow mode: use tab groups
+  try {
     // Always query by title - no cached ID that can go stale
     const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
 
@@ -502,21 +541,46 @@ async function syncTabGroup(): Promise<void> {
 
     if (tabsToRemove.length > 0) {
       try {
-        await chrome.tabs.ungroup(tabsToRemove)
-        logger.debug('Removed tabs from group:', tabsToRemove)
+        // Verify tabs still exist before ungrouping
+        const existingTabsToRemove: number[] = []
+        for (const tabId of tabsToRemove) {
+          try {
+            await chrome.tabs.get(tabId)
+            existingTabsToRemove.push(tabId)
+          } catch {
+            // Tab no longer exists, skip
+          }
+        }
+        if (existingTabsToRemove.length > 0) {
+          await chrome.tabs.ungroup(existingTabsToRemove)
+          logger.debug('Removed tabs from group:', existingTabsToRemove)
+        }
       } catch (e: any) {
         logger.debug('Failed to ungroup tabs:', tabsToRemove, e.message)
       }
     }
 
     if (tabsToAdd.length > 0) {
-      if (groupId === undefined) {
-        const newGroupId = await chrome.tabs.group({ tabIds: tabsToAdd })
-        await chrome.tabGroups.update(newGroupId, { title: 'playwriter', color: 'green' })
-        logger.debug('Created tab group:', newGroupId, 'with tabs:', tabsToAdd)
-      } else {
-        await chrome.tabs.group({ tabIds: tabsToAdd, groupId })
-        logger.debug('Added tabs to existing group:', tabsToAdd)
+      // Verify tabs still exist before grouping (they may have been closed/moved)
+      const existingTabIds: number[] = []
+      for (const tabId of tabsToAdd) {
+        try {
+          await chrome.tabs.get(tabId)
+          existingTabIds.push(tabId)
+        } catch {
+          logger.debug('Tab no longer exists, skipping:', tabId)
+        }
+      }
+      
+      if (existingTabIds.length > 0) {
+        if (groupId === undefined) {
+          const newGroupId = await chrome.tabs.group({ tabIds: existingTabIds })
+          await chrome.tabGroups.update(newGroupId, { title: 'playwriter', color: 'green' })
+          logger.debug('Created tab group:', newGroupId, 'with tabs:', existingTabIds)
+        } else {
+          await chrome.tabs.group({ tabIds: existingTabIds, groupId })
+          logger.debug('Added tabs to existing group:', existingTabIds)
+        }
       }
     }
   } catch (error: any) {
@@ -828,6 +892,109 @@ function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
 }
 
 let creatingWindowPromise: Promise<chrome.tabs.Tab> | null = null
+let movingToWorkerWindowPromise: Promise<void> | null = null
+
+// Move an existing tab to the worker window, creating the window if needed
+async function moveTabToWorkerWindow(tabId: number): Promise<void> {
+  const { workerWindowId, separateWindow } = store.getState()
+  if (!separateWindow) return
+
+  // Get tab info to check if it's already in worker window
+  let tab: chrome.tabs.Tab
+  try {
+    tab = await chrome.tabs.get(tabId)
+  } catch {
+    logger.debug('moveTabToWorkerWindow: tab no longer exists:', tabId)
+    return
+  }
+
+  // If worker window exists and tab is already there, nothing to do
+  if (workerWindowId && tab.windowId === workerWindowId) {
+    return
+  }
+
+  // Ensure only one window creation/move happens at a time
+  if (movingToWorkerWindowPromise) {
+    await movingToWorkerWindowPromise
+    // Retry after the previous move completes
+    return moveTabToWorkerWindow(tabId)
+  }
+
+  movingToWorkerWindowPromise = (async () => {
+    try {
+      let targetWindowId = store.getState().workerWindowId
+      let defaultTabToClose: number | undefined
+
+      // Create worker window if it doesn't exist
+      if (!targetWindowId) {
+        // Check again in case another move created it
+        const freshState = store.getState()
+        if (freshState.workerWindowId) {
+          targetWindowId = freshState.workerWindowId
+        } else {
+          logger.debug('moveTabToWorkerWindow: creating new worker window')
+          const win = await chrome.windows.create({
+            focused: false,
+            width: 1200,
+            height: 800,
+          })
+          targetWindowId = win.id!
+          // Remember the default tab to close after moving our tab
+          defaultTabToClose = win.tabs?.[0]?.id
+          store.setState({ workerWindowId: targetWindowId })
+          logger.debug('moveTabToWorkerWindow: created worker window:', targetWindowId, 'defaultTab:', defaultTabToClose)
+        }
+      }
+
+      // Verify worker window still exists
+      try {
+        await chrome.windows.get(targetWindowId)
+      } catch {
+        logger.debug('moveTabToWorkerWindow: worker window was closed, creating new one')
+        const win = await chrome.windows.create({
+          focused: false,
+          width: 1200,
+          height: 800,
+        })
+        targetWindowId = win.id!
+        defaultTabToClose = win.tabs?.[0]?.id
+        store.setState({ workerWindowId: targetWindowId })
+      }
+
+      // Get fresh tab info
+      try {
+        tab = await chrome.tabs.get(tabId)
+      } catch {
+        logger.debug('moveTabToWorkerWindow: tab no longer exists:', tabId)
+        return
+      }
+
+      // If tab is already in worker window, nothing to do
+      if (tab.windowId === targetWindowId) {
+        return
+      }
+
+      // Move the tab to worker window
+      logger.debug('moveTabToWorkerWindow: moving tab', tabId, 'from window', tab.windowId, 'to worker window', targetWindowId)
+      await chrome.tabs.move(tabId, { windowId: targetWindowId, index: -1 })
+      logger.debug('moveTabToWorkerWindow: successfully moved tab', tabId)
+
+      // Close the default new tab that was created with the window
+      if (defaultTabToClose) {
+        try {
+          await chrome.tabs.remove(defaultTabToClose)
+          logger.debug('moveTabToWorkerWindow: closed default tab', defaultTabToClose)
+        } catch {
+          // Tab might already be closed or doesn't exist
+        }
+      }
+    } finally {
+      movingToWorkerWindowPromise = null
+    }
+  })()
+
+  return movingToWorkerWindowPromise
+}
 
 async function createTabInWorkerWindow(url: string): Promise<chrome.tabs.Tab> {
   const { workerWindowId } = store.getState()
@@ -855,6 +1022,10 @@ async function createTabInWorkerWindow(url: string): Promise<chrome.tabs.Tab> {
 
   creatingWindowPromise = (async () => {
     try {
+      // Debug: log existing windows before creating new one
+      const existingWindows = await chrome.windows.getAll()
+      logger.debug('createTabInWorkerWindow: existing windows before create:', existingWindows.map(w => w.id))
+      
       // Create new worker window with first tab
       const win = await chrome.windows.create({
         url,
@@ -863,6 +1034,7 @@ async function createTabInWorkerWindow(url: string): Promise<chrome.tabs.Tab> {
         height: 800,
       })
 
+      logger.debug('createTabInWorkerWindow: created new window with id:', win.id, 'existing windows were:', existingWindows.map(w => w.id))
       store.setState({ workerWindowId: win.id! })
       return win.tabs![0]
     } finally {
@@ -1138,6 +1310,21 @@ async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
   if (tabInfo?.state === 'connected') {
     await disconnectTab(tab.id)
   } else {
+    // In separateWindow mode, if this is the last tab in the user's window,
+    // create a new tab first to prevent Chrome from closing the window
+    // when the tab gets moved to the worker window via tab grouping.
+    const { separateWindow, workerWindowId } = store.getState()
+    // Check if separateWindow is enabled AND either:
+    // 1. workerWindowId exists and this tab is not in the worker window, OR
+    // 2. workerWindowId doesn't exist yet (first connection, worker window will be created)
+    const isUserWindow = workerWindowId ? tab.windowId !== workerWindowId : true
+    if (separateWindow && isUserWindow) {
+      const windowTabs = await chrome.tabs.query({ windowId: tab.windowId })
+      if (windowTabs.length === 1) {
+        logger.debug('Last tab in user window, creating new tab to keep window open')
+        await chrome.tabs.create({ windowId: tab.windowId, url: 'chrome://newtab', active: true })
+      }
+    }
     await connectTab(tab.id)
   }
 }
@@ -1177,7 +1364,14 @@ store.subscribe((state, prevState) => {
   updateContextMenuVisibility()
 
   if (state.separateWindow && state.tabs.size === 0 && state.workerWindowId) {
-    chrome.windows.remove(state.workerWindowId).catch(() => {})
+    // Debug logging: log window state before cleanup
+    logger.debug('store.subscribe cleanup: workerWindowId =', state.workerWindowId, 'tabs.size =', state.tabs.size)
+    chrome.windows.getAll().then(windows => {
+      logger.debug('store.subscribe: windows before remove:', windows.map(w => ({ id: w.id, tabCount: w.tabs?.length })))
+    }).catch(() => {})
+    chrome.windows.remove(state.workerWindowId).catch((err) => {
+      logger.debug('store.subscribe: failed to remove workerWindow:', err.message)
+    })
     store.setState({ workerWindowId: null })
   }
 

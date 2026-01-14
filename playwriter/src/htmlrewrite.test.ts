@@ -11,7 +11,7 @@ test('formatHtmlForPrompt', async () => {
     "<!doctype html>
     <html data-redirect-timezone="1">
      <body>
-      <div data-framer-hydrate-v2="{&quot;routeId&quot;:&quot;Zw20hns9v&quot;,&quot;localeId&quot;:&quot;default&quot;,&quot;breakpoints&quot;:[{&quot;hash&quot;:&quot;2ngqvi&quot;,&quot;mediaQuery&quot;:&quot;(min-width: 1200px)&quot;},{&quot;hash&quot;:&quot;11ziuji&quot;,&quot;mediaQuery&quot;:&quot;(min-width: 810px) and (max-width: 1199.98px)&quot;},{&quot;hash&quot;:...237 more characters" data-framer-ssr-released-at="2026-01-12T00:23:47.512Z" data-framer-page-optimized-at="2026-01-12T09:49:28.497Z" data-framer-generated-page="">
+      <div data-framer-hydrate-v2="{&quot;routeId&quot;:&quot;Zw20hns9v&quot;,&quot;localeId&quot;:&quot;default&quot;,&quot;breakpoints&quot;:[{&quot;hash&quot;:&quot;2ngqvi&quot;,&quot;mediaQuery&quot;:&quot;(min-width: 1200px)&quot;},{&quot;hash&quot;:&quot;11ziuji&quot;,&quot;mediaQuery&quot;:&quot;(min-width: 810px) and (max-width: 1199.98px)&quot;},{&quot;hash&quot;:...237 more characters" data-framer-ssr-released-at="2026-01-13T10:16:21.728Z" data-framer-page-optimized-at="2026-01-13T16:39:37.747Z" data-framer-generated-page="">
        <div data-layout-template="true" data-selection="true">
         <div>
          <nav data-framer-name="Desktop Nav" data-hide-scrollbars="true">
@@ -629,7 +629,7 @@ test('formatHtmlForPrompt', async () => {
               <h1 data-styles-preset="V_kfGv2cj">Build better sites, faster</h1>
              </div>
              <div data-framer-appear-id="1dlfy3o" data-framer-component-type="RichTextContainer">
-              <p data-styles-preset="h59NUQSP8">Framer is the site builder trusted by startups to Fortune 500. Build fast and scale with an integrated CMS, SEO, Analytics, and more.</p>
+              <p data-styles-preset="h59NUQSP8">Framer is the site builder trusted by leading startups and Fortune 500 companies. Build fast and scale with an integrated CMS, Analytics, Localization, and SEO.</p>
              </div>
              <div data-framer-appear-id="1dlfy3o" data-framer-component-type="RichTextContainer">
               <p data-styles-preset="h59NUQSP8">Framer is the site builder trusted by startups to Fortune 500. Build fast and scale with an integrated CMS, SEO, Analytics, and more.</p>
@@ -2546,7 +2546,7 @@ test('formatHtmlForPrompt', async () => {
                <div data-framer-name="UI">
                 <div data-framer-name="Stats">
                  <div data-border="true" data-framer-name="Content">
-                  <p>January 12, 2026</p>
+                  <p>January 13, 2026</p>
                   <div>
                    <div data-framer-component-type="RichTextContainer">
                     <p>Pageviews</p>
@@ -2806,7 +2806,7 @@ test('formatHtmlForPrompt', async () => {
                <div data-framer-name="UI">
                 <div data-framer-name="Stats">
                  <div data-border="true" data-framer-name="Content">
-                  <p>January 12, 2026</p>
+                  <p>January 13, 2026</p>
                   <div>
                    <div data-framer-component-type="RichTextContainer">
                     <p>Pageviews</p>
@@ -3066,7 +3066,7 @@ test('formatHtmlForPrompt', async () => {
                <div data-framer-name="UI">
                 <div data-framer-name="Stats">
                  <div data-border="true" data-framer-name="Content">
-                  <p>January 12, 2026</p>
+                  <p>January 13, 2026</p>
                   <div>
                    <div data-framer-component-type="RichTextContainer">
                     <p>Pageviews</p>

@@ -43,6 +43,7 @@ export async function startPlayWriterCDPRelayServer({
   logger?: { log(...args: any[]): void; error(...args: any[]): void }
   separateWindow?: boolean
 } = {}): Promise<RelayServer> {
+  logger?.log(`[Server] separateWindow mode: ${separateWindow}`)
   const emitter = new EventEmitter()
   const connectedTargets = new Map<string, ConnectedTarget>()
 
@@ -583,6 +584,7 @@ export async function startPlayWriterCDPRelayServer({
   const ALLOWED_EXTENSION_IDS = [
     'jfeammnjpkecdekppnclgkkffahnhfhe', // Production extension (Chrome Web Store)
     'elnnakgjclnapgflmidlpobefkdmapdm', // Dev extension (loaded unpacked)
+    'piccomghleomehaoohnodnilcienndad', // Dev extension (saboor's local)
   ]
 
   app.get('/cdp/:clientId?', (c, next) => {

@@ -4,7 +4,7 @@
 
 ## Summary
 
-**Comprehensive Compatibility: 96.1%** (124/129 tests passing)
+**Comprehensive Compatibility: 96.9%** (125/129 tests passing)
 
 All major Playwright APIs work correctly with playwriter's CDP relay when using Node.js (`npx tsx`).
 
@@ -13,10 +13,10 @@ All major Playwright APIs work correctly with playwriter's CDP relay when using 
 | Metric | Value |
 |--------|-------|
 | Total Tests | 130 |
-| Passed | 124 ✅ |
-| Failed | 5 ❌ |
+| Passed | 125 ✅ |
+| Failed | 4 ❌ |
 | Skipped | 1 ⏭️ |
-| Pass Rate | **96.1%** |
+| Pass Rate | **96.9%** |
 
 ---
 
@@ -94,8 +94,8 @@ All major Playwright APIs work correctly with playwriter's CDP relay when using 
 - `page.viewportSize()` returns viewport
 - `page.setViewportSize()` sets viewport
 
-### Section 13: Accessibility (0/1 ❌)
-- `page.accessibility.snapshot()` - **FAILS** (undefined property)
+### Section 13: Accessibility (1/1 ✅)
+- `page.accessibility.snapshot()` returns tree
 
 ### Section 14: Advanced Selectors (6/6 ✅)
 - `getByRole()` finds elements by role
@@ -270,31 +270,9 @@ Requires:
 
 ---
 
-## Methods That DO NOT Work with Playwriter (8 total)
+## Methods That DO NOT Work with Playwriter (4 total)
 
 All failures are at the **context/browser level** - the extension relay works at page/tab level only.
-
-### Cookie Methods (4)
-
-| Method | Error |
-|--------|-------|
-| `context.cookies()` | Storage.getCookies requires browser-level access |
-| `context.addCookies()` | Storage.setCookies requires browser-level access |
-| `context.clearCookies()` | Storage.getCookies requires browser-level access |
-| `context.storageState()` | Storage.getCookies requires browser-level access |
-
-**Workaround:**
-```typescript
-// Instead of context.cookies(), use:
-const cookies = await page.evaluate(() => document.cookie)
-
-// Instead of context.addCookies(), use:
-await page.evaluate(() => { document.cookie = 'name=value; path=/' })
-
-// For localStorage/sessionStorage:
-const storage = await page.evaluate(() => JSON.stringify(localStorage))
-await page.evaluate((data) => { Object.assign(localStorage, JSON.parse(data)) }, storageData)
-```
 
 ### Permission Methods (2)
 
@@ -321,7 +299,7 @@ await page.evaluate((data) => { Object.assign(localStorage, JSON.parse(data)) },
 
 ---
 
-## Complete Working API List (121 methods)
+## Complete Working API List (125 methods)
 
 ### Browser Level (5/5 ✅)
 - `browser.isConnected()`
@@ -330,7 +308,7 @@ await page.evaluate((data) => { Object.assign(localStorage, JSON.parse(data)) },
 - `browser.newContext()`
 - `browser.newPage()`
 
-### Context Level (9/16 - 7 ❌)
+### Context Level (13/16 - 3 ❌)
 - ✅ `context.pages()`
 - ✅ `context.newPage()`
 - ✅ `context.setGeolocation()`
@@ -340,10 +318,10 @@ await page.evaluate((data) => { Object.assign(localStorage, JSON.parse(data)) },
 - ✅ `context.exposeFunction()`
 - ✅ `context.exposeBinding()`
 - ✅ `context.addInitScript()`
-- ❌ `context.cookies()`
-- ❌ `context.addCookies()`
-- ❌ `context.clearCookies()`
-- ❌ `context.storageState()`
+- ✅ `context.cookies()`
+- ✅ `context.addCookies()`
+- ✅ `context.clearCookies()`
+- ✅ `context.storageState()`
 - ❌ `context.grantPermissions()`
 - ❌ `context.clearPermissions()`
 - ❌ `context.newCDPSession()`
