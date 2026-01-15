@@ -41,7 +41,7 @@
      "mcpServers": {
        "playwriter": {
          "command": "npx",
-         "args": ["playwriter@latest"]
+         "args": ["-y", "playwriter@latest"]
        }
      }
    }
@@ -161,11 +161,11 @@ When set, the MCP will automatically create an initial tab when a Playwright cli
 {
   "mcpServers": {
     "playwriter": {
-      "command": "npx",
-      "args": ["playwriter@latest"],
-      "env": {
-        "PLAYWRITER_AUTO_ENABLE": "1"
-      }
+"command": "npx",
+        "args": ["-y", "playwriter@latest"],
+        "env": {
+          "PLAYWRITER_AUTO_ENABLE": "1"
+        }
     }
   }
 }
@@ -359,8 +359,8 @@ Configure your MCP client with the host and token. You can pass them as CLI argu
 {
   "mcpServers": {
     "playwriter": {
-      "command": "npx",
-      "args": ["playwriter@latest", "--host", "host.docker.internal", "--token", "<secret>"]
+"command": "npx",
+        "args": ["-y", "playwriter@latest", "--host", "host.docker.internal", "--token", "<secret>"]
     }
   }
 }
@@ -372,12 +372,12 @@ Or use environment variables (useful if you want to set them globally in your pr
 {
   "mcpServers": {
     "playwriter": {
-      "command": "npx",
-      "args": ["playwriter@latest"],
-      "env": {
-        "PLAYWRITER_HOST": "host.docker.internal",
-        "PLAYWRITER_TOKEN": "<secret>"
-      }
+"command": "npx",
+        "args": ["-y", "playwriter@latest"],
+        "env": {
+          "PLAYWRITER_HOST": "host.docker.internal",
+          "PLAYWRITER_TOKEN": "<secret>"
+        }
     }
   }
 }
