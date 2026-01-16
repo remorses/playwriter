@@ -419,8 +419,20 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
   }
 
   const app = new Hono()
+  // CORS middleware for HTTP endpoints - only allows our specific extension IDs.
+  // This prevents other extensions from reading responses via fetch/XHR.
+  // WebSocket connections have their own separate origin validation.
   app.use('*', cors({
-    origin: (origin) => origin.startsWith('chrome-extension://') ? origin : null,
+    origin: (origin) => {
+      if (!origin.startsWith('chrome-extension://')) {
+        return null
+      }
+      const extensionId = origin.replace('chrome-extension://', '')
+      if (!OUR_EXTENSION_IDS.includes(extensionId)) {
+        return null
+      }
+      return origin
+    },
     allowMethods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
   }))
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
