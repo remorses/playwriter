@@ -578,15 +578,13 @@ export async function screenshotWithAccessibilityLabels({ page, interactiveOnly 
   }
   const screenshotPath = path.join(tmpDir, filename)
 
-  // Get viewport size to clip screenshot to visible area
+  // Cap at 2000px - Anthropic rejects larger images in many-image requests
   const viewport = await page.evaluate('({ width: window.innerWidth, height: window.innerHeight })') as { width: number; height: number }
-
-  // Take viewport screenshot with scale: 'css' to ignore device pixel ratio
   const rawBuffer = await page.screenshot({
     type: 'jpeg',
     quality: 80,
     scale: 'css',
-    clip: { x: 0, y: 0, width: viewport.width, height: viewport.height },
+    clip: { x: 0, y: 0, width: Math.min(viewport.width, 2000), height: Math.min(viewport.height, 2000) },
   })
 
   // Resize to fit within Claude's optimal limits:
