@@ -16,3 +16,6 @@ claude-extension
 
 # opensrc - source code for packages
 opensrc/
+
+# snapshots
+playwriter/src/snapshots/shadcn-ui-accessibility.md
