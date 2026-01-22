@@ -118,9 +118,30 @@ function buildStylesApi() {
   writeToDestinations('styles-api.md', content)
 }
 
+function buildSkill() {
+  const promptContent = readFile('src/prompt.md')
+  
+  const frontmatter = dedent`
+    ---
+    name: playwriter
+    description: Control Chrome browser via Playwright code snippets. Automate web interactions, take screenshots, inspect accessibility trees, and debug web applications.
+    ---
+  `
+  
+  const content = frontmatter + '\n\n' + promptContent
+  
+  // Write to repo root skills/ folder for add-skill discovery
+  const skillsDir = path.join(playwriterDir, '..', 'skills', 'playwriter')
+  ensureDir(skillsDir)
+  fs.writeFileSync(path.join(skillsDir, 'SKILL.md'), content, 'utf-8')
+  
+  console.log('Generated skills/playwriter/SKILL.md')
+}
+
 // Run all builds
 buildDebuggerApi()
 buildEditorApi()
 buildStylesApi()
+buildSkill()
 
 console.log('Resource files generated successfully')
