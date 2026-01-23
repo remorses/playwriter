@@ -1303,10 +1303,15 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       // Set up promise to wait for final chunk
+      let timeoutId: ReturnType<typeof setTimeout>
       const finalPromise = new Promise<StopRecordingResult>((resolve) => {
-        recording.resolveStop = resolve
+        const wrappedResolve = (result: StopRecordingResult) => {
+          clearTimeout(timeoutId)
+          resolve(result)
+        }
+        recording.resolveStop = wrappedResolve
         // Timeout after 30 seconds
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           if (recording.resolveStop) {
             recording.resolveStop = undefined
             resolve({ success: false, error: 'Timeout waiting for recording data' })
