@@ -22,6 +22,7 @@ import { getReactSource, type ReactSourceLocation } from './react-source.js'
 import { ScopedFS } from './scoped-fs.js'
 import { screenshotWithAccessibilityLabels, type ScreenshotResult } from './aria-snapshot.js'
 import { getCleanHTML, type GetCleanHTMLOptions } from './clean-html.js'
+import { startRecording, stopRecording, isRecording, cancelRecording } from './screen-recording.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -580,6 +581,30 @@ export class PlaywrightExecutor {
         })
       }
       
+      // Screen recording functions
+      const startRecordingFn = async (options: {
+        page?: Page
+        frameRate?: number
+        videoBitsPerSecond?: number
+        audioBitsPerSecond?: number
+        audio?: boolean
+        mimeType?: string
+      } = {}) => {
+        return startRecording({ page: options.page || page, ...options })
+      }
+      
+      const stopRecordingFn = async (options: { page?: Page; outputPath: string }) => {
+        return stopRecording({ page: options.page || page, outputPath: options.outputPath })
+      }
+      
+      const isRecordingFn = async (options: { page?: Page } = {}) => {
+        return isRecording({ page: options.page || page })
+      }
+      
+      const cancelRecordingFn = async (options: { page?: Page } = {}) => {
+        return cancelRecording({ page: options.page || page })
+      }
+      
       const self = this
       
       let vmContextObj: any = {
@@ -600,6 +625,10 @@ export class PlaywrightExecutor {
         formatStylesAsText,
         getReactSource: getReactSourceFn,
         screenshotWithAccessibilityLabels: screenshotWithAccessibilityLabelsFn,
+        startRecording: startRecordingFn,
+        stopRecording: stopRecordingFn,
+        isRecording: isRecordingFn,
+        cancelRecording: cancelRecordingFn,
         resetPlaywright: async () => {
           const { page: newPage, context: newContext } = await self.reset()
           vmContextObj.page = newPage

@@ -282,6 +282,36 @@ await screenshotWithAccessibilityLabels({ page });
 
 Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs.
 
+**startRecording / stopRecording** - record the page as a video at native FPS (30-60fps). Uses `getDisplayMedia` with `preferCurrentTab` for high-quality capture. Video is saved as WebM.
+
+```js
+// Start recording the current page
+await startRecording({ page });
+// or with options:
+await startRecording({ page, frameRate: 30, audio: true, videoBitsPerSecond: 2500000 });
+
+// Do interactions...
+await page.click('button');
+await page.waitForTimeout(2000);
+
+// Stop and save to file
+const { path, duration, size } = await stopRecording({ page, outputPath: './recording.webm' });
+console.log(`Saved ${size} bytes, duration: ${duration}ms`);
+```
+
+Additional recording utilities:
+```js
+// Check if recording is active
+const { isRecording, startedAt } = await isRecording({ page });
+
+// Cancel recording without saving
+await cancelRecording({ page });
+```
+
+**Notes**:
+- Recording requires user gesture or Chrome flags `--auto-accept-this-tab-capture --use-fake-ui-for-media-stream` for headless/automated use
+- **Navigation resets recording**: If you navigate to a different URL, the recording state is lost (the MediaRecorder is stored in the page's window object). Record interactions on a single page, or stop recording before navigation.
+
 ## pinned elements
 
 Users can right-click → "Copy Playwriter Element Reference" to store elements in `globalThis.playwriterPinnedElem1` (increments for each pin). The reference is copied to clipboard:
