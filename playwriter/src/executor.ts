@@ -601,6 +601,9 @@ export class PlaywrightExecutor {
         audio?: boolean
         outputPath: string
       }) => {
+        // Recording uses chrome.tabCapture which requires activeTab permission.
+        // This permission is granted when the user clicks the Playwriter extension icon on a tab.
+        // Recording will work on any tab where the user has clicked the icon.
         return startRecording({
           page: options.page || page,
           relayPort,

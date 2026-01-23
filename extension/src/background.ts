@@ -1100,7 +1100,7 @@ interface StartRecordingParams {
 async function handleStartRecording(params: StartRecordingParams): Promise<{ success: true; tabId: number; startedAt: number } | { success: false; error: string }> {
   const tabId = resolveTabIdFromSessionId(params.sessionId)
   if (!tabId) {
-    return { success: false, error: 'No connected tab found for recording' }
+    return { success: false, error: 'No connected tab found for recording. Click the Playwriter extension icon on the tab you want to record.' }
   }
 
   if (activeRecordings.has(tabId)) {
@@ -1125,7 +1125,7 @@ async function handleStartRecording(params: StartRecordingParams): Promise<{ suc
           const errorMsg = chrome.runtime.lastError.message || 'Unknown error'
           // Chrome returns this error when activeTab permission hasn't been granted
           if (errorMsg.includes('Extension has not been invoked') || errorMsg.includes('activeTab')) {
-            reject(new Error(`${errorMsg}. Toggle the Playwriter extension icon on this tab to enable recording, then try again.`))
+            reject(new Error(`${errorMsg}. Click the Playwriter extension icon on this tab to enable recording, then try again.`))
           } else {
             reject(new Error(errorMsg))
           }

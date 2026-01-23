@@ -423,7 +423,7 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 **startRecording / stopRecording** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` in the extension context, so **recording survives page navigation**. Video is saved as WebM.
 
-**Important**: Recording requires the user to have clicked the playwriter extension icon on the target tab first. This grants the `activeTab` permission which is required for `chrome.tabCapture`. If recording fails with "Extension has not been invoked for the current page", ask the user to click the extension icon on the tab they want to record.
+**Note**: Recording requires the user to have clicked the Playwriter extension icon on the tab. This grants `activeTab` permission needed for `chrome.tabCapture`. Recording works on tabs where the icon was clicked - if you need to record a new tab, ask the user to click the icon on it first.
 
 ```js
 // Start recording - outputPath must be specified upfront
