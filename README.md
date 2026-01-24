@@ -66,34 +66,33 @@ console.log({ title, url: page.url() });
 
 **Persist data in state:**
 ```bash
-# Store data across calls
-playwriter -s 1 -e "state.users = await page.$$eval('.user', els => els.map(e => e.textContent))"
-playwriter -s 1 -e "console.log(state.users)"
+playwriter -e "state.users = await page.$$eval('.user', els => els.map(e => e.textContent))"
+playwriter -e "console.log(state.users)"
 ```
 
 **Intercept network requests:**
 ```bash
-playwriter -s 1 -e "state.requests = []; page.on('response', r => { if (r.url().includes('/api/')) state.requests.push(r.url()) })"
-playwriter -s 1 -e "await page.click('button'); await page.waitForLoadState('networkidle')"
-playwriter -s 1 -e "console.log(state.requests)"
+playwriter -e "state.requests = []; page.on('response', r => { if (r.url().includes('/api/')) state.requests.push(r.url()) })"
+playwriter -e "await page.click('button'); await page.waitForLoadState('networkidle')"
+playwriter -e "console.log(state.requests)"
 ```
 
 **Set breakpoints and debug:**
 ```bash
-playwriter -s 1 -e "state.cdp = await getCDPSession({ page }); state.dbg = createDebugger({ cdp: state.cdp }); await state.dbg.enable()"
-playwriter -s 1 -e "state.scripts = await state.dbg.listScripts({ search: 'app' }); console.log(state.scripts.map(s => s.url))"
-playwriter -s 1 -e "await state.dbg.setBreakpoint({ file: state.scripts[0].url, line: 42 })"
+playwriter -e "state.cdp = await getCDPSession({ page }); state.dbg = createDebugger({ cdp: state.cdp }); await state.dbg.enable()"
+playwriter -e "state.scripts = await state.dbg.listScripts({ search: 'app' }); console.log(state.scripts.map(s => s.url))"
+playwriter -e "await state.dbg.setBreakpoint({ file: state.scripts[0].url, line: 42 })"
 ```
 
 **Live edit page code:**
 ```bash
-playwriter -s 1 -e "state.cdp = await getCDPSession({ page }); state.editor = createEditor({ cdp: state.cdp }); await state.editor.enable()"
-playwriter -s 1 -e "await state.editor.edit({ url: 'app.js', oldString: 'DEBUG=false', newString: 'DEBUG=true' })"
+playwriter -e "state.cdp = await getCDPSession({ page }); state.editor = createEditor({ cdp: state.cdp }); await state.editor.enable()"
+playwriter -e "await state.editor.edit({ url: 'app.js', oldString: 'DEBUG=false', newString: 'DEBUG=true' })"
 ```
 
 **Screenshot with labels:**
 ```bash
-playwriter -s 1 -e "await screenshotWithAccessibilityLabels({ page })"
+playwriter -e "await screenshotWithAccessibilityLabels({ page })"
 ```
 
 ## MCP Setup
