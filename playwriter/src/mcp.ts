@@ -93,6 +93,7 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
   executor = new PlaywrightExecutor({
     cdpConfig,
     logger: mcpLogger,
+    cwd: process.cwd(),
   })
   
   return executor
