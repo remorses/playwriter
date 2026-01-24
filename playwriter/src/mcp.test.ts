@@ -1,8 +1,6 @@
 import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
-import { chromium, BrowserContext } from 'playwright-core'
+import { chromium } from 'playwright-core'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -13,115 +11,19 @@ import { imageSize } from 'image-size'
 import { getCDPSessionForPage } from './cdp-session.js'
 import { Debugger } from './debugger.js'
 import { Editor } from './editor.js'
-import { startPlayWriterCDPRelayServer, type RelayServer } from './cdp-relay.js'
-import { createFileLogger } from './create-logger.js'
 import type { CDPCommand } from './cdp-types.js'
-import { killPortProcess } from 'kill-port-process'
+import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext } from './test-utils.js'
 
 declare const window: any
 declare const document: any
 
 const TEST_PORT = 19987
 
-const execAsync = promisify(exec)
-
-async function getExtensionServiceWorker(context: BrowserContext) {
-    let serviceWorkers = context.serviceWorkers().filter(sw => sw.url().startsWith('chrome-extension://'))
-    let serviceWorker = serviceWorkers[0]
-    if (!serviceWorker) {
-        serviceWorker = await context.waitForEvent('serviceworker', {
-            predicate: (sw) => sw.url().startsWith('chrome-extension://')
-        })
-    }
-
-    for (let i = 0; i < 50; i++) {
-        const isReady = await serviceWorker.evaluate(() => {
-            // @ts-ignore
-            return typeof globalThis.toggleExtensionForActiveTab === 'function'
-        })
-        if (isReady) break
-        await new Promise(r => setTimeout(r, 100))
-    }
-
-    return serviceWorker
-}
-
 function js(strings: TemplateStringsArray, ...values: any[]): string {
     return strings.reduce(
         (result, str, i) => result + str + (values[i] || ''),
         '',
     )
-}
-
-async function killProcessOnPort(port: number): Promise<void> {
-    try {
-        await killPortProcess(port)
-        console.log(`Killed processes on port ${port}`)
-    } catch (err) {
-        console.error('Error killing process on port:', err)
-    }
-}
-
-interface TestContext {
-    browserContext: Awaited<ReturnType<typeof chromium.launchPersistentContext>>
-    userDataDir: string
-    relayServer: RelayServer
-}
-
-async function setupTestContext({ tempDirPrefix }: { tempDirPrefix: string }): Promise<TestContext> {
-    await killProcessOnPort(TEST_PORT)
-
-    console.log('Building extension...')
-    await execAsync(`TESTING=1 PLAYWRITER_PORT=${TEST_PORT} pnpm build`, { cwd: '../extension' })
-    console.log('Extension built')
-
-    const localLogPath = path.join(process.cwd(), 'relay-server.log')
-    const logger = createFileLogger({ logFilePath: localLogPath })
-    const relayServer = await startPlayWriterCDPRelayServer({ port: TEST_PORT, logger })
-
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix))
-    const extensionPath = path.resolve('../extension/dist')
-
-    const browserContext = await chromium.launchPersistentContext(userDataDir, {
-        channel: 'chromium',
-        headless: !process.env.HEADFUL,
-        colorScheme: 'dark',
-        args: [
-            `--disable-extensions-except=${extensionPath}`,
-            `--load-extension=${extensionPath}`,
-        ],
-    })
-
-    const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-    const page = await browserContext.newPage()
-    await page.goto('about:blank')
-
-    await serviceWorker.evaluate(async () => {
-        await globalThis.toggleExtensionForActiveTab()
-    })
-
-    return { browserContext, userDataDir, relayServer }
-}
-
-async function cleanupTestContext(ctx: TestContext | null, cleanup?: (() => Promise<void>) | null): Promise<void> {
-    if (ctx?.browserContext) {
-        await ctx.browserContext.close()
-    }
-    if (ctx?.relayServer) {
-        ctx.relayServer.close()
-    }
-
-    if (ctx?.userDataDir) {
-        try {
-            fs.rmSync(ctx.userDataDir, { recursive: true, force: true })
-        } catch (e) {
-            console.error('Failed to cleanup user data dir:', e)
-        }
-    }
-    if (cleanup) {
-        await cleanup()
-    }
 }
 
 declare global {
@@ -136,7 +38,7 @@ describe('MCP Server Tests', () => {
     let testCtx: TestContext | null = null
 
     beforeAll(async () => {
-        testCtx = await setupTestContext({ tempDirPrefix: 'pw-test-' })
+        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-test-', toggleExtension: true })
 
         const result = await createMCPClient({ port: TEST_PORT })
         client = result.client
@@ -2679,7 +2581,7 @@ describe('CDP Session Tests', () => {
     let testCtx: TestContext | null = null
 
     beforeAll(async () => {
-        testCtx = await setupTestContext({ tempDirPrefix: 'pw-cdp-test-' })
+        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-cdp-test-', toggleExtension: true })
 
         const serviceWorker = await getExtensionServiceWorker(testCtx.browserContext)
         await serviceWorker.evaluate(async () => {
@@ -3606,7 +3508,7 @@ describe('Service Worker Target Tests', () => {
     let testCtx: TestContext | null = null
 
     beforeAll(async () => {
-        testCtx = await setupTestContext({ tempDirPrefix: 'pw-sw-test-' })
+        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-sw-test-', toggleExtension: true })
     }, 600000)
 
     afterAll(async () => {
@@ -3727,7 +3629,7 @@ describe('Auto-enable Tests', () => {
     process.env.PLAYWRITER_AUTO_ENABLE = '1'
 
     beforeAll(async () => {
-        testCtx = await setupTestContext({ tempDirPrefix: 'pw-auto-test-' })
+        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-auto-test-' })
 
         // Disconnect all tabs to start with a clean state
         const serviceWorker = await getExtensionServiceWorker(testCtx.browserContext)
