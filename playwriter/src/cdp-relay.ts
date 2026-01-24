@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pc from 'picocolors'
 import { EventEmitter } from 'node:events'
-import { VERSION } from './utils.js'
+import { VERSION, EXTENSION_IDS } from './utils.js'
 import { createCdpLogger, type CdpLogEntry, type CdpLogger } from './cdp-log.js'
 
 type ConnectedTarget = {
@@ -21,11 +21,7 @@ type ConnectedTarget = {
 }
 
 // Our extension IDs - allow attaching to our own extension pages for debugging
-const OUR_EXTENSION_IDS = [
-  'jfeammnjpkecdekppnclgkkffahnhfhe', // Production extension (Chrome Web Store)
-  'pebbngnfojnignonigcnkdilknapkgid', // Dev extension (stable ID from manifest key)
-]
-
+const OUR_EXTENSION_IDS = EXTENSION_IDS
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
  * Filters extension pages, service workers, and other restricted targets,
@@ -47,7 +43,7 @@ function isRestrictedTarget(targetInfo: Protocol.Target.TargetInfo): boolean {
   // Allow our own extension pages
   if (url.startsWith('chrome-extension://')) {
     const extensionId = url.replace('chrome-extension://', '').split('/')[0]
-    if (OUR_EXTENSION_IDS.includes(extensionId)) {
+    if (EXTENSION_IDS.includes(extensionId)) {
       return false
     }
     return true
@@ -461,7 +457,7 @@ export async function startPlayWriterCDPRelayServer({
         return null
       }
       const extensionId = origin.replace('chrome-extension://', '')
-      if (!OUR_EXTENSION_IDS.includes(extensionId)) {
+      if (!EXTENSION_IDS.includes(extensionId)) {
         return null
       }
       return origin
@@ -589,7 +585,7 @@ export async function startPlayWriterCDPRelayServer({
     if (origin) {
       if (origin.startsWith('chrome-extension://')) {
         const extensionId = origin.replace('chrome-extension://', '')
-        if (!OUR_EXTENSION_IDS.includes(extensionId)) {
+        if (!EXTENSION_IDS.includes(extensionId)) {
           logger?.log(pc.red(`Rejecting /cdp WebSocket from unknown extension: ${extensionId}`))
           return c.text('Forbidden', 403)
         }
@@ -798,7 +794,7 @@ export async function startPlayWriterCDPRelayServer({
     }
 
     const extensionId = origin.replace('chrome-extension://', '')
-    if (!OUR_EXTENSION_IDS.includes(extensionId)) {
+    if (!EXTENSION_IDS.includes(extensionId)) {
       logger?.log(pc.red(`Rejecting /extension WebSocket from unknown extension: ${extensionId}`))
       return c.text('Forbidden', 403)
     }
@@ -1274,6 +1270,10 @@ export async function startPlayWriterCDPRelayServer({
         params,
         timeout: 10000,
       }) as StartRecordingResult
+
+      if (!result) {
+        return c.json({ success: false, error: 'Extension returned empty result' } as StartRecordingResult, 500)
+      }
 
       if (result.success) {
         // Track this recording

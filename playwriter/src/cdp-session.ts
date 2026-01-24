@@ -16,6 +16,7 @@ export interface ICDPSession {
   on(event: string, callback: (params: any) => void): unknown
   off(event: string, callback: (params: any) => void): unknown
   detach(): Promise<void>
+  getSessionId?(): string | null
 }
 
 interface PendingRequest {
@@ -66,6 +67,10 @@ export class CDPSession implements ICDPSession {
 
   setSessionId(sessionId: string) {
     this.sessionId = sessionId
+  }
+
+  getSessionId(): string | null {
+    return this.sessionId
   }
 
   send<K extends keyof ProtocolMapping.Commands>(

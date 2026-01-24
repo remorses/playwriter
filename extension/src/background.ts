@@ -1116,8 +1116,9 @@ async function handleStartRecording(params: StartRecordingParams): Promise<Start
         if (chrome.runtime.lastError) {
           const errorMsg = chrome.runtime.lastError.message || 'Unknown error'
           // Chrome returns this error when activeTab permission hasn't been granted
+          // User must click the extension icon at least once per session - this is a Chrome security requirement
           if (errorMsg.includes('Extension has not been invoked') || errorMsg.includes('activeTab')) {
-            reject(new Error(`${errorMsg}. Click the Playwriter extension icon on this tab to enable recording, then try again.`))
+            reject(new Error(`${errorMsg}. Click the Playwriter extension icon on this tab to enable recording.`))
           } else {
             reject(new Error(errorMsg))
           }

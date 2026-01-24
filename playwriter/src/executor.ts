@@ -595,10 +595,16 @@ export class PlaywrightExecutor {
       // This permission is granted when the user clicks the Playwriter extension icon on a tab.
       const relayPort = this.cdpConfig.port || 19988
       // Recording will work on any tab where the user has clicked the icon.
-      const withRecordingDefaults = <T extends { page?: Page }, R>(
-        fn: (opts: T & { relayPort: number }) => Promise<R>
+      const withRecordingDefaults = <T extends { page?: Page; sessionId?: string }, R>(
+        fn: (opts: T & { relayPort: number; sessionId?: string }) => Promise<R>
       ) => {
-        return (options: T = {} as T) => fn({ page: options.page || page, relayPort, ...options })
+        return async (options: T = {} as T) => {
+          const targetPage = options.page || page
+          // Get sessionId from cached CDP session to identify which tab to record
+          const cdp = await getCDPSession({ page: targetPage })
+          const sessionId = options.sessionId || cdp.getSessionId() || undefined
+          return fn({ page: targetPage, sessionId, relayPort, ...options })
+        }
       }
       const self = this
 

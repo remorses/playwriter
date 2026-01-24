@@ -1,8 +1,40 @@
 /**
- * Offscreen document for Playwriter extension.
- * Handles operations that require DOM APIs not available in service workers:
- * - Screen recording via chrome.tabCapture + MediaRecorder
- * - Future: audio processing, canvas operations, etc.
+ * Offscreen document for Playwriter screen recording.
+ * 
+ * WHY OFFSCREEN DOCUMENT?
+ * Manifest V3 service workers cannot use MediaRecorder or getUserMedia directly.
+ * This hidden document provides access to Web APIs while the service worker orchestrates.
+ * 
+ * RECORDING FLOW:
+ * 
+ * ┌─────────────────┐     HTTP      ┌─────────────────┐    WebSocket    ┌─────────────────┐
+ * │  User Code      │ ────────────► │  Relay Server   │ ───────────────►│  Extension      │
+ * │  startRecording │               │  /recording/*   │                 │  background.ts  │
+ * └─────────────────┘               └─────────────────┘                 └────────┬────────┘
+ *                                                                                │
+ *                                          ┌─────────────────────────────────────┘
+ *                                          ▼
+ *                                   ┌─────────────────┐
+ *                                   │  Offscreen Doc  │  ◄── MediaRecorder
+ *                                   │  (this file)    │
+ *                                   └─────────────────┘
+ * 
+ * STEP BY STEP:
+ * 1. User calls startRecording() → HTTP POST to relay server
+ * 2. Relay server forwards to extension via WebSocket
+ * 3. Extension calls chrome.tabCapture.getMediaStreamId() to get capture permission
+ *    - Requires --allowlisted-extension-id flag OR user clicking extension icon
+ * 4. Extension creates this offscreen document via chrome.offscreen.createDocument()
+ * 5. Extension sends streamId to offscreen document
+ * 6. Offscreen calls navigator.mediaDevices.getUserMedia() with streamId
+ * 7. Offscreen creates MediaRecorder and starts encoding to webm
+ * 8. Chunks are sent back to extension → relay server → written to output file
+ * 
+ * KEY APIS:
+ * - chrome.tabCapture.getMediaStreamId() - Extension API, gets capture permission
+ * - chrome.offscreen.createDocument()    - Extension API, creates this document
+ * - navigator.mediaDevices.getUserMedia() - Web API, gets MediaStream from streamId
+ * - MediaRecorder                         - Web API, encodes video to webm
  */
 
 interface OffscreenRecordingState {

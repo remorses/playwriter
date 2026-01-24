@@ -3,6 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Playwriter extension IDs - used for validation and Chrome flag commands
+export const EXTENSION_IDS = [
+  'jfeammnjpkecdekppnclgkkffahnhfhe', // Production (Chrome Web Store)
+  'elnnakgjclnapgflmidlpobefkdmapdm', // Dev (loaded unpacked)
+]
+
 export function getCdpUrl({ port = 19988, host = '127.0.0.1', token }: { port?: number; host?: string; token?: string } = {}) {
   const id = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
   const queryString = token ? `?token=${token}` : ''
