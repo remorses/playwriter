@@ -64,6 +64,8 @@ console.log({ title, url: page.url() });
 
 ## Examples
 
+Variables in scope: `page`, `context`, `state` (persists between calls), `require`, and Node.js globals.
+
 **Persist data in state:**
 ```bash
 playwriter -e "state.users = await page.$$eval('.user', els => els.map(e => e.textContent))"
