@@ -525,6 +525,25 @@ function rebuildLines(node: SnapshotNode, result: string[]): void {
 }
 
 // ============================================================================
+// Ref Data Types (optimized - no ElementHandles stored upfront)
+// ============================================================================
+
+/**
+ * Data stored for each ref - used to construct locators lazily
+ */
+export interface RefData {
+  role: string
+  name: string
+  /** Index for disambiguation when multiple elements have same role+name */
+  nth?: number
+}
+
+/**
+ * Map from ref (e.g., "e5") to its data
+ */
+export type RefMap = Map<string, RefData>
+
+// ============================================================================
 // Original Aria Snapshot Types and Functions
 // ============================================================================
 
@@ -544,8 +563,16 @@ export interface ScreenshotResult {
 
 export interface AriaSnapshotResult {
   snapshot: string
+  /** Map from ref to role/name data - use this for lookups */
   refToElement: Map<string, { role: string; name: string }>
-  refHandles: Array<{ ref: string; handle: ElementHandle }>
+  /** 
+   * Get a Playwright locator for a ref. Returns null if ref not found.
+   * Uses getByRole() internally for reliable element selection.
+   */
+  getLocatorForRef: (ref: string) => Locator | null
+  /** Get ElementHandles for multiple refs in parallel (for labeling) */
+  getElementHandlesForRefs: (refs: string[]) => Promise<Array<{ ref: string; handle: ElementHandle } | null>>
+  /** Find refs for locators by matching in browser context */
   getRefsForLocators: (locators: Array<Locator | ElementHandle>) => Promise<Array<AriaRef | null>>
   getRefForLocator: (locator: Locator | ElementHandle) => Promise<AriaRef | null>
   getRefStringForLocator: (locator: Locator | ElementHandle) => Promise<string | null>
@@ -647,150 +674,237 @@ const CONTAINER_STYLES = css`
   pointer-events: none;
 `
 
+// ============================================================================
+// Role/Name Tracking for nth disambiguation
+// ============================================================================
+
+interface RoleNameTracker {
+  counts: Map<string, number>
+  refsByKey: Map<string, string[]>
+  getKey(role: string, name: string): string
+  getNextIndex(role: string, name: string): number
+  trackRef(role: string, name: string, ref: string): void
+  getDuplicateKeys(): Set<string>
+}
+
+function createRoleNameTracker(): RoleNameTracker {
+  const counts = new Map<string, number>()
+  const refsByKey = new Map<string, string[]>()
+  return {
+    counts,
+    refsByKey,
+    getKey(role: string, name: string): string {
+      return `${role}:${name}`
+    },
+    getNextIndex(role: string, name: string): number {
+      const key = this.getKey(role, name)
+      const current = counts.get(key) ?? 0
+      counts.set(key, current + 1)
+      return current
+    },
+    trackRef(role: string, name: string, ref: string): void {
+      const key = this.getKey(role, name)
+      const refs = refsByKey.get(key) ?? []
+      refs.push(ref)
+      refsByKey.set(key, refs)
+    },
+    getDuplicateKeys(): Set<string> {
+      const duplicates = new Set<string>()
+      for (const [key, refs] of refsByKey) {
+        if (refs.length > 1) {
+          duplicates.add(key)
+        }
+      }
+      return duplicates
+    },
+  }
+}
+
+// Ref counter for generating refs (reset at start of each snapshot)
+let refCounter = 0
+
+function resetRefs(): void {
+  refCounter = 0
+}
+
+function nextRef(): string {
+  return `e${++refCounter}`
+}
+
+/**
+ * Process ARIA snapshot: add refs to interactive elements.
+ * Uses Playwright's public ariaSnapshot() API and generates our own refs.
+ */
+function processAriaTreeWithRefs(
+  ariaTree: string,
+  refMap: RefMap,
+  refFilter?: (info: { role: string; name: string }) => boolean
+): string {
+  const lines = ariaTree.split('\n')
+  const result: string[] = []
+  const tracker = createRoleNameTracker()
+
+  for (const line of lines) {
+    if (!line.trim()) {
+      continue
+    }
+
+    // Match lines like: "  - button "Submit"" or "  - heading "Title" [level=1]"
+    const match = line.match(/^(\s*-\s*)(\w+)(?:\s+"([^"]*)")?(.*)$/)
+    if (!match) {
+      // Keep metadata lines (like /url:) or text content as-is
+      result.push(line)
+      continue
+    }
+
+    const [, prefix, role, name, suffix] = match
+    const roleLower = role.toLowerCase()
+    const nameStr = name ?? ''
+
+    // Check if this element should get a ref
+    const isInteractive = INTERACTIVE_ROLES.has(roleLower)
+    const shouldHaveRef = isInteractive && (!refFilter || refFilter({ role: roleLower, name: nameStr }))
+
+    if (shouldHaveRef) {
+      const ref = nextRef()
+      const nth = tracker.getNextIndex(roleLower, nameStr)
+      tracker.trackRef(roleLower, nameStr, ref)
+
+      refMap.set(ref, {
+        role: roleLower,
+        name: nameStr,
+        nth, // Always store nth, we'll clean up non-duplicates later
+      })
+
+      // Build enhanced line with ref
+      let enhanced = `${prefix}${role}`
+      if (name) {
+        enhanced += ` "${name}"`
+      }
+      enhanced += ` [ref=${ref}]`
+      if (suffix) {
+        enhanced += suffix
+      }
+      result.push(enhanced)
+    } else {
+      // Keep line as-is (no ref)
+      result.push(line)
+    }
+  }
+
+  // Post-process: remove nth from refs that don't have duplicates
+  const duplicateKeys = tracker.getDuplicateKeys()
+  for (const [ref, data] of refMap) {
+    const key = tracker.getKey(data.role, data.name)
+    if (!duplicateKeys.has(key)) {
+      delete refMap.get(ref)!.nth
+    }
+  }
+
+  return result.join('\n')
+}
+
 /**
  * Get an accessibility snapshot with utilities to look up aria refs for elements.
- * Uses Playwright's internal aria-ref selector engine.
+ * 
+ * Uses Playwright's public ariaSnapshot() API and generates our own refs.
+ * This avoids dependency on internal _snapshotForAI() method.
+ * Locators are constructed lazily using getByRole().
  *
  * @example
  * ```ts
- * const { snapshot, getRefsForLocators } = await getAriaSnapshot({ page })
- * const refs = await getRefsForLocators([page.locator('button'), page.locator('a')])
- * // refs[0].ref is e.g. "e5" - use page.locator('aria-ref=e5') to select
+ * const { snapshot, getLocatorForRef } = await getAriaSnapshot({ page })
+ * // Get a locator for ref e5
+ * const locator = getLocatorForRef('e5')
+ * if (locator) await locator.click()
  * ```
  */
 export async function getAriaSnapshot({ page, refFilter }: {
   page: Page
   refFilter?: (info: { role: string; name: string }) => boolean
 }): Promise<AriaSnapshotResult> {
-  const snapshotMethod = (page as any)._snapshotForAI
-  if (!snapshotMethod) {
-    throw new Error('_snapshotForAI not available. Ensure you are using Playwright.')
-  }
+  // Reset ref counter for deterministic refs
+  resetRefs()
 
-  const snapshot = await snapshotMethod.call(page)
+  // Use public ariaSnapshot() API instead of internal _snapshotForAI()
+  const rawSnapshot = await page.locator(':root').ariaSnapshot()
+  
   // Sanitize to remove unpaired surrogates that break JSON encoding for Claude API
-  const rawStr = typeof snapshot === 'string' ? snapshot : (snapshot.full || JSON.stringify(snapshot, null, 2))
-  const snapshotStr = rawStr.toWellFormed?.() ?? rawStr
+  const cleanSnapshot = rawSnapshot.toWellFormed?.() ?? rawSnapshot
 
-  const snapshotRefInfo = extractRefInfoFromSnapshot(snapshotStr)
-  const snapshotRefs = [...snapshotRefInfo.entries()]
-    .filter(([_, info]) => !refFilter || refFilter(info))
-    .map(([ref]) => ref)
+  // Process the ARIA tree and generate refs for interactive elements
+  const refData: RefMap = new Map()
+  const snapshotWithRefs = processAriaTreeWithRefs(cleanSnapshot, refData, refFilter)
 
-  // Discover refs by probing aria-ref=e1, e2, e3... until 10 consecutive misses
+  // Build refToElement map for backward compatibility
   const refToElement = new Map<string, { role: string; name: string }>()
-  const refHandles: Array<{ ref: string; handle: ElementHandle }> = []
+  for (const [ref, data] of refData) {
+    refToElement.set(ref, { role: data.role, name: data.name })
+  }
 
-  const fetchRefInfo = async (ref: string): Promise<{ ref: string; handle: ElementHandle; info: { role: string; name: string } } | null> => {
-    try {
-      const locator = page.locator(`aria-ref=${ref}`)
-      const handle = await locator.elementHandle({ timeout: 1000 })
-      if (!handle) {
-        return null
-      }
-      const info = await handle.evaluate((el) => {
-        const element = el as ElementLike
-        const tagName = element.tagName.toLowerCase()
-        const roleAttribute = element.getAttribute('role')
-        const inputElement = element as InputElementLike
-        const inputType = inputElement.type || ''
-        const placeholder = inputElement.placeholder || ''
-        const role = roleAttribute || {
-          a: element.hasAttribute('href') ? 'link' : 'generic',
-          button: 'button',
-          input: {
-            button: 'button',
-            checkbox: 'checkbox',
-            radio: 'radio',
-            text: 'textbox',
-            search: 'searchbox',
-            number: 'spinbutton',
-            range: 'slider',
-          }[inputType] || 'textbox',
-          select: 'combobox',
-          textarea: 'textbox',
-          img: 'img',
-          nav: 'navigation',
-          main: 'main',
-          header: 'banner',
-          footer: 'contentinfo',
-        }[tagName] || 'generic'
-        const name = element.getAttribute('aria-label') || element.textContent?.trim() || placeholder || ''
-        return { role, name }
-      })
-      return { ref, handle, info }
-    } catch {
+  /**
+   * Get a Playwright locator for a ref using getByRole().
+   * This is lazy - no async calls until the locator is used.
+   */
+  const getLocatorForRef = (ref: string): Locator | null => {
+    const data = refData.get(ref)
+    if (!data) {
       return null
     }
-  }
 
-  const fetchRefHandle = async (ref: string): Promise<{ ref: string; handle: ElementHandle } | null> => {
-    try {
-      const locator = page.locator(`aria-ref=${ref}`)
-      const handle = await locator.elementHandle({ timeout: 1000 })
-      if (!handle) {
-        return null
-      }
-      return { ref, handle }
-    } catch {
-      return null
+    // Build locator using getByRole with exact matching
+    let locator: Locator
+    if (data.name) {
+      locator = page.getByRole(data.role as any, { name: data.name, exact: true })
+    } else {
+      // For unnamed elements, use role-only locator
+      // Note: this may match multiple elements, nth handles disambiguation
+      locator = page.getByRole(data.role as any)
     }
-  }
 
-  const addRefInfo = ({ ref, handle, info }: { ref: string; handle: ElementHandle; info: { role: string; name: string } }) => {
-    refToElement.set(ref, info)
-    refHandles.push({ ref, handle })
-  }
-
-  const probeRefsSequentially = async () => {
-    let consecutiveMisses = 0
-    let refNum = 1
-    while (consecutiveMisses < 10) {
-      const ref = `e${refNum++}`
-      const result = await fetchRefInfo(ref)
-      if (!result) {
-        consecutiveMisses++
-        continue
-      }
-      consecutiveMisses = 0
-      addRefInfo(result)
+    // Apply nth if needed for disambiguation (multiple elements with same role+name)
+    if (data.nth !== undefined) {
+      locator = locator.nth(data.nth)
     }
+
+    return locator
   }
 
-  const probeRefsFromSnapshot = async (refs: string[]) => {
-    const concurrency = 20
-    const chunks = refs.reduce((acc, ref, index) => {
-      const chunkIndex = Math.floor(index / concurrency)
-      if (!acc[chunkIndex]) {
-        acc[chunkIndex] = []
-      }
-      acc[chunkIndex].push(ref)
-      return acc
-    }, [] as string[][])
-
-    await chunks.reduce(async (previous, chunk) => {
-      await previous
-      const results = await Promise.all(chunk.map(async (ref) => fetchRefHandle(ref)))
-      const successfulResults = results.filter((result): result is { ref: string; handle: ElementHandle } => result !== null)
-      successfulResults.map((result) => {
-        const info = snapshotRefInfo.get(result.ref) || { role: 'generic', name: '' }
-        addRefInfo({ ...result, info })
+  /**
+   * Get ElementHandles for multiple refs in parallel.
+   * Used by showAriaRefLabels for batched bounding box fetching.
+   */
+  const getElementHandlesForRefs = async (refs: string[]): Promise<Array<{ ref: string; handle: ElementHandle } | null>> => {
+    const results = await Promise.all(
+      refs.map(async (ref) => {
+        const locator = getLocatorForRef(ref)
+        if (!locator) {
+          return null
+        }
+        try {
+          const handle = await locator.elementHandle({ timeout: 2000 })
+          if (!handle) {
+            return null
+          }
+          return { ref, handle }
+        } catch {
+          return null
+        }
       })
-    }, Promise.resolve())
+    )
+    return results
   }
 
-  if (snapshotRefs.length > 0) {
-    await probeRefsFromSnapshot(snapshotRefs)
-  } else {
-    await probeRefsSequentially()
-  }
-
-  // Find refs for multiple locators in a single evaluate call
+  /**
+   * Find refs for multiple locators by matching elements in browser context.
+   * This requires a single evaluate call to compare elements.
+   */
   const getRefsForLocators = async (locators: Array<Locator | ElementHandle>): Promise<Array<AriaRef | null>> => {
-    if (locators.length === 0 || refHandles.length === 0) {
+    if (locators.length === 0 || refData.size === 0) {
       return locators.map(() => null)
     }
 
+    // Get handles for target locators
     const targetHandles = await Promise.all(
       locators.map(async (loc) => {
         try {
@@ -803,12 +917,26 @@ export async function getAriaSnapshot({ page, refFilter }: {
       })
     )
 
+    // Get handles for all refs
+    const refList = [...refData.keys()]
+    const refHandleResults = await getElementHandlesForRefs(refList)
+    const validRefHandles = refHandleResults
+      .filter((r): r is { ref: string; handle: ElementHandle } => r !== null)
+
+    if (validRefHandles.length === 0) {
+      return locators.map(() => null)
+    }
+
+    // Compare in browser context
     const matchingRefs = await page.evaluate(
       ({ targets, candidates }) => targets.map((target) => {
         if (!target) return null
         return candidates.find(({ element }) => element === target)?.ref ?? null
       }),
-      { targets: targetHandles, candidates: refHandles.map(({ ref, handle }) => ({ ref, element: handle })) }
+      {
+        targets: targetHandles,
+        candidates: validRefHandles.map(({ ref, handle }) => ({ ref, element: handle })),
+      }
     )
 
     return matchingRefs.map((ref) => {
@@ -819,28 +947,14 @@ export async function getAriaSnapshot({ page, refFilter }: {
   }
 
   return {
-    snapshot: snapshotStr,
+    snapshot: snapshotWithRefs,
     refToElement,
-    refHandles,
+    getLocatorForRef,
+    getElementHandlesForRefs,
     getRefsForLocators,
     getRefForLocator: async (loc) => (await getRefsForLocators([loc]))[0],
     getRefStringForLocator: async (loc) => (await getRefsForLocators([loc]))[0]?.ref ?? null,
   }
-}
-
-function extractRefInfoFromSnapshot(snapshot: string): Map<string, { role: string; name: string }> {
-  const lines = snapshot.split('\n')
-  return lines.reduce((map, line) => {
-    if (!line.trim()) {
-      return map
-    }
-    const parsed = parseSnapshotLine(line)
-    if (!parsed.ref || map.has(parsed.ref)) {
-      return map
-    }
-    map.set(parsed.ref, { role: parsed.role, name: parsed.name ?? '' })
-    return map
-  }, new Map<string, { role: string; name: string }>())
 }
 
 /**
@@ -872,7 +986,7 @@ export async function showAriaRefLabels({ page, interactiveOnly = true, logger }
   labelCount: number
 }> {
   const getSnapshotStart = Date.now()
-  const { snapshot, refHandles, refToElement } = await getAriaSnapshot({
+  const { snapshot, refToElement, getElementHandlesForRefs } = await getAriaSnapshot({
     page,
     refFilter: interactiveOnly ? (info) => { return INTERACTIVE_ROLES.has(info.role) } : undefined,
   })
@@ -881,11 +995,18 @@ export async function showAriaRefLabels({ page, interactiveOnly = true, logger }
     log(`getAriaSnapshot: ${Date.now() - getSnapshotStart}ms`)
   }
 
-  // Filter to only interactive elements if requested
-  const filteredRefs = refHandles
+  // Get element handles in parallel for all refs
+  const getHandlesStart = Date.now()
+  const refs = [...refToElement.keys()]
+  const handleResults = await getElementHandlesForRefs(refs)
+  const validHandles = handleResults
+    .filter((r): r is { ref: string; handle: ElementHandle } => r !== null)
+  if (log) {
+    log(`getElementHandlesForRefs: ${Date.now() - getHandlesStart}ms (${validHandles.length}/${refs.length} refs)`)
+  }
 
   // Build refs with role info for color coding
-  const refsWithRoles = filteredRefs.map(({ ref, handle }) => ({
+  const refsWithRoles = validHandles.map(({ ref, handle }) => ({
     ref,
     element: handle,
     role: refToElement.get(ref)?.role || 'generic',

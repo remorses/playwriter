@@ -2095,10 +2095,11 @@ describe('MCP Server Tests', () => {
         console.log('RefToElement map size:', ariaResult.refToElement.size)
         console.log('RefToElement entries:', [...ariaResult.refToElement.entries()])
 
-        // Verify we can select elements using aria-ref selectors
-        const btnViaAriaRef = cdpPage!.locator('aria-ref=e2')
-        const btnTextViaRef = await btnViaAriaRef.textContent()
-        console.log('Button text via aria-ref=e2:', btnTextViaRef)
+        // Verify we can select elements using getLocatorForRef (our refs, not Playwright's aria-ref)
+        const btnLocator = ariaResult.getLocatorForRef('e1')
+        expect(btnLocator).not.toBeNull()
+        const btnTextViaRef = await btnLocator!.textContent()
+        console.log('Button text via getLocatorForRef(e1):', btnTextViaRef)
         expect(btnTextViaRef).toBe('Submit Form')
 
         // Get ref for the submit button using getRefForLocator
@@ -2110,9 +2111,10 @@ describe('MCP Server Tests', () => {
         expect(btnAriaRef?.name).toBe('Submit Form')
         expect(btnAriaRef?.ref).toMatch(/^e\d+$/)
 
-        // Verify the ref matches what we can use to select
-        const btnFromRef = cdpPage!.locator(`aria-ref=${btnAriaRef?.ref}`)
-        const btnText = await btnFromRef.textContent()
+        // Verify the ref works via getLocatorForRef
+        const btnFromRef = ariaResult.getLocatorForRef(btnAriaRef!.ref)
+        expect(btnFromRef).not.toBeNull()
+        const btnText = await btnFromRef!.textContent()
         expect(btnText).toBe('Submit Form')
 
         // Test getRefStringForLocator
@@ -2128,9 +2130,10 @@ describe('MCP Server Tests', () => {
         expect(linkAriaRef?.role).toBe('link')
         expect(linkAriaRef?.name).toBe('About Us')
 
-        // Verify the link ref works
-        const linkFromRef = cdpPage!.locator(`aria-ref=${linkAriaRef?.ref}`)
-        const linkText = await linkFromRef.textContent()
+        // Verify the link ref works via getLocatorForRef
+        const linkFromRef = ariaResult.getLocatorForRef(linkAriaRef!.ref)
+        expect(linkFromRef).not.toBeNull()
+        const linkText = await linkFromRef!.textContent()
         expect(linkText).toBe('About Us')
 
         // Test input field
