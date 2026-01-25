@@ -125,7 +125,7 @@ const server = new McpServer({
 })
 
 const promptContent =
-  fs.readFileSync(path.join(__dirname, '..', 'src', 'prompt.md'), 'utf-8') +
+  fs.readFileSync(path.join(__dirname, '..', 'dist', 'prompt.md'), 'utf-8') +
   `\n\nfor debugging internal playwriter errors, check playwriter relay server logs at: ${LOG_FILE_PATH}`
 
 server.resource(

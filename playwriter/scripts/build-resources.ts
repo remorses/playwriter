@@ -6,10 +6,10 @@
  * - website/public/ - for hosting on playwriter.dev
  * 
  * Source of truth:
- * - skills/playwriter/SKILL.md - manually edited, contains full docs including CLI usage
+ * - playwriter/src/skill.md - manually edited, contains full docs including CLI usage
  * 
  * Generated files:
- * - playwriter/src/prompt.md - MCP prompt (SKILL.md minus frontmatter and CLI sections)
+ * - playwriter/dist/prompt.md - MCP prompt (skill.md minus CLI sections)
  * - website/public/SKILL.md - full copy for playwriter.dev/SKILL.md
  */
 
@@ -127,18 +127,14 @@ function buildStylesApi() {
 }
 
 /**
- * Removes frontmatter and CLI-related sections from SKILL.md to create prompt.md for the MCP.
+ * Removes CLI-related sections from skill.md to create prompt.md for the MCP.
  * 
  * Sections removed:
- * - Frontmatter (--- block at top)
- * - "## CLI Usage" section and all its subsections (### Execute code, ### Reset connection)
+ * - "## CLI Usage" section and all its subsections
  */
 function stripCliSectionsFromSkill(skillContent: string): string {
-  // Remove frontmatter using regex
-  const withoutFrontmatter = skillContent.replace(/^---\n[\s\S]*?\n---\n*/, '')
-  
   // Parse markdown tokens
-  const tokens = Lexer.lex(withoutFrontmatter)
+  const tokens = Lexer.lex(skillContent)
   
   // Filter out CLI Usage section and its subsections
   const filteredTokens: Token[] = []
@@ -168,17 +164,17 @@ function stripCliSectionsFromSkill(skillContent: string): string {
 }
 
 function buildPromptFromSkill() {
-  // Read SKILL.md as source of truth
-  const skillPath = path.join(playwriterDir, '..', 'skills', 'playwriter', 'SKILL.md')
+  // Read skill.md as source of truth
+  const skillPath = path.join(playwriterDir, 'src', 'skill.md')
   const skillContent = fs.readFileSync(skillPath, 'utf-8')
   
-  // Generate prompt.md for MCP (without frontmatter and CLI sections)
+  // Generate prompt.md for MCP (without CLI sections)
   const promptContent = stripCliSectionsFromSkill(skillContent)
-  const srcPromptPath = path.join(playwriterDir, 'src', 'prompt.md')
-  fs.writeFileSync(srcPromptPath, promptContent, 'utf-8')
-  console.log('Generated playwriter/src/prompt.md (from SKILL.md)')
+  const distPromptPath = path.join(distDir, 'prompt.md')
+  fs.writeFileSync(distPromptPath, promptContent, 'utf-8')
+  console.log('Generated playwriter/dist/prompt.md (from skill.md)')
   
-  // Copy full SKILL.md to website/public/ for hosting at playwriter.dev/SKILL.md
+  // Copy full skill.md to website/public/ for hosting at playwriter.dev/SKILL.md
   const websitePublicRoot = path.join(playwriterDir, '..', 'website', 'public')
   ensureDir(websitePublicRoot)
   fs.writeFileSync(path.join(websitePublicRoot, 'SKILL.md'), skillContent, 'utf-8')

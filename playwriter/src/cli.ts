@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { cac } from '@xmorse/cac'
 import { VERSION, LOG_FILE_PATH } from './utils.js'
 import { ensureRelayServer, RELAY_PORT, waitForExtension } from './relay-client.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const cliRelayEnv = { PLAYWRITER_AUTO_ENABLE: '1' }
 
@@ -316,6 +321,14 @@ cli
   .command('logfile', 'Print the path to the relay server log file')
   .action(() => {
     console.log(LOG_FILE_PATH)
+  })
+
+cli
+  .command('skill', 'Print the full playwriter usage instructions')
+  .action(() => {
+    const skillPath = path.join(__dirname, '..', 'src', 'skill.md')
+    const content = fs.readFileSync(skillPath, 'utf-8')
+    console.log(content)
   })
 
 cli.help()
