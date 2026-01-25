@@ -379,16 +379,26 @@ declare global {
   var disconnectEverything: () => Promise<void>
 }
 
+const MAX_LOG_STRING_LENGTH = 2000
+
+function truncateLogString(value: string): string {
+  if (value.length <= MAX_LOG_STRING_LENGTH) {
+    return value
+  }
+  return `${value.slice(0, MAX_LOG_STRING_LENGTH)}…[truncated ${value.length - MAX_LOG_STRING_LENGTH} chars]`
+}
+
 function safeSerialize(arg: any): string {
   if (arg === undefined) return 'undefined'
   if (arg === null) return 'null'
   if (typeof arg === 'function') return `[Function: ${arg.name || 'anonymous'}]`
   if (typeof arg === 'symbol') return String(arg)
-  if (arg instanceof Error) return arg.stack || arg.message || String(arg)
+  if (typeof arg === 'string') return truncateLogString(arg)
+  if (arg instanceof Error) return truncateLogString(arg.stack || arg.message || String(arg))
   if (typeof arg === 'object') {
     try {
       const seen = new WeakSet()
-      return JSON.stringify(arg, (key, value) => {
+      const serialized = JSON.stringify(arg, (key, value) => {
         if (typeof value === 'object' && value !== null) {
           if (seen.has(value)) return '[Circular]'
           seen.add(value)
@@ -397,11 +407,12 @@ function safeSerialize(arg: any): string {
         }
         return value
       })
+      return truncateLogString(serialized)
     } catch {
-      return String(arg)
+      return truncateLogString(String(arg))
     }
   }
-  return String(arg)
+  return truncateLogString(String(arg))
 }
 
 function sendLog(level: string, args: any[]) {
