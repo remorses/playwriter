@@ -1,4 +1,4 @@
-# playwriter execute
+# playwriter best practices
 
 Control user's Chrome browser via playwright code snippets. Prefer single-line code with semicolons between statements. If you get "extension is not connected" or "no browser tabs have Playwriter enabled" error, tell user to click the playwriter extension icon on the tab they want to control.
 
@@ -139,7 +139,7 @@ await state.myPage.goto('https://example.com');
 
 **Find a page the user opened:**
 
-Sometimes the user enables playwriter on a specific tab they want you to control (e.g., they're logged into an app). Find it by URL pattern:
+Sometimes the user enables playwriter extension on a specific tab they want you to control (e.g., they're logged into an app). Find it by URL pattern:
 
 ```js
 const pages = context.pages().filter(x => x.url().includes('myapp.com'));
@@ -265,14 +265,14 @@ const source = await getReactSource({ locator: page.locator('aria-ref=e5') });
 // => { fileName, lineNumber, columnNumber, componentName }
 ```
 
-**getStylesForLocator** - inspect CSS styles applied to an element, like browser DevTools "Styles" panel. Useful for debugging styling issues, finding where a CSS property is defined (file:line), and checking inherited styles. Returns selector, source location, and declarations for each matching rule. ALWAYS read `https://playwriter.dev/resources/styles-api.md` first.
+**getStylesForLocator** - inspect CSS styles applied to an element, like browser DevTools "Styles" panel. Useful for debugging styling issues, finding where a CSS property is defined (file:line), and checking inherited styles. Returns selector, source location, and declarations for each matching rule. ALWAYS fetch `https://playwriter.dev/resources/styles-api.md` first with curl or webfetch tool.
 
 ```js
 const styles = await getStylesForLocator({ locator: page.locator('.btn'), cdp: await getCDPSession({ page }) });
 console.log(formatStylesAsText(styles));
 ```
 
-**createDebugger** - set breakpoints, step through code, inspect variables at runtime. Useful for debugging issues that only reproduce in browser, understanding code flow, and inspecting state at specific points. Can pause on exceptions, evaluate expressions in scope, and blackbox framework code. ALWAYS read `https://playwriter.dev/resources/debugger-api.md` first.
+**createDebugger** - set breakpoints, step through code, inspect variables at runtime. Useful for debugging issues that only reproduce in browser, understanding code flow, and inspecting state at specific points. Can pause on exceptions, evaluate expressions in scope, and blackbox framework code. ALWAYS fetch `https://playwriter.dev/resources/debugger-api.md` first.
 
 ```js
 const cdp = await getCDPSession({ page }); const dbg = createDebugger({ cdp }); await dbg.enable();
@@ -324,6 +324,8 @@ Always use `scale: 'css'` to avoid 2-4x larger images on high-DPI displays:
 ```js
 await page.screenshot({ path: 'shot.png', scale: 'css' });
 ```
+
+If you want to read back the image file into context make sure to resize it first, scaling down the image to make sure max size is 1500px. for example with `sips --resampleHeightWidthMax 1500 input.png --out output.png` on macOS.
 
 ## page.evaluate
 
@@ -421,4 +423,13 @@ Examples of what playwriter can do:
 
 ## debugging playwriter issues
 
-if some internal critical error happens you can read your own relay ws logs to understand the issue, it will show logs from extension, mcp and ws server together. then you can create a gh issue using `gh issue create -R remorses/playwriter --title title --body body`. ask for user confirmation before doing this.
+if some internal critical error happens you can read the relay server logs to understand the issue. the log file is located in the system temp directory:
+
+```bash
+playwriter logfile  # prints the log file path
+# typically: /tmp/playwriter/relay-server.log (Linux/macOS) or %TEMP%\playwriter\relay-server.log (Windows)
+```
+
+the log file contains logs from the extension, MCP and WS server together with all CDP events. the file is recreated every time the server starts. for debugging internal playwriter errors, read this file with grep/rg to find relevant lines.
+
+if you find a bug, you can create a gh issue using `gh issue create -R remorses/playwriter --title title --body body`. ask for user confirmation before doing this.
