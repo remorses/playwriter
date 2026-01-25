@@ -10,9 +10,11 @@ If `playwriter` command is not found, install globally or use npx/bunx:
 ```bash
 npm install -g playwriter@latest
 # or use without installing:
-npx playwriter session new
-bunx playwriter session new
+npx playwriter@latest session new
+bunx playwriter@latest session new
 ```
+
+If using npx or bunx always use @latest for the first session command. so we are sure of using the latest version of the package
 
 ### Session management
 
@@ -132,7 +134,7 @@ console.log('url:', page.url()); console.log(await accessibilitySnapshot({ page 
 
 For visually complex pages (grids, galleries, dashboards), use `screenshotWithAccessibilityLabels({ page })` instead to understand spatial layout.
 
-If nothing changed, try `await page.waitForLoadState('networkidle', {timeout: 3000})` or you may have clicked the wrong element.
+If nothing changed, try `await waitForPageLoad({ page, timeout: 3000 })` or you may have clicked the wrong element.
 
 ## accessibility snapshots
 

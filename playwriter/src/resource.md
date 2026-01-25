@@ -26,7 +26,7 @@ console.log('Heading text:', headingText)
 await page.getByRole('button', { name: 'Submit Form' }).click()
 console.log('Clicked submit button')
 
-await page.waitForLoadState('networkidle')
+await waitForPageLoad({ page })
 console.log('Form submitted successfully')
 ```
 
@@ -74,8 +74,9 @@ await page.locator('//div[@class="content"]')
 
 ```javascript
 await page.goto('https://example.com')
-// Wait for network idle (no requests for 500ms)
-await page.goto('https://example.com', { waitUntil: 'networkidle' })
+// Wait for page load (smart detection that ignores analytics/ads)
+await page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+await waitForPageLoad({ page })
 ```
 
 ### Navigate Back/Forward
@@ -345,8 +346,8 @@ await page.waitForFunction(
 // Wait for navigation
 await page.waitForURL('**/success')
 
-// Wait for page load
-await page.waitForLoadState('networkidle')
+// Wait for page load (smart detection that ignores analytics/ads)
+await waitForPageLoad({ page })
 
 // Wait for specific condition
 await page.waitForFunction(

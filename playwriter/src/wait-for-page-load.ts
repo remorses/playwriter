@@ -131,6 +131,25 @@ export async function waitForPageLoad(options: WaitForPageLoadOptions): Promise<
     return result
   }
 
+  // Fast path: check immediately first. If already ready, return without waiting.
+  try {
+    const firstCheck = await checkPageReady()
+    if (firstCheck.ready) {
+      return {
+        success: true,
+        readyState: firstCheck.readyState,
+        pendingRequests: [],
+        waitTimeMs: Date.now() - startTime,
+        timedOut: false,
+      }
+    }
+    lastReadyState = firstCheck.readyState
+    lastPendingRequests = firstCheck.pendingRequests
+  } catch (e) {
+    // First check failed, continue with polling
+  }
+
+  // Not ready yet - wait minWait to let JS settle and catch late-starting requests
   await sleep(minWait)
 
   while (Date.now() - startTime < timeout) {

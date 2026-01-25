@@ -37,7 +37,7 @@ console.log('url:', page.url()); console.log(await accessibilitySnapshot({ page 
 
 For visually complex pages (grids, galleries, dashboards), use `screenshotWithAccessibilityLabels({ page })` instead to understand spatial layout.
 
-If nothing changed, try `await page.waitForLoadState('networkidle', {timeout: 3000})` or you may have clicked the wrong element.
+If nothing changed, try `await waitForPageLoad({ page, timeout: 3000 })` or you may have clicked the wrong element.
 
 ## accessibility snapshots
 
