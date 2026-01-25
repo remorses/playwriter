@@ -746,18 +746,30 @@ function processAriaTreeWithRefs(
 
   for (const line of lines) {
     if (!line.trim()) {
+      result.push(line) // Preserve empty lines for structure
       continue
     }
 
+    // Handle single-quote wrapped lines: - 'role "name with: colon"':
+    // These occur when the name contains a colon
+    let processedLine = line.trim()
+    if (processedLine.startsWith("- '") && processedLine.includes("':")) {
+      const innerMatch = processedLine.match(/^-\s+'(.+)'/)
+      if (innerMatch) {
+        processedLine = '- ' + innerMatch[1]
+      }
+    }
+
     // Match lines like: "  - button "Submit"" or "  - heading "Title" [level=1]"
-    const match = line.match(/^(\s*-\s*)(\w+)(?:\s+"([^"]*)")?(.*)$/)
+    const match = processedLine.match(/^-\s*(\w+)(?:\s+"([^"]*)")?(.*)$/)
     if (!match) {
       // Keep metadata lines (like /url:) or text content as-is
       result.push(line)
       continue
     }
 
-    const [, prefix, role, name, suffix] = match
+    const [, role, name, suffix] = match
+    const prefix = line.slice(0, line.indexOf('-') + 2) // Preserve original indentation
     const roleLower = role.toLowerCase()
     const nameStr = name ?? ''
 
@@ -797,7 +809,9 @@ function processAriaTreeWithRefs(
   for (const [ref, data] of refMap) {
     const key = tracker.getKey(data.role, data.name)
     if (!duplicateKeys.has(key)) {
-      delete refMap.get(ref)!.nth
+      // Use spread to create new object without nth (cleaner than delete)
+      const { nth, ...rest } = data
+      refMap.set(ref, rest as RefData)
     }
   }
 
@@ -853,14 +867,9 @@ export async function getAriaSnapshot({ page, refFilter }: {
     }
 
     // Build locator using getByRole with exact matching
-    let locator: Locator
-    if (data.name) {
-      locator = page.getByRole(data.role as any, { name: data.name, exact: true })
-    } else {
-      // For unnamed elements, use role-only locator
-      // Note: this may match multiple elements, nth handles disambiguation
-      locator = page.getByRole(data.role as any)
-    }
+    // For unnamed elements, use { name: '', exact: true } to match only elements
+    // with empty accessible names, so nth disambiguation works correctly
+    let locator = page.getByRole(data.role as any, { name: data.name, exact: true })
 
     // Apply nth if needed for disambiguation (multiple elements with same role+name)
     if (data.nth !== undefined) {
@@ -871,27 +880,36 @@ export async function getAriaSnapshot({ page, refFilter }: {
   }
 
   /**
-   * Get ElementHandles for multiple refs in parallel.
+   * Get ElementHandles for multiple refs in batches.
    * Used by showAriaRefLabels for batched bounding box fetching.
+   * Processes in batches of 20 to avoid overwhelming the browser.
    */
   const getElementHandlesForRefs = async (refs: string[]): Promise<Array<{ ref: string; handle: ElementHandle } | null>> => {
-    const results = await Promise.all(
-      refs.map(async (ref) => {
-        const locator = getLocatorForRef(ref)
-        if (!locator) {
-          return null
-        }
-        try {
-          const handle = await locator.elementHandle({ timeout: 2000 })
-          if (!handle) {
+    const BATCH_SIZE = 20
+    const results: Array<{ ref: string; handle: ElementHandle } | null> = []
+
+    for (let i = 0; i < refs.length; i += BATCH_SIZE) {
+      const batch = refs.slice(i, i + BATCH_SIZE)
+      const batchResults = await Promise.all(
+        batch.map(async (ref) => {
+          const locator = getLocatorForRef(ref)
+          if (!locator) {
             return null
           }
-          return { ref, handle }
-        } catch {
-          return null
-        }
-      })
-    )
+          try {
+            const handle = await locator.elementHandle({ timeout: 2000 })
+            if (!handle) {
+              return null
+            }
+            return { ref, handle }
+          } catch {
+            return null
+          }
+        })
+      )
+      results.push(...batchResults)
+    }
+
     return results
   }
 
