@@ -1142,32 +1142,6 @@ export async function startPlayWriterCDPRelayServer({
   // CLI Execute Endpoints - For stateful code execution via CLI
   // ============================================================================
   
-  // Security middleware for CLI endpoints - blocks browser-based attacks
-  // CLI tools (curl, playwriter CLI) don't send Origin headers, but browsers always do
-  app.use('/cli/*', async (c, next) => {
-    // 1. Localhost check: CLI endpoints must only be accessed from localhost
-    // This prevents remote exploitation even if server is exposed via 0.0.0.0
-    const info = getConnInfo(c)
-    const remoteAddress = info.remote.address
-    const isLocalhost = remoteAddress === '127.0.0.1' || remoteAddress === '::1'
-    
-    if (!isLocalhost) {
-      logger?.log(pc.red(`Rejecting /cli request from remote IP: ${remoteAddress}`))
-      return c.text('Forbidden - CLI endpoints are localhost only', 403)
-    }
-    
-    // 2. Origin check: Reject requests with browser Origin headers
-    // Browsers always send Origin for cross-origin requests (including localhost:different-port)
-    // CLI tools don't send Origin, so this blocks website-based attacks while allowing CLI usage
-    const origin = c.req.header('origin')
-    if (origin) {
-      logger?.log(pc.red(`Rejecting /cli request with Origin header: ${origin}`))
-      return c.text('Forbidden - CLI endpoints cannot be called from browsers', 403)
-    }
-    
-    await next()
-  })
-  
   // Session counter for suggesting next session number
   let nextSessionNumber = 1
   
@@ -1302,16 +1276,11 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ success: false, error: 'Extension not connected' } as StopRecordingResult, 503)
       }
 
-      // Create a promise that will be resolved when we receive the final chunk
-      const recording = Array.from(activeRecordings.values()).find(r => {
-        // Find the recording for this session
-        if (params.sessionId) {
-          const target = connectedTargets.get(params.sessionId)
-          // We don't have tabId in connectedTargets, so we'll match by the first one
-          return true
-        }
-        return true
-      })
+      // Find the active recording. Currently we only support one recording at a time.
+      // The extension handles sessionId → tabId resolution on its side when stopping.
+      // TODO: If we need to support multiple concurrent recordings, we'd need to track
+      // which sessionId corresponds to which tabId when starting a recording.
+      const recording = activeRecordings.values().next().value as typeof activeRecordings extends Map<any, infer V> ? V : never | undefined
 
       if (!recording) {
         return c.json({ success: false, error: 'No active recording found' } as StopRecordingResult, 404)
@@ -1394,10 +1363,9 @@ export async function startPlayWriterCDPRelayServer({
         timeout: 5000,
       }) as CancelRecordingResult
 
-      // Clean up local recording state
-      for (const [tabId, recording] of activeRecordings) {
-        activeRecordings.delete(tabId)
-      }
+      // Note: Recording cleanup is handled by the 'recordingCancelled' event handler
+      // which is triggered by the extension after cancellation. This ensures we only
+      // delete the specific recording that was cancelled, not all active recordings.
 
       return c.json(result)
     } catch (error: any) {

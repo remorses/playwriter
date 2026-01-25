@@ -1110,7 +1110,7 @@ async function handleStartRecording(params: StartRecordingParams): Promise<Start
     // Ensure offscreen document exists
     await ensureOffscreenDocument()
 
-    // Get stream ID using chrome.tabCapture.getMediaStreamId (works without user gesture)
+    // Get stream ID using chrome.tabCapture.getMediaStreamId (requires activeTab permission - user must click extension icon)
     const streamId = await new Promise<string>((resolve, reject) => {
       chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (id) => {
         if (chrome.runtime.lastError) {
