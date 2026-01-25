@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.55
+
+### Features
+
+- **`playwriter skill` CLI command**: New command that prints full MCP instructions to stdout, useful for agents that need up-to-date documentation without relying on MCP resources
+
+### Internal
+
+- **Moved SKILL.md to src/**: Source of truth for agent instructions now lives in `src/skill.md`
+- **Removed docker.package.json**: Cleaned up unused Docker configuration
+
 ## 0.0.54
 
 ### Features

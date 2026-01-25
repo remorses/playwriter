@@ -1,7 +1,7 @@
 {
   "name": "playwriter",
   "description": "",
-  "version": "0.0.54",
+  "version": "0.0.55",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
