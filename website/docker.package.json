@@ -1,7 +1,0 @@
-{
-  "type": "module",
-  "scripts": {},
-  "dependencies": {
-    "@sentry/node": "^10.32.1"
-  }
-}
