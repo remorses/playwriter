@@ -1184,9 +1184,10 @@ async function handleStopRecording(params: StopRecordingParams): Promise<Extensi
   logger.debug('Stopping recording for tab:', tabId)
 
   try {
-    // Send message to offscreen document to stop recording
+    // Send message to offscreen document to stop recording - include tabId for concurrent support
     const result = await chrome.runtime.sendMessage({
       action: 'stopRecording',
+      tabId,
     }) as { success: boolean; tabId?: number; duration?: number; error?: string }
 
     if (!result.success) {
@@ -1225,10 +1226,11 @@ async function handleIsRecording(params: IsRecordingParams): Promise<IsRecording
     return { isRecording: false, tabId }
   }
 
-  // Check with offscreen document for actual recording state
+  // Check with offscreen document for actual recording state - include tabId for concurrent support
   try {
     const result = await chrome.runtime.sendMessage({
       action: 'isRecording',
+      tabId,
     }) as { isRecording: boolean; tabId?: number; startedAt?: number }
 
     return {
@@ -1256,9 +1258,10 @@ async function handleCancelRecording(params: CancelRecordingParams): Promise<Can
   logger.debug('Cancelling recording for tab:', tabId)
 
   try {
-    // Send message to offscreen document to cancel recording
+    // Send message to offscreen document to cancel recording - include tabId for concurrent support
     await chrome.runtime.sendMessage({
       action: 'cancelRecording',
+      tabId,
     })
 
     activeRecordings.delete(tabId)
@@ -1292,8 +1295,8 @@ async function cleanupRecordingForTab(tabId: number): Promise<void> {
   if (recording) {
     logger.debug('Cleaning up recording for disconnected tab:', tabId)
     try {
-      // Tell offscreen document to cancel recording
-      await chrome.runtime.sendMessage({ action: 'cancelRecording' })
+      // Tell offscreen document to cancel recording - include tabId for concurrent support
+      await chrome.runtime.sendMessage({ action: 'cancelRecording', tabId })
     } catch (e) {
       logger.debug('Error cleaning up recording:', e)
     }

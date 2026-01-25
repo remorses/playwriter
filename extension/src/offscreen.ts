@@ -44,7 +44,8 @@ interface OffscreenRecordingState {
   tabId: number
 }
 
-let recording: OffscreenRecordingState | null = null
+// Map of tabId -> recording state for concurrent recording support
+const recordings = new Map<number, OffscreenRecordingState>()
 
 // Message types
 type StartRecordingMessage = {
@@ -59,14 +60,17 @@ type StartRecordingMessage = {
 
 type StopRecordingMessage = {
   action: 'stopRecording'
+  tabId: number
 }
 
 type IsRecordingMessage = {
   action: 'isRecording'
+  tabId: number
 }
 
 type CancelRecordingMessage = {
   action: 'cancelRecording'
+  tabId: number
 }
 
 type OffscreenMessage = StartRecordingMessage | StopRecordingMessage | IsRecordingMessage | CancelRecordingMessage
@@ -81,19 +85,21 @@ async function handleMessage(message: OffscreenMessage): Promise<any> {
     case 'startRecording':
       return handleStartRecording(message)
     case 'stopRecording':
-      return handleStopRecording()
+      return handleStopRecording(message)
     case 'isRecording':
-      return handleIsRecording()
+      return handleIsRecording(message)
     case 'cancelRecording':
-      return handleCancelRecording()
+      return handleCancelRecording(message)
     default:
       return { success: false, error: 'Unknown action' }
   }
 }
 
 async function handleStartRecording(params: StartRecordingMessage): Promise<any> {
-  if (recording) {
-    return { success: false, error: 'Recording already in progress' }
+  const { tabId } = params
+  
+  if (recordings.has(tabId)) {
+    return { success: false, error: `Recording already in progress for tab ${tabId}` }
   }
 
   try {
@@ -123,14 +129,14 @@ async function handleStartRecording(params: StartRecordingMessage): Promise<any>
 
     const startedAt = Date.now()
 
-    recording = {
+    recordings.set(tabId, {
       recorder,
       stream,
       startedAt,
-      tabId: params.tabId,
-    }
+      tabId,
+    })
 
-    // Send chunks to service worker
+    // Send chunks to service worker - each chunk includes tabId for routing
     recorder.ondataavailable = async (event) => {
       if (event.data.size > 0) {
         // Convert blob to array buffer and send to service worker
@@ -138,38 +144,41 @@ async function handleStartRecording(params: StartRecordingMessage): Promise<any>
         const uint8Array = new Uint8Array(arrayBuffer)
         chrome.runtime.sendMessage({
           action: 'recordingChunk',
-          tabId: params.tabId,
+          tabId,
           data: Array.from(uint8Array), // Convert to regular array for message passing
         })
       }
     }
 
     recorder.onerror = (event: Event) => {
-      console.error('MediaRecorder error:', (event as ErrorEvent).error)
-      handleCancelRecording()
+      console.error(`MediaRecorder error for tab ${tabId}:`, (event as ErrorEvent).error)
+      handleCancelRecordingForTab(tabId)
     }
 
     recorder.onstop = () => {
-      console.log('MediaRecorder stopped')
+      console.log(`MediaRecorder stopped for tab ${tabId}`)
     }
 
     // Start with 1 second chunks
     recorder.start(1000)
 
-    return { success: true, tabId: params.tabId, startedAt, mimeType: 'video/mp4' }
+    return { success: true, tabId, startedAt, mimeType: 'video/mp4' }
   } catch (error: any) {
-    console.error('Failed to start recording:', error)
+    console.error(`Failed to start recording for tab ${tabId}:`, error)
     return { success: false, error: error.message }
   }
 }
 
-async function handleStopRecording(): Promise<any> {
+async function handleStopRecording(params: StopRecordingMessage): Promise<any> {
+  const { tabId } = params
+  const recording = recordings.get(tabId)
+  
   if (!recording) {
-    return { success: false, error: 'No active recording' }
+    return { success: false, error: `No active recording for tab ${tabId}` }
   }
 
   try {
-    const { recorder, stream, startedAt, tabId } = recording
+    const { recorder, stream, startedAt } = recording
 
     // Stop recorder and wait for final data
     await new Promise<void>((resolve) => {
@@ -199,33 +208,45 @@ async function handleStopRecording(): Promise<any> {
       final: true,
     })
 
-    recording = null
+    recordings.delete(tabId)
 
     return { success: true, tabId, duration }
   } catch (error: any) {
-    console.error('Failed to stop recording:', error)
+    console.error(`Failed to stop recording for tab ${tabId}:`, error)
     return { success: false, error: error.message }
   }
 }
 
-function handleIsRecording(): any {
+function handleIsRecording(params: IsRecordingMessage): any {
+  const { tabId } = params
+  const recording = recordings.get(tabId)
+  
   if (!recording) {
-    return { isRecording: false }
+    return { isRecording: false, tabId }
   }
+  
   return {
     isRecording: recording.recorder?.state === 'recording',
-    tabId: recording.tabId,
+    tabId,
     startedAt: recording.startedAt,
   }
 }
 
-function handleCancelRecording(): any {
+function handleCancelRecording(params: CancelRecordingMessage): any {
+  const { tabId } = params
+  return handleCancelRecordingForTab(tabId)
+}
+
+// Helper function to cancel recording for a specific tab - used by error handlers too
+function handleCancelRecordingForTab(tabId: number): any {
+  const recording = recordings.get(tabId)
+  
   if (!recording) {
-    return { success: true }
+    return { success: true, tabId }
   }
 
   try {
-    const { recorder, stream, tabId } = recording
+    const { recorder, stream } = recording
 
     if (recorder.state !== 'inactive') {
       recorder.stop()
@@ -237,11 +258,11 @@ function handleCancelRecording(): any {
       tabId,
     })
 
-    recording = null
+    recordings.delete(tabId)
 
-    return { success: true }
+    return { success: true, tabId }
   } catch (error: any) {
-    console.error('Failed to cancel recording:', error)
+    console.error(`Failed to cancel recording for tab ${tabId}:`, error)
     return { success: false, error: error.message }
   }
 }

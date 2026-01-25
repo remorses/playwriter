@@ -88,8 +88,10 @@ export async function startPlayWriterCDPRelayServer({
   }
 
   // Recording state - tracks active recordings and their accumulated chunks
+  // Keyed by tabId for routing chunks, but also stores sessionId for lookup when stopping
   type ActiveRecording = {
     tabId: number
+    sessionId?: string  // The sessionId used to start this recording, for lookup when stopping
     outputPath: string
     chunks: Buffer[]
     startedAt: number
@@ -1250,14 +1252,15 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       if (result.success) {
-        // Track this recording
+        // Track this recording - store sessionId for lookup when stopping
         activeRecordings.set(result.tabId, {
           tabId: result.tabId,
+          sessionId: params.sessionId,
           outputPath,
           chunks: [],
           startedAt: result.startedAt,
         })
-        logger?.log(pc.green(`Recording started for tab ${result.tabId}, output: ${outputPath}`))
+        logger?.log(pc.green(`Recording started for tab ${result.tabId} (sessionId: ${params.sessionId || 'none'}), output: ${outputPath}`))
       }
 
       return c.json(result)
@@ -1276,14 +1279,29 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ success: false, error: 'Extension not connected' } as StopRecordingResult, 503)
       }
 
-      // Find the active recording. Currently we only support one recording at a time.
-      // The extension handles sessionId → tabId resolution on its side when stopping.
-      // TODO: If we need to support multiple concurrent recordings, we'd need to track
-      // which sessionId corresponds to which tabId when starting a recording.
-      const recording = activeRecordings.values().next().value as typeof activeRecordings extends Map<any, infer V> ? V : never | undefined
+      // Find the active recording by sessionId for concurrent recording support
+      // If no sessionId provided, fall back to the first recording (backward compatibility)
+      const findRecording = (): ActiveRecording | undefined => {
+        if (params.sessionId) {
+          for (const recording of activeRecordings.values()) {
+            if (recording.sessionId === params.sessionId) {
+              return recording
+            }
+          }
+          // SessionId provided but no matching recording found
+          return undefined
+        }
+        // No sessionId - return first recording (backward compat for single-recording case)
+        return activeRecordings.values().next().value
+      }
+      
+      const recording = findRecording()
 
       if (!recording) {
-        return c.json({ success: false, error: 'No active recording found' } as StopRecordingResult, 404)
+        const errorMsg = params.sessionId 
+          ? `No active recording found for sessionId: ${params.sessionId}` 
+          : 'No active recording found'
+        return c.json({ success: false, error: errorMsg } as StopRecordingResult, 404)
       }
 
       // Set up promise to wait for final chunk
