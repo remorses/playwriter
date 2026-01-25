@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.54
+
+### Features
+
+- **Faster aria snapshot ref lookup**: Refs are now extracted directly from the snapshot string and fetched in parallel (20 concurrent requests), significantly reducing time to generate accessibility snapshots with labels
+- **`refFilter` parameter for `getAriaSnapshot`**: New optional filter to include only specific refs by role/name, reducing unnecessary ref lookups
+- **Increased default execution timeout**: Execution timeout increased from 5s to 10s for better handling of slow operations
+
+### Bug Fixes
+
+- **Pass cwd to executor in MCP**: File operations in executed code now use the correct working directory
+
 ## 0.0.53
 
 ### Bug Fixes
