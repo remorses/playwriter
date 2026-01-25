@@ -17,7 +17,13 @@
 
 2. Click extension icon on a tab → turns green when connected
 
-3. Add skill to your agent:
+3. Start automating the browser:
+   ```bash
+   npm i -g playwriter
+   playwriter -s 1 -e "await page.goto('https://example.com')"
+   ```
+
+4. Add skill to your agent:
    ```bash
    npx -y skills add remorses/playwriter
    ```
