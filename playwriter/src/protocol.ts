@@ -11,6 +11,7 @@ type ForwardCDPCommand =
         method: K
         sessionId?: string
         params?: ProtocolMapping.Commands[K]['paramsType'][0]
+        source?: 'playwriter'
       }
     }
   }[keyof ProtocolMapping.Commands]

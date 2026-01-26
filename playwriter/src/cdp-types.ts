@@ -1,11 +1,14 @@
 import type { Protocol } from 'devtools-protocol';
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 
+export type CDPCommandSource = 'playwriter';
+
 export type CDPCommandFor<T extends keyof ProtocolMapping.Commands> = {
   id: number;
   sessionId?: string;
   method: T;
   params?: ProtocolMapping.Commands[T]['paramsType'][0];
+  source?: CDPCommandSource;
 };
 
 export type CDPCommand = {

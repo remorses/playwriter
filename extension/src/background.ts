@@ -600,6 +600,12 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
 
   const debuggee = targetTabId ? { tabId: targetTabId } : undefined
 
+  // TODO disable network things?
+  // if (msg.params.method === 'Network.enable' && msg.params.source !== 'playwriter') {
+  //   logger.debug('Skipping Network.enable from non-playwriter CDP client:', msg.params.sessionId)
+  //   return {}
+  // }
+
   switch (msg.params.method) {
     case 'Runtime.enable': {
       if (!debuggee) {

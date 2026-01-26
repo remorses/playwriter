@@ -73,7 +73,13 @@ export class CDPSession implements ICDPSession {
     params?: ProtocolMapping.Commands[K]['paramsType'][0],
   ): Promise<ProtocolMapping.Commands[K]['returnType']> {
     const id = ++this.messageId
-    const message: Record<string, unknown> = { id, method, params }
+    const message: {
+      id: number
+      method: K
+      params?: ProtocolMapping.Commands[K]['paramsType'][0]
+      sessionId?: string
+      source?: 'playwriter'
+    } = { id, method, params, source: 'playwriter' }
     if (this.sessionId) {
       message.sessionId = this.sessionId
     }

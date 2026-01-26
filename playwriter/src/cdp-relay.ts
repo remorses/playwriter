@@ -267,7 +267,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
     }
   }
 
-  async function routeCdpCommand({ method, params, sessionId }: { method: string; params: any; sessionId?: string }) {
+  async function routeCdpCommand({ method, params, sessionId, source }: { method: string; params: any; sessionId?: string; source?: 'playwriter' }) {
     switch (method) {
       case 'Browser.getVersion': {
         return {
@@ -349,14 +349,14 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
       case 'Target.createTarget': {
         return await sendToExtension({
           method: 'forwardCDPCommand',
-          params: { method, params }
+          params: { method, params, source }
         })
       }
 
       case 'Target.closeTarget': {
         return await sendToExtension({
           method: 'forwardCDPCommand',
-          params: { method, params }
+          params: { method, params, source }
         })
       }
 
@@ -386,7 +386,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
 
         const result = await sendToExtension({
           method: 'forwardCDPCommand',
-          params: { sessionId, method, params }
+          params: { sessionId, method, params, source }
         })
 
         await contextCreatedPromise
@@ -397,7 +397,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
 
     return await sendToExtension({
       method: 'forwardCDPCommand',
-      params: { sessionId, method, params }
+      params: { sessionId, method, params, source }
     })
   }
 
@@ -582,7 +582,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
           return
         }
 
-        const { id, sessionId, method, params } = message
+        const { id, sessionId, method, params, source } = message
 
         logCdpMessage({
           direction: 'from-playwright',
@@ -607,7 +607,7 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
         }
 
         try {
-          const result: any = await routeCdpCommand({ method, params, sessionId })
+          const result: any = await routeCdpCommand({ method, params, sessionId, source })
 
           if (method === 'Target.setAutoAttach' && !sessionId) {
             for (const target of connectedTargets.values()) {
