@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.56
+
+### Bug Fixes
+
+- **Fix hung navigations on YouTube and similar sites**: Resume filtered targets (like service workers) to avoid blocking navigations. CDP `Target.setAutoAttach` with `waitForDebuggerOnStart: true` requires calling `Runtime.runIfWaitingForDebugger` even on targets we filter out, otherwise they hang forever.
+- **Fix auto-enable page selection when no pages**: Properly handles the case when there are no existing pages during auto-enable
+
+### Features
+
+- **CDP JSONL logging**: Added structured CDP logging to a JSONL file (`/tmp/playwriter/cdp.jsonl`) for debugging. Log all CDP messages with direction, timestamp, and source info. Use `jq` to analyze.
+- **Sync tab state for automated tabs**: Tab state is now properly synced for programmatically created tabs
+
+### Improvements
+
+- **Better logging output**: Use `util.inspect` for cleaner log output with proper object formatting
+- **Set default timeout**: Added sensible default timeouts for operations
+
 ## 0.0.55
 
 ### Features
