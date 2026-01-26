@@ -3850,7 +3850,7 @@ describe('Auto-enable Tests', () => {
         await serviceWorker.evaluate(async () => {
             await globalThis.disconnectEverything()
         })
-        await new Promise(r => setTimeout(r, 100))
+        await new Promise((r) => { setTimeout(r, 100) })
 
         const tabCountBefore = await serviceWorker.evaluate(() => {
             const state = globalThis.getExtensionState()
@@ -3883,8 +3883,25 @@ describe('Auto-enable Tests', () => {
             arguments: {
                 code: js`
                     await page.close();
+                    return { remaining: context.pages().length };
                 `,
             },
         })
+
+        await new Promise((r) => { setTimeout(r, 100) })
+
+        const afterCloseResult = await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+                    return { pageCount: context.pages().length, url: page.url() };
+                `,
+            },
+        })
+
+        expect((afterCloseResult as any).isError).toBeFalsy()
+        const afterCloseText = (afterCloseResult as any).content[0].text
+        expect(afterCloseText).toContain('pageCount')
+        expect(afterCloseText).toContain('about:blank')
     }, 60000)
 })
