@@ -12,7 +12,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-let childSessions: Map<string, number> = new Map()
+let childSessions: Map<string, { tabId: number; targetId?: string }> = new Map()
 let nextSessionId = 1
 let tabGroupQueue: Promise<void> = Promise.resolve()
 
@@ -581,11 +581,11 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
   }
 
   if (!targetTab && msg.params.sessionId) {
-    const parentTabId = childSessions.get(msg.params.sessionId)
-    if (parentTabId) {
-      targetTabId = parentTabId
-      targetTab = store.getState().tabs.get(parentTabId)
-      logger.debug('Found parent tab for child session:', msg.params.sessionId, 'tabId:', parentTabId)
+    const childSession = childSessions.get(msg.params.sessionId)
+    if (childSession) {
+      targetTabId = childSession.tabId
+      targetTab = store.getState().tabs.get(childSession.tabId)
+      logger.debug('Found parent tab for child session:', msg.params.sessionId, 'tabId:', childSession.tabId)
     }
   }
 
@@ -672,7 +672,8 @@ function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string
 
   if (method === 'Target.attachedToTarget' && params?.sessionId) {
     logger.debug('Child target attached:', params.sessionId, 'for tab:', source.tabId)
-    childSessions.set(params.sessionId, source.tabId!)
+    const targetId = params.targetInfo?.targetId as string | undefined
+    childSessions.set(params.sessionId, { tabId: source.tabId!, targetId })
   }
 
   if (method === 'Target.detachedFromTarget' && params?.sessionId) {
@@ -726,7 +727,17 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
   }
 
   for (const [childSessionId, parentTabId] of childSessions.entries()) {
-    if (parentTabId === tabId) {
+    if (parentTabId.tabId === tabId) {
+      const childDetachParams: Protocol.Target.DetachedFromTargetEvent = parentTabId.targetId
+        ? { sessionId: childSessionId, targetId: parentTabId.targetId }
+        : { sessionId: childSessionId }
+      sendMessage({
+        method: 'forwardCDPEvent',
+        params: {
+          method: 'Target.detachedFromTarget',
+          params: childDetachParams,
+        },
+      })
       logger.debug('Cleaning up child session:', childSessionId, 'for tab:', tabId)
       childSessions.delete(childSessionId)
     }
@@ -849,7 +860,17 @@ function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
   })
 
   for (const [childSessionId, parentTabId] of childSessions.entries()) {
-    if (parentTabId === tabId) {
+    if (parentTabId.tabId === tabId) {
+      const childDetachParams: Protocol.Target.DetachedFromTargetEvent = parentTabId.targetId
+        ? { sessionId: childSessionId, targetId: parentTabId.targetId }
+        : { sessionId: childSessionId }
+      sendMessage({
+        method: 'forwardCDPEvent',
+        params: {
+          method: 'Target.detachedFromTarget',
+          params: childDetachParams,
+        },
+      })
       logger.debug('Cleaning up child session:', childSessionId, 'for tab:', tabId)
       childSessions.delete(childSessionId)
     }

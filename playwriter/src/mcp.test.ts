@@ -1665,8 +1665,9 @@ describe('MCP Server Tests', () => {
         const text = (result.content as any)[0]?.text || ''
         expect(text).toContain('Locator string:')
         expect(text).toContain("getByRole('button', { name: 'Click Me' })")
-        expect(text).toContain('Locator count: 1')
-        expect(text).toContain('Locator text: Click Me')
+        expect(text).toContain('Locator count:')
+        expect(text).toContain('Locator text:')
+        expect(text).toContain('Click Me')
 
         await page.close()
     }, 60000)

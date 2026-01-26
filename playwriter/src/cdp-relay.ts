@@ -32,10 +32,8 @@ const OUR_EXTENSION_IDS = [
 function isRestrictedTarget(targetInfo: Protocol.Target.TargetInfo): boolean {
   const { url, type } = targetInfo
 
-  // Filter by type - only allow 'page' type through
-  // Service workers, web workers, iframes, etc. cause issues when Playwright tries to initialize them
-  // Iframes are accessible via page.frameLocator() on the parent page
-  if (type !== 'page') {
+  // Filter by type - allow pages and iframe targets (OOPIFs)
+  if (type !== 'page' && type !== 'iframe') {
     return true
   }
 
@@ -885,19 +883,7 @@ export async function startPlayWriterCDPRelayServer({
             const targetParams = params as Protocol.Target.AttachedToTargetEvent
 
             // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
-            // These targets can't be properly controlled through chrome.debugger API
-            // and cause issues when Playwright tries to initialize them (issue #14)
             if (isRestrictedTarget(targetParams.targetInfo)) {
-              // NOTE: We auto-resume restricted targets that were auto-attached with
-              // waitForDebuggerOnStart=true. We still filter them out, but Chrome pauses
-              // these targets until Runtime.runIfWaitingForDebugger is sent; if we don’t
-              // resume, OOPIF navigations (e.g. Google RotateCookiesPage) can hang and the
-              // main tab spinner never finishes.
-              //
-              // To support iframes directly in the future, we’d need to forward
-              // Target.attachedToTarget for type==='iframe', wire child session routing
-              // (commands/events per session), and allow iframes in isRestrictedTarget,
-              // plus add tests for iframe navigation + network lifecycles.
               if (targetParams.waitingForDebugger && targetParams.sessionId) {
                 void sendToExtension({
                   method: 'forwardCDPCommand',

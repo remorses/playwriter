@@ -11,6 +11,7 @@ import { createFileLogger } from './create-logger.js'
 import { killPortProcess } from 'kill-port-process'
 
 const execAsync = promisify(exec)
+let extensionBuildQueue: Promise<void> = Promise.resolve()
 
 export async function getExtensionServiceWorker(context: BrowserContext) {
   let serviceWorkers = context.serviceWorkers().filter((sw) => sw.url().startsWith('chrome-extension://'))
@@ -54,7 +55,15 @@ export async function setupTestContext({
   await killPortProcess(port).catch(() => {})
 
   console.log('Building extension...')
-  await execAsync(`TESTING=1 PLAYWRITER_PORT=${port} pnpm build`, { cwd: '../extension' })
+  const buildPromise = extensionBuildQueue
+    .catch((error) => {
+      console.error('Previous extension build failed:', error)
+    })
+    .then(async () => {
+      await execAsync(`TESTING=1 PLAYWRITER_PORT=${port} pnpm build`, { cwd: '../extension' })
+    })
+  extensionBuildQueue = buildPromise.finally(() => {})
+  await buildPromise
   console.log('Extension built')
 
   const localLogPath = path.join(process.cwd(), 'relay-server.log')
