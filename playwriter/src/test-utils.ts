@@ -286,3 +286,85 @@ export async function withTimeout<T>({ promise, timeoutMs, errorMessage }: { pro
             })
     })
 }
+
+/** Tagged template for inline JS code strings used in MCP execute calls */
+export function js(strings: TemplateStringsArray, ...values: unknown[]): string {
+    return strings.reduce(
+        (result, str, i) => result + str + (values[i] || ''),
+        '',
+    )
+}
+
+export function tryJsonParse(str: string) {
+    try {
+        return JSON.parse(str)
+    } catch {
+        return str
+    }
+}
+
+export type SimpleServer = {
+    baseUrl: string
+    close: () => Promise<void>
+}
+
+/** Minimal local HTTP server for tests that need cross-origin iframes or custom routes */
+export async function createSimpleServer({ routes }: { routes: Record<string, string> }): Promise<SimpleServer> {
+    const openSockets: Set<net.Socket> = new Set()
+    const server = http.createServer((req, res) => {
+        const url = req.url || '/'
+        const body = routes[url]
+        if (!body) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' })
+            res.end('not found')
+            return
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(body)
+    })
+
+    server.on('connection', (socket) => {
+        openSockets.add(socket)
+        socket.on('close', () => {
+            openSockets.delete(socket)
+        })
+    })
+
+    await new Promise<void>((resolve) => {
+        server.listen(0, '127.0.0.1', () => {
+            resolve()
+        })
+    })
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+        await new Promise<void>((resolve, reject) => {
+            server.close((error) => {
+                if (error) {
+                    reject(error)
+                    return
+                }
+                resolve()
+            })
+        })
+        throw new Error('Failed to start test server')
+    }
+
+    return {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: async () => {
+            for (const socket of openSockets) {
+                socket.destroy()
+            }
+            await new Promise<void>((resolve, reject) => {
+                server.close((error) => {
+                    if (error) {
+                        reject(error)
+                        return
+                    }
+                    resolve()
+                })
+            })
+        },
+    }
+}
