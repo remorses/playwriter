@@ -24,6 +24,7 @@ export default defineConfig({
           src: resolve(__dirname, 'icons/*'),
           dest: 'icons'
         },
+
         {
           src: resolve(__dirname, 'manifest.json'),
           dest: '.',

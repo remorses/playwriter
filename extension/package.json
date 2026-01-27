@@ -16,7 +16,7 @@
     },
     "license": "Apache-2.0",
     "scripts": {
-        "build": "tsc --project . && vite build --config vite.config.mts",
+        "build": "tsc --project . && vite build --config vite.config.mts && tsx scripts/download-prism.ts",
         "reload": "bun run build && osascript -e 'tell application \"Google Chrome\" to open location \"chrome://extensions/?id=pebbngnfojnignonigcnkdilknapkgid\"'",
         "watch": "vite build --watch --config vite.config.mts",
         "clean": "rm -rf dist"

@@ -141,8 +141,7 @@ cli
     try {
       const res = await fetch(`${serverUrl}/cli/session/suggest`)
       const { next } = await res.json() as { next: number }
-      console.log(`Session ${next} created.`)
-      console.log(`Use it with: playwriter -s ${next} -e "await page.goto('https://example.com')"`)
+      console.log(`Session ${next} created. Use with: playwriter -s ${next} -e "..."`)
     } catch (error: any) {
       console.error(`Error: ${error.message}`)
       process.exit(1)

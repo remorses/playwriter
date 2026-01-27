@@ -10,7 +10,7 @@
         --color-text: #262626;
         --color-heading: #171717;
         --color-border: #d4d4d4;
-        --color-code-bg: #f5f5f5;
+        --color-code-bg: transparent;
         --color-link: #0969da;
         --color-link-hover: #0550ae;
         --color-success: #16a34a;
@@ -25,7 +25,7 @@
           --color-text: #e5e5e5;
           --color-heading: #fafafa;
           --color-border: #404040;
-          --color-code-bg: #171717;
+          --color-code-bg: transparent;
           --color-link: #4493f8;
           --color-link-hover: #539bf5;
           --color-success: #22c55e;
@@ -90,24 +90,22 @@
         font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
           "Liberation Mono", monospace;
         font-size: 0.875em;
-        background-color: var(--color-code-bg);
-        padding: 0.2em 0.4em;
-        border-radius: 6px;
       }
 
       pre {
-        background-color: var(--color-code-bg);
-        padding: 1rem;
-        border-radius: 6px;
-        overflow-x: auto;
+        background: transparent !important;
+        border: none !important;
+        padding: 0 !important;
         margin-bottom: 1rem;
-        border: 1px solid var(--color-border);
+        overflow: visible;
+        white-space: pre;
       }
 
       pre code {
-        background-color: transparent;
-        padding: 0;
+        background: transparent !important;
+        padding: 0 !important;
         font-size: 0.875rem;
+        white-space: pre;
       }
 
       ol,
@@ -124,8 +122,6 @@
         font-weight: 600;
         color: var(--color-heading);
       }
-
-
 
       .step-number {
         color: var(--color-link);
@@ -144,6 +140,7 @@
 
       .step-content {
         flex: 1;
+        min-width: 0;
       }
 
       footer {
@@ -153,6 +150,41 @@
         text-align: center;
         color: var(--color-muted);
         font-size: 0.875rem;
+      }
+
+      /* Tomorrow (light) token colors */
+      code[class*="language-"],
+      pre[class*="language-"] {
+        color: #8959a8;
+        text-shadow: none;
+      }
+      .token.comment, .token.block-comment, .token.prolog, .token.doctype, .token.cdata { color: #8e908c; }
+      .token.punctuation { color: #8959a8; }
+      .token.tag, .token.attr-name, .token.namespace, .token.deleted { color: #c82829; }
+      .token.function-name { color: #4271ae; }
+      .token.boolean, .token.number, .token.function { color: #f5871f; }
+      .token.property, .token.class-name, .token.constant, .token.symbol { color: #eab700; }
+      .token.selector, .token.important, .token.atrule, .token.keyword, .token.builtin { color: #8959a8; }
+      .token.string, .token.char, .token.attr-value, .token.regex, .token.variable { color: #718c00; }
+      .token.operator, .token.entity, .token.url { color: #3e999f; }
+      .token.inserted { color: #718c00; }
+
+      /* Tomorrow Night (dark) token colors */
+      @media (prefers-color-scheme: dark) {
+        code[class*="language-"],
+        pre[class*="language-"] {
+          color: #b294bb;
+        }
+        .token.comment, .token.block-comment, .token.prolog, .token.doctype, .token.cdata { color: #969896; }
+        .token.punctuation { color: #b294bb; }
+        .token.tag, .token.attr-name, .token.namespace, .token.deleted { color: #cc6666; }
+        .token.function-name { color: #81a2be; }
+        .token.boolean, .token.number, .token.function { color: #de935f; }
+        .token.property, .token.class-name, .token.constant, .token.symbol { color: #f0c674; }
+        .token.selector, .token.important, .token.atrule, .token.keyword, .token.builtin { color: #b294bb; }
+        .token.string, .token.char, .token.attr-value, .token.regex, .token.variable { color: #b5bd68; }
+        .token.operator, .token.entity, .token.url { color: #8abeb7; }
+        .token.inserted { color: #b5bd68; }
       }
     </style>
   </head>
@@ -171,18 +203,10 @@
         <div class="step">
           <span class="step-number">1</span>
           <div class="step-content">
-            <strong>Install the extension</strong>
+            <strong>Pin the extension</strong>
             <p>
-              Add the Playwriter extension from the Chrome Web Store.
-            </p>
-            <p>
-              <a
-                href="https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open Chrome Web Store
-              </a>
+              Click the puzzle icon in Chrome's toolbar, then pin Playwriter so
+              it's always visible.
             </p>
           </div>
         </div>
@@ -204,7 +228,9 @@
             <p>
               Install the CLI and start automating the browser:
             </p>
-            <pre><code>npm i -g playwriter
+            <pre><code class="language-bash"># install the CLI globally
+npm i -g playwriter
+# navigate to a URL in the active tab
 playwriter -s 1 -e "await page.goto('https://example.com')"</code></pre>
           </div>
         </div>
@@ -216,15 +242,20 @@ playwriter -s 1 -e "await page.goto('https://example.com')"</code></pre>
             <p>
               Install the Playwriter skill so your agent can call the CLI:
             </p>
-            <pre><code>npx -y skills add remorses/playwriter</code></pre>
+            <pre><code class="language-bash"># add playwriter skill to your coding agent
+npx -y skills add remorses/playwriter</code></pre>
           </div>
         </div>
 
-        <h3>Quick Start (CLI)</h3>
+        <h3>CLI Examples</h3>
 
-        <pre><code>playwriter session new  # creates stateful sandbox, outputs session id (e.g. 1)
+        <pre><code class="language-bash"># create a stateful sandbox, outputs session id (e.g. 1)
+playwriter session new
+# navigate to a URL
 playwriter -s 1 -e "await page.goto('https://example.com')"
+# get the accessibility tree of the page
 playwriter -s 1 -e "console.log(await accessibilitySnapshot({ page }))"
+# click an element by its accessibility reference
 playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"</code></pre>
       </section>
 
@@ -280,7 +311,8 @@ playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"</code></pre>
           server setup, auto-configure it with:
         </p>
 
-        <pre><code>npx -y @playwriter/install-mcp playwriter@latest</code></pre>
+        <pre><code class="language-bash"># auto-configure MCP server for your editor
+npx -y @playwriter/install-mcp playwriter@latest</code></pre>
 
         <p>
           For full MCP instructions, see
@@ -311,5 +343,7 @@ playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"</code></pre>
         </p>
       </footer>
     </main>
+    <script src="prism.min.js"></script>
+    <script src="prism-bash.min.js"></script>
   </body>
 </html>
