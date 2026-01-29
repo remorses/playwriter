@@ -145,7 +145,7 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 Always screenshot and READ the image after important actions (form submissions, uploads, typing). Your mental model can diverge from actual browser state:
 ```js
 await page.keyboard.type('my text');
-await page.screenshot({ path: '/tmp/verify.png', scale: 'css' });
+await page.screenshotWithAccessibilityLabels({ page });
 // Then READ the screenshot file to verify text appeared correctly
 ```
 
@@ -156,7 +156,7 @@ Clipboard paste (`Meta+v`) can silently fail. For file uploads, prefer file inpu
 const fileInput = page.locator('input[type="file"]').first();
 await fileInput.setInputFiles('/path/to/image.png');
 
-// Unreliable: clipboard paste may silently fail
+// Unreliable: clipboard paste may silently fail, need to focus textarea first for example
 await page.keyboard.press('Meta+v');  // always verify with screenshot!
 ```
 
@@ -167,7 +167,7 @@ await page.keyboard.press('Meta+v');  // always verify with screenshot!
 await page.locator('[ref=e23]').click();  // element may have changed
 
 // GOOD: get fresh snapshot, then immediately use refs from it
-console.log(await accessibilitySnapshot({ page }));
+console.log(await accessibilitySnapshot({ page, showDiffSinceLastCall: true }));
 // Now use the NEW refs from this output
 ```
 
@@ -175,7 +175,7 @@ console.log(await accessibilitySnapshot({ page }));
 Before destructive actions (delete, submit), verify you're targeting the right thing:
 ```js
 // Before deleting, verify it's the right item
-await page.screenshot({ path: '/tmp/before-delete.png', scale: 'css' });
+await page.screenshotWithAccessibilityLabels({ page });
 // READ the screenshot to confirm, THEN proceed with delete
 ```
 
