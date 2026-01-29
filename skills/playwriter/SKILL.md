@@ -1,6 +1,6 @@
 ---
 name: playwriter
-description: Control the user own Chrome browser via Playwriter extension with Playwright code snippets in a stateful local js sandbox via playwriter cli. Automate web interactions, take screenshots, inspect accessibility trees, debug & profile web applications. Run `playwriter skill` command to read the complete up to date skill
+description: Control the user own Chrome browser via Playwriter extension with Playwright code snippets in a stateful local js sandbox via playwriter cli. Automate web interactions, take screenshots, inspect accessibility trees, debug & profile web applications. ALWAYS run `playwriter skill` command to read the complete up to date skill
 ---
 
 ## Quick Start
