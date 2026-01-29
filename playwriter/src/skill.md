@@ -139,6 +139,68 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 - **Wait for load**: use `page.waitForLoadState('domcontentloaded')` not `page.waitForEvent('load')` - waitForEvent times out if already loaded
 - **Avoid timeouts**: prefer proper waits over `page.waitForTimeout()` - there are better ways to wait for elements
 
+## common mistakes to avoid
+
+**1. Not verifying actions succeeded**
+Always screenshot and READ the image after important actions (form submissions, uploads, typing). Your mental model can diverge from actual browser state:
+```js
+await page.keyboard.type('my text');
+await page.screenshot({ path: '/tmp/verify.png', scale: 'css' });
+// Then READ the screenshot file to verify text appeared correctly
+```
+
+**2. Assuming paste/upload worked**
+Clipboard paste (`Meta+v`) can silently fail. For file uploads, prefer file input:
+```js
+// Reliable: use file input
+const fileInput = page.locator('input[type="file"]').first();
+await fileInput.setInputFiles('/path/to/image.png');
+
+// Unreliable: clipboard paste may silently fail
+await page.keyboard.press('Meta+v');  // always verify with screenshot!
+```
+
+**3. Using stale refs from old snapshots**
+`[ref=e23]` refs change when page updates. Always get a fresh snapshot before clicking:
+```js
+// BAD: using ref from minutes ago
+await page.locator('[ref=e23]').click();  // element may have changed
+
+// GOOD: get fresh snapshot, then immediately use refs from it
+console.log(await accessibilitySnapshot({ page }));
+// Now use the NEW refs from this output
+```
+
+**4. Wrong assumptions about current page/element**
+Before destructive actions (delete, submit), verify you're targeting the right thing:
+```js
+// Before deleting, verify it's the right item
+await page.screenshot({ path: '/tmp/before-delete.png', scale: 'css' });
+// READ the screenshot to confirm, THEN proceed with delete
+```
+
+**5. Text concatenation without line breaks**
+`keyboard.type()` doesn't insert newlines from `\n` in strings. Use `keyboard.press('Enter')`:
+```js
+// BAD: newlines in string don't create line breaks
+await page.keyboard.type('Line 1\nLine 2');  // becomes "Line 1Line 2"
+
+// GOOD: use Enter key for line breaks
+await page.keyboard.type('Line 1');
+await page.keyboard.press('Enter');
+await page.keyboard.type('Line 2');
+```
+
+**6. Assuming page content loaded**
+Even after `goto()`, dynamic content may not be ready:
+```js
+await page.goto('https://example.com');
+// Content may still be loading via JavaScript!
+await page.waitForSelector('article', { timeout: 10000 });
+// Or use waitForPageLoad utility
+await waitForPageLoad({ page, timeout: 5000 });
+```
+
 ## checking page state
 
 After any action (click, submit, navigate), verify what happened:
