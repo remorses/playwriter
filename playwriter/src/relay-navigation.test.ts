@@ -226,7 +226,7 @@ describe('Relay Navigation Tests', () => {
         const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('about:'))
         expect(cdpPage).toBeDefined()
 
-        const response = await cdpPage!.goto('https://www.youtube.com', { waitUntil: 'load', timeout: 5000 })
+        const response = await cdpPage!.goto('https://www.youtube.com', { waitUntil: 'domcontentloaded', timeout: 20000 })
         const currentUrl = cdpPage!.url()
         const responseUrl = response?.url() ?? ''
 
