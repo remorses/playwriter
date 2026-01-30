@@ -201,6 +201,29 @@ await page.waitForSelector('article', { timeout: 10000 });
 await waitForPageLoad({ page, timeout: 5000 });
 ```
 
+**7. Login buttons that open popups**
+Playwriter extension cannot control popup windows. If a login button opens a popup (common with OAuth/SSO), use cmd+click to open in a new tab instead:
+```js
+// BAD: popup window is not controllable by playwriter
+await page.click('button:has-text("Login with Google")');
+
+// GOOD: cmd+click opens in new tab that playwriter can control
+await page.locator('button:has-text("Login with Google")').click({ modifiers: ['Meta'] });
+await page.waitForTimeout(2000);
+
+// Verify new tab opened - last page should be the login page
+const pages = context.pages();
+const loginPage = pages[pages.length - 1];
+if (loginPage.url() === page.url()) {
+  throw new Error('Cmd+click did not open new tab - login may have opened as popup');
+}
+
+// Complete login flow in loginPage, cookies are shared with original page
+await loginPage.locator('[data-email]').first().click();
+await loginPage.waitForURL('**/callback**');
+// Original page should now be authenticated
+```
+
 ## checking page state
 
 After any action (click, submit, navigate), verify what happened:
@@ -350,12 +373,57 @@ await waitForPageLoad({ page, timeout: 5000 });
 
 ## common patterns
 
-**Popups** - capture before triggering:
+**Authenticated fetches** - to access protected resources, fetch from within page context (includes session cookies automatically):
 
 ```js
-const [popup] = await Promise.all([page.waitForEvent('popup'), page.click('a[target=_blank]')]);
-await popup.waitForLoadState(); console.log('Popup URL:', popup.url());
+// BAD: curl/external requests don't have session cookies
+// curl -H "Cookie: ..." often fails due to missing cookies or CSRF
+
+// GOOD: fetch inside page.evaluate uses browser's full session
+const data = await page.evaluate(async (url) => {
+  const resp = await fetch(url);
+  return await resp.text();
+}, 'https://example.com/protected/resource');
 ```
+
+**Downloading large data** - console output truncates large strings. Trigger a browser download instead:
+
+```js
+// Fetch protected data and trigger download to user's Downloads folder
+await page.evaluate(async (url) => {
+  const resp = await fetch(url);
+  const data = await resp.text();
+  const blob = new Blob([data], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'data.json';
+  a.click();
+}, 'https://example.com/protected/large-file');
+// File saves to ~/Downloads - read it from there
+```
+
+**Avoid permission-gated browser APIs** - some APIs require user permission prompts or special browser flags. These often fail silently or hang. Examples to avoid:
+- `navigator.clipboard.writeText()` - requires permission
+- Multiple concurrent downloads - browser may block
+- `window.showSaveFilePicker()` - requires user gesture
+- Geolocation, camera, microphone APIs
+
+Instead, use simpler alternatives (single download via `a.click()`, store data in `state`, etc).
+
+**Links that open new tabs** - use cmd+click to open in a controllable new tab:
+
+```js
+// For links with target=_blank or buttons that open popups
+await page.locator('a[target=_blank]').click({ modifiers: ['Meta'] });
+await page.waitForTimeout(1000);
+
+// New tab is last in context.pages()
+const pages = context.pages();
+const newTab = pages[pages.length - 1];
+console.log('New tab URL:', newTab.url());
+```
+
+Note: `page.waitForEvent('popup')` is unreliable - playwriter cannot control popup windows opened via `window.open`. Use cmd+click instead.
 
 **Downloads** - capture and save:
 
