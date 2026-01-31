@@ -13965,6 +13965,24 @@ test('always keeps test ID attributes', async () => {
   `)
 })
 
+test('keeps all common e2e test ID attributes', async () => {
+  const html = `
+    <div tid="short" qa="quality" qa-id="qa1" e2e="test" e2e-id="e2e1" class="hidden">
+      <button automation-id="auto1" automationid="auto2" selenium="sel1" pw="play1">Click</button>
+      <span data-qa="dataqa" data-automation="dataauto" data-pw="datapw">Text</span>
+    </div>
+  `
+  const result = await formatHtmlForPrompt({ html })
+
+  expect(result).toMatchInlineSnapshot(`
+    "<div tid="short" qa="quality" qa-id="qa1" e2e="test" e2e-id="e2e1">
+     <button automation-id="auto1" automationid="auto2" selenium="sel1" pw="play1">Click</button>
+     <span data-qa="dataqa" data-automation="dataauto" data-pw="datapw">Text</span>
+    </div>
+    "
+  `)
+})
+
 test('processes x.com.html with size savings', async () => {
   const html = readFileSync(new URL('./assets/x.com.html', import.meta.url), 'utf-8')
 

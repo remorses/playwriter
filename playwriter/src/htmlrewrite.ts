@@ -52,9 +52,18 @@ export async function formatHtmlForPrompt({
         'aria-pressed',
         'aria-required',
         'aria-current',
-        // Test IDs (data-testid, data-test, data-cy are covered by data-* prefix)
+        // Test IDs (data-testid, data-test, data-cy, data-qa are covered by data-* prefix)
         'testid',
         'test-id',
+        'tid',
+        'qa',
+        'qa-id',
+        'e2e',
+        'e2e-id',
+        'automation-id',
+        'automationid',
+        'selenium',
+        'pw',
         'vimium-label',
         // Conditionally added: 'style', 'class'
     ]

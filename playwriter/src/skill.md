@@ -469,12 +469,23 @@ const html = await getCleanHTML({ locator: page, search: /button/i })
 const diff = await getCleanHTML({ locator: page, showDiffSinceLastCall: true })
 ```
 
+**Parameters:**
 - `locator` - Playwright Locator or Page to get HTML from
-- `search` - string/regex to filter results (returns first 10 matching lines)
-- `showDiffSinceLastCall` - returns diff since last snapshot
+- `search` - string/regex to filter results (returns first 10 matching lines with 5 lines context)
+- `showDiffSinceLastCall` - returns unified diff since last call for same locator/page. First call stores snapshot and returns message; subsequent calls return the diff. Useful for tracking DOM changes after actions.
 - `includeStyles` - keep style and class attributes (default: false)
 
-Returns cleaned HTML with only essential attributes (aria-*, data-*, href, role, title, alt, etc.). Removes script, style, svg, head tags.
+**HTML processing:**
+The function cleans HTML for compact, readable output:
+- **Removes tags**: script, style, link, meta, noscript, svg, head
+- **Unwraps nested wrappers**: Empty divs/spans with no attributes that only wrap a single child are collapsed (e.g., `<div><div><div><p>text</p></div></div></div>` → `<div><p>text</p></div>`)
+- **Removes empty elements**: Elements with no attributes and no content are removed
+- **Truncates long values**: Attribute values >200 chars and text content >500 chars are truncated
+
+**Attributes kept (summary):**
+- Common semantic and ARIA attributes (e.g., `href`, `name`, `type`, `aria-*`)
+- All `data-*` test attributes
+- Frequently used test IDs and special attributes (e.g., `testid`, `qa`, `e2e`, `vimium-label`)
 
 For pagination, use `.split('\n').slice(offset, offset + limit).join('\n')`:
 ```js
