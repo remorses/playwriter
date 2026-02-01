@@ -7,7 +7,7 @@
   "types": "dist/index.d.ts",
   "repository": "https://github.com/remorses/playwriter",
   "scripts": {
-    "build": "rm -rf dist *.tsbuildinfo && mkdir dist && bun scripts/build-selector-generator.ts && bun scripts/build-bippy.ts && tsc && bun scripts/build-resources.ts",
+    "build": "rm -rf dist *.tsbuildinfo && mkdir dist && bun scripts/build-selector-generator.ts && bun scripts/build-bippy.ts && bun scripts/build-a11y-client.ts && tsc && bun scripts/build-resources.ts",
     "prepublishOnly": "pnpm build",
     "watch": "tsc -w",
     "cli": "vite-node src/cli.ts",
@@ -46,6 +46,7 @@
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@xmorse/cac": "^6.0.7",
     "diff": "^8.0.2",
+    "dom-accessibility-api": "^0.7.1",
     "hono": "^4.10.6",
     "kill-port-process": "^3.2.1",
     "picocolors": "^1.1.1",

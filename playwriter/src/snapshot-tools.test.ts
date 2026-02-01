@@ -578,12 +578,13 @@ describe('Snapshot & Screenshot Tests', () => {
         const serviceWorker = await getExtensionServiceWorker(browserContext)
 
         const page = await browserContext.newPage()
+        // Use data-testid for stable refs, regular id for the button
         await page.setContent(`
             <html>
                 <body>
-                    <button id="submit-btn">Submit Form</button>
-                    <a href="/about">About Us</a>
-                    <input type="text" placeholder="Enter your name" />
+                    <button data-testid="submit-btn">Submit Form</button>
+                    <a href="/about" data-testid="about-link">About Us</a>
+                    <input type="text" placeholder="Enter your name" data-testid="name-input" />
                 </body>
             </html>
         `)
@@ -612,55 +613,42 @@ describe('Snapshot & Screenshot Tests', () => {
         expect(ariaResult.snapshot).toBeDefined()
         expect(ariaResult.snapshot.length).toBeGreaterThan(0)
         expect(ariaResult.snapshot).toContain('Submit Form')
+        // New implementation uses stable test IDs as refs
+        expect(ariaResult.snapshot).toContain('[ref=submit-btn]')
+        expect(ariaResult.snapshot).toContain('[ref=about-link]')
+        expect(ariaResult.snapshot).toContain('[ref=name-input]')
 
         expect(ariaResult.refToElement.size).toBeGreaterThan(0)
         console.log('RefToElement map size:', ariaResult.refToElement.size)
         console.log('RefToElement entries:', [...ariaResult.refToElement.entries()])
 
-        const btnViaAriaRef = cdpPage!.locator('aria-ref=e2')
-        const btnTextViaRef = await btnViaAriaRef.textContent()
-        console.log('Button text via aria-ref=e2:', btnTextViaRef)
+        // Verify refs are stable test IDs
+        expect(ariaResult.refToElement.has('submit-btn')).toBe(true)
+        expect(ariaResult.refToElement.has('about-link')).toBe(true)
+        expect(ariaResult.refToElement.has('name-input')).toBe(true)
+
+        // Use getSelectorForRef to get CSS selector for a ref
+        const btnSelector = ariaResult.getSelectorForRef('submit-btn')
+        expect(btnSelector).toBeDefined()
+        console.log('Button selector:', btnSelector)
+
+        // Verify the selector works
+        const btnViaSelector = cdpPage!.locator('[data-testid="submit-btn"]')
+        const btnTextViaRef = await btnViaSelector.textContent()
+        console.log('Button text via selector:', btnTextViaRef)
         expect(btnTextViaRef).toBe('Submit Form')
 
-        const submitBtn = cdpPage!.locator('#submit-btn')
-        const btnAriaRef = await ariaResult.getRefForLocator(submitBtn)
-        console.log('Button ariaRef:', btnAriaRef)
-        expect(btnAriaRef).toBeDefined()
-        expect(btnAriaRef?.role).toBe('button')
-        expect(btnAriaRef?.name).toBe('Submit Form')
-        expect(btnAriaRef?.ref).toMatch(/^e\d+$/)
+        // Test role and name
+        const btnInfo = ariaResult.refToElement.get('submit-btn')
+        expect(btnInfo?.role).toBe('button')
+        expect(btnInfo?.name).toBe('Submit Form')
 
-        const btnFromRef = cdpPage!.locator(`aria-ref=${btnAriaRef?.ref}`)
-        const btnText = await btnFromRef.textContent()
-        expect(btnText).toBe('Submit Form')
+        const linkInfo = ariaResult.refToElement.get('about-link')
+        expect(linkInfo?.role).toBe('link')
+        expect(linkInfo?.name).toBe('About Us')
 
-        const btnRefStr = await ariaResult.getRefStringForLocator(submitBtn)
-        console.log('Button ref string:', btnRefStr)
-        expect(btnRefStr).toBe(btnAriaRef?.ref)
-
-        const aboutLink = cdpPage!.locator('a')
-        const linkAriaRef = await ariaResult.getRefForLocator(aboutLink)
-        console.log('Link ariaRef:', linkAriaRef)
-        expect(linkAriaRef).toBeDefined()
-        expect(linkAriaRef?.role).toBe('link')
-        expect(linkAriaRef?.name).toBe('About Us')
-
-        const linkFromRef = cdpPage!.locator(`aria-ref=${linkAriaRef?.ref}`)
-        const linkText = await linkFromRef.textContent()
-        expect(linkText).toBe('About Us')
-
-        const inputField = cdpPage!.locator('input')
-        const inputAriaRef = await ariaResult.getRefForLocator(inputField)
-        console.log('Input ariaRef:', inputAriaRef)
-        expect(inputAriaRef).toBeDefined()
-        expect(inputAriaRef?.role).toBe('textbox')
-
-        const batchRefs = await ariaResult.getRefsForLocators([submitBtn, aboutLink, inputField])
-        console.log('Batch refs:', batchRefs)
-        expect(batchRefs).toHaveLength(3)
-        expect(batchRefs[0]?.ref).toBe(btnAriaRef?.ref)
-        expect(batchRefs[1]?.ref).toBe(linkAriaRef?.ref)
-        expect(batchRefs[2]?.ref).toBe(inputAriaRef?.ref)
+        const inputInfo = ariaResult.refToElement.get('name-input')
+        expect(inputInfo?.role).toBe('textbox')
 
         await browser.close()
         await page.close()

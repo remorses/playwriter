@@ -1,6 +1,7 @@
 import type { Page, Locator, ElementHandle } from 'playwright-core'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Import sharp at module level - resolves to null if not available
 const sharpPromise = import('sharp')
@@ -11,27 +12,22 @@ const sharpPromise = import('sharp')
 // Aria Snapshot Format Documentation
 // ============================================================================
 //
-// This module processes accessibility snapshots from Playwright's _snapshotForAI() method.
-// The expected format is a YAML-like tree structure:
+// This module generates accessibility snapshots using dom-accessibility-api
+// running entirely in browser context. The output format is:
 //
 // ```
-// - role "accessible name" [ref=eXX] [cursor=pointer] [active]:
-//   - childRole "child name" [ref=eYY]:
-//     - /url: https://example.com
-//     - text: "raw text content"
+// - role "accessible name" [ref=testid-or-e1]
+// - button "Submit" [ref=submit-btn]
+// - link "Home" [ref=nav-home]
+// - textbox "Search" [ref=e3]
 // ```
 //
-// Key format assumptions:
-// - Lines start with "- " followed by a role name (e.g., link, button, row, cell)
-// - Accessible names are in double quotes: "name"
-// - When names contain colons, the whole entry is single-quoted: - 'role "name: with colon"':
-// - Element refs are in brackets: [ref=e123]
-// - Attributes like [cursor=pointer], [active] may appear after the name
-// - Child elements are indented (2 spaces per level)
-// - URL metadata appears as: - /url: https://...
-// - Raw text appears as: - text: "content"
+// Refs are generated from stable test IDs when available:
+// - data-testid, data-test-id, data-test, data-cy, data-pw
+// - Stable id attributes (excluding auto-generated ones)
+// - Fallback: e1, e2, e3...
 //
-// If Playwright changes this format, the parsing functions below will need updates.
+// Duplicate refs get a suffix: submit-btn, submit-btn-2, submit-btn-3
 // ============================================================================
 
 // ============================================================================
@@ -208,7 +204,8 @@ function extractInteractiveFlat(lines: string[], interactiveRoles: Set<string>, 
       continue
     }
 
-    const match = trimmed.match(/^-\s+(\w+)(?:\s+"[^"]*")?(?:\s+\[[^\]]+\])*\s*\[ref=(\w+)\]/)
+    // Match ref pattern - now supports any ref format (not just e123)
+    const match = trimmed.match(/^-\s+(\w+)(?:\s+"[^"]*")?(?:\s+\[[^\]]+\])*\s*\[ref=([^\]]+)\]/)
     if (!match || !interactiveRoles.has(match[1])) {
       continue
     }
@@ -294,7 +291,7 @@ function extractInteractiveWithStructure(
     // Clean line and strip refs from non-interactive
     let cleanedLine = cleanSnapshotLine(lines[i])
     if (!lineIsInteractive[i]) {
-      cleanedLine = cleanedLine.replace(/\s*\[ref=\w+\]/g, '')
+      cleanedLine = cleanedLine.replace(/\s*\[ref=[^\]]+\]/g, '')
     }
 
     result.push(cleanedLine)
@@ -422,7 +419,8 @@ function parseSnapshotLine(line: string): { role: string; name: string | null; r
   }
 
   // Match: - role "name" [ref=xxx]: or - role [ref=xxx]: or - role "name": or - role:
-  const match = trimmed.match(/^-\s+(\w+)(?:\s+"([^"]*)")?(?:\s+\[ref=(\w+)\])?/)
+  // Updated to support any ref format (not just e123)
+  const match = trimmed.match(/^-\s+(\w+)(?:\s+"([^"]*)")?(?:\s+\[ref=([^\]]+)\])?/)
 
   if (!match) {
     return { role: '', name: null, ref: null }
@@ -525,7 +523,31 @@ function rebuildLines(node: SnapshotNode, result: string[]): void {
 }
 
 // ============================================================================
-// Original Aria Snapshot Types and Functions
+// A11y Client Code Loading
+// ============================================================================
+
+let a11yClientCode: string | null = null
+
+function getA11yClientCode(): string {
+  if (a11yClientCode) {
+    return a11yClientCode
+  }
+  const currentDir = path.dirname(fileURLToPath(import.meta.url))
+  const a11yClientPath = path.join(currentDir, '..', 'dist', 'a11y-client.js')
+  a11yClientCode = fs.readFileSync(a11yClientPath, 'utf-8')
+  return a11yClientCode
+}
+
+async function ensureA11yClient(page: Page): Promise<void> {
+  const hasA11y = await page.evaluate(() => !!(globalThis as any).__a11y)
+  if (!hasA11y) {
+    const code = getA11yClientCode()
+    await page.evaluate(code)
+  }
+}
+
+// ============================================================================
+// Types
 // ============================================================================
 
 export interface AriaRef {
@@ -545,27 +567,18 @@ export interface ScreenshotResult {
 export interface AriaSnapshotResult {
   snapshot: string
   refToElement: Map<string, { role: string; name: string }>
-  refHandles: Array<{ ref: string; handle: ElementHandle }>
+  /**
+   * Get a CSS selector for a ref. Use with page.locator().
+   * For stable test IDs, returns [data-testid="..."] or [id="..."]
+   * For fallback refs (e1, e2), returns a role-based selector.
+   */
+  getSelectorForRef: (ref: string) => string | null
   getRefsForLocators: (locators: Array<Locator | ElementHandle>) => Promise<Array<AriaRef | null>>
   getRefForLocator: (locator: Locator | ElementHandle) => Promise<AriaRef | null>
   getRefStringForLocator: (locator: Locator | ElementHandle) => Promise<string | null>
 }
 
-interface ElementLike {
-  tagName: string
-  textContent: string | null
-  getAttribute: (name: string) => string | null
-  hasAttribute: (name: string) => boolean
-}
-
-interface InputElementLike extends ElementLike {
-  type?: string
-  placeholder?: string
-}
-
-const LABELS_CONTAINER_ID = '__playwriter_labels__'
-
-// Roles that represent interactive elements (clickable, typeable) and media elements
+// Roles that represent interactive elements
 const INTERACTIVE_ROLES = new Set([
   'button',
   'link',
@@ -583,214 +596,117 @@ const INTERACTIVE_ROLES = new Set([
   'option',
   'tab',
   'treeitem',
-  // Media elements - useful for visual tasks
   'img',
   'video',
   'audio',
 ])
 
-// Color categories for different role types - warm color scheme
-// Format: [gradient-top, gradient-bottom, border]
-const ROLE_COLORS: Record<string, [string, string, string]> = {
-  // Links - yellow (Vimium-style)
-  link: ['#FFF785', '#FFC542', '#E3BE23'],
-  // Buttons - orange
-  button: ['#FFE0B2', '#FFCC80', '#FFB74D'],
-  // Text inputs - coral/red
-  textbox: ['#FFCDD2', '#EF9A9A', '#E57373'],
-  combobox: ['#FFCDD2', '#EF9A9A', '#E57373'],
-  searchbox: ['#FFCDD2', '#EF9A9A', '#E57373'],
-  spinbutton: ['#FFCDD2', '#EF9A9A', '#E57373'],
-  // Checkboxes/Radios/Switches - warm pink
-  checkbox: ['#F8BBD0', '#F48FB1', '#EC407A'],
-  radio: ['#F8BBD0', '#F48FB1', '#EC407A'],
-  switch: ['#F8BBD0', '#F48FB1', '#EC407A'],
-  // Sliders - peach
-  slider: ['#FFCCBC', '#FFAB91', '#FF8A65'],
-  // Menu items - salmon
-  menuitem: ['#FFAB91', '#FF8A65', '#FF7043'],
-  menuitemcheckbox: ['#FFAB91', '#FF8A65', '#FF7043'],
-  menuitemradio: ['#FFAB91', '#FF8A65', '#FF7043'],
-  // Tabs/Options - amber
-  tab: ['#FFE082', '#FFD54F', '#FFC107'],
-  option: ['#FFE082', '#FFD54F', '#FFC107'],
-  treeitem: ['#FFE082', '#FFD54F', '#FFC107'],
-  // Media elements - light blue
-  img: ['#B3E5FC', '#81D4FA', '#4FC3F7'],
-  video: ['#B3E5FC', '#81D4FA', '#4FC3F7'],
-  audio: ['#B3E5FC', '#81D4FA', '#4FC3F7'],
-}
-
-// Default yellow for unknown roles
-const DEFAULT_COLORS: [string, string, string] = ['#FFF785', '#FFC542', '#E3BE23']
-
-// Use String.raw for CSS syntax highlighting in editors
-const css = String.raw
-
-const LABEL_STYLES = css`
-  .__pw_label__ {
-    position: absolute;
-    font: bold 12px Helvetica, Arial, sans-serif;
-    padding: 1px 4px;
-    border-radius: 3px;
-    color: black;
-    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-    white-space: nowrap;
-  }
-`
-
-const CONTAINER_STYLES = css`
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 2147483647;
-  pointer-events: none;
-`
+// ============================================================================
+// Main Functions
+// ============================================================================
 
 /**
- * Get an accessibility snapshot with utilities to look up aria refs for elements.
- * Uses Playwright's internal aria-ref selector engine.
+ * Get an accessibility snapshot with utilities to look up refs for elements.
+ * Uses dom-accessibility-api running entirely in browser context.
+ * 
+ * Refs are generated from stable test IDs when available (data-testid, data-test-id, etc.)
+ * or fall back to e1, e2, e3...
+ *
+ * @param page - Playwright page
+ * @param locator - Optional locator to scope the snapshot to a subtree
+ * @param refFilter - Optional filter for which elements get refs
  *
  * @example
  * ```ts
- * const { snapshot, getRefsForLocators } = await getAriaSnapshot({ page })
- * const refs = await getRefsForLocators([page.locator('button'), page.locator('a')])
- * // refs[0].ref is e.g. "e5" - use page.locator('aria-ref=e5') to select
+ * const { snapshot, getSelectorForRef } = await getAriaSnapshot({ page })
+ * // Snapshot shows refs like [ref=submit-btn] or [ref=e5]
+ * const selector = getSelectorForRef('submit-btn')
+ * await page.locator(selector).click()
  * ```
  */
-export async function getAriaSnapshot({ page, refFilter }: {
+export async function getAriaSnapshot({ page, locator, refFilter }: {
   page: Page
+  locator?: Locator
   refFilter?: (info: { role: string; name: string }) => boolean
 }): Promise<AriaSnapshotResult> {
-  const snapshotMethod = (page as any)._snapshotForAI
-  if (!snapshotMethod) {
-    throw new Error('_snapshotForAI not available. Ensure you are using Playwright.')
-  }
+  await ensureA11yClient(page)
 
-  const snapshot = await snapshotMethod.call(page)
-  // Sanitize to remove unpaired surrogates that break JSON encoding for Claude API
-  const rawStr = typeof snapshot === 'string' ? snapshot : (snapshot.full || JSON.stringify(snapshot, null, 2))
-  const snapshotStr = rawStr.toWellFormed?.() ?? rawStr
+  // Determine root element
+  const rootHandle = locator ? await locator.elementHandle() : null
 
-  const snapshotRefInfo = extractRefInfoFromSnapshot(snapshotStr)
-  const snapshotRefs = [...snapshotRefInfo.entries()]
-    .filter(([_, info]) => !refFilter || refFilter(info))
-    .map(([ref]) => ref)
+  const result = await page.evaluate(
+    ({ root, interactiveOnly }) => {
+      const a11y = (globalThis as any).__a11y
+      if (!a11y) {
+        throw new Error('a11y client not loaded')
+      }
+      const rootElement = root || document.body
+      return a11y.computeA11ySnapshot({
+        root: rootElement,
+        interactiveOnly,
+        renderLabels: false,
+      })
+    },
+    {
+      root: rootHandle,
+      interactiveOnly: !!refFilter,
+    }
+  )
 
-  // Discover refs by probing aria-ref=e1, e2, e3... until 10 consecutive misses
+  // Build refToElement map
   const refToElement = new Map<string, { role: string; name: string }>()
-  const refHandles: Array<{ ref: string; handle: ElementHandle }> = []
+  for (const { ref, role, name } of result.refs) {
+    if (!refFilter || refFilter({ role, name })) {
+      refToElement.set(ref, { role, name })
+    }
+  }
 
-  const fetchRefInfo = async (ref: string): Promise<{ ref: string; handle: ElementHandle; info: { role: string; name: string } } | null> => {
-    try {
-      const locator = page.locator(`aria-ref=${ref}`)
-      const handle = await locator.elementHandle({ timeout: 1000 })
-      if (!handle) {
-        return null
+  // Filter snapshot if refFilter provided
+  let snapshot = result.snapshot
+  if (refFilter) {
+    const lines = snapshot.split('\n').filter((line) => {
+      const match = line.match(/\[ref=([^\]]+)\]/)
+      if (!match) {
+        return true
       }
-      const info = await handle.evaluate((el) => {
-        const element = el as ElementLike
-        const tagName = element.tagName.toLowerCase()
-        const roleAttribute = element.getAttribute('role')
-        const inputElement = element as InputElementLike
-        const inputType = inputElement.type || ''
-        const placeholder = inputElement.placeholder || ''
-        const role = roleAttribute || {
-          a: element.hasAttribute('href') ? 'link' : 'generic',
-          button: 'button',
-          input: {
-            button: 'button',
-            checkbox: 'checkbox',
-            radio: 'radio',
-            text: 'textbox',
-            search: 'searchbox',
-            number: 'spinbutton',
-            range: 'slider',
-          }[inputType] || 'textbox',
-          select: 'combobox',
-          textarea: 'textbox',
-          img: 'img',
-          nav: 'navigation',
-          main: 'main',
-          header: 'banner',
-          footer: 'contentinfo',
-        }[tagName] || 'generic'
-        const name = element.getAttribute('aria-label') || element.textContent?.trim() || placeholder || ''
-        return { role, name }
-      })
-      return { ref, handle, info }
-    } catch {
+      const ref = match[1]
+      return refToElement.has(ref)
+    })
+    snapshot = lines.join('\n')
+  }
+
+  /**
+   * Get a CSS selector for a ref.
+   * For stable test IDs: [data-testid="value"] or [id="value"]
+   * For fallback refs: uses role + name matching
+   */
+  const getSelectorForRef = (ref: string): string | null => {
+    const info = refToElement.get(ref)
+    if (!info) {
       return null
     }
-  }
 
-  const fetchRefHandle = async (ref: string): Promise<{ ref: string; handle: ElementHandle } | null> => {
-    try {
-      const locator = page.locator(`aria-ref=${ref}`)
-      const handle = await locator.elementHandle({ timeout: 1000 })
-      if (!handle) {
-        return null
-      }
-      return { ref, handle }
-    } catch {
-      return null
+    // Check if ref looks like a stable test ID (not e1, e2, etc.)
+    if (!/^e\d+$/.test(ref)) {
+      // Try common test ID attributes
+      return `[data-testid="${ref}"], [data-test-id="${ref}"], [data-test="${ref}"], [data-cy="${ref}"], [data-pw="${ref}"], [id="${ref}"]`
     }
+
+    // For fallback refs, use role-based selector
+    // This is less reliable but works for simple cases
+    const escapedName = info.name.replace(/"/g, '\\"')
+    return `[role="${info.role}"][aria-label="${escapedName}"], ${info.role}:has-text("${escapedName}")`
   }
 
-  const addRefInfo = ({ ref, handle, info }: { ref: string; handle: ElementHandle; info: { role: string; name: string } }) => {
-    refToElement.set(ref, info)
-    refHandles.push({ ref, handle })
-  }
-
-  const probeRefsSequentially = async () => {
-    let consecutiveMisses = 0
-    let refNum = 1
-    while (consecutiveMisses < 10) {
-      const ref = `e${refNum++}`
-      const result = await fetchRefInfo(ref)
-      if (!result) {
-        consecutiveMisses++
-        continue
-      }
-      consecutiveMisses = 0
-      addRefInfo(result)
-    }
-  }
-
-  const probeRefsFromSnapshot = async (refs: string[]) => {
-    const concurrency = 20
-    const chunks = refs.reduce((acc, ref, index) => {
-      const chunkIndex = Math.floor(index / concurrency)
-      if (!acc[chunkIndex]) {
-        acc[chunkIndex] = []
-      }
-      acc[chunkIndex].push(ref)
-      return acc
-    }, [] as string[][])
-
-    await chunks.reduce(async (previous, chunk) => {
-      await previous
-      const results = await Promise.all(chunk.map(async (ref) => fetchRefHandle(ref)))
-      const successfulResults = results.filter((result): result is { ref: string; handle: ElementHandle } => result !== null)
-      successfulResults.map((result) => {
-        const info = snapshotRefInfo.get(result.ref) || { role: 'generic', name: '' }
-        addRefInfo({ ...result, info })
-      })
-    }, Promise.resolve())
-  }
-
-  if (snapshotRefs.length > 0) {
-    await probeRefsFromSnapshot(snapshotRefs)
-  } else {
-    await probeRefsSequentially()
-  }
-
-  // Find refs for multiple locators in a single evaluate call
+  /**
+   * Find refs for locators by matching in browser context.
+   */
   const getRefsForLocators = async (locators: Array<Locator | ElementHandle>): Promise<Array<AriaRef | null>> => {
-    if (locators.length === 0 || refHandles.length === 0) {
-      return locators.map(() => null)
+    if (locators.length === 0) {
+      return []
     }
 
+    // Get handles for target locators
     const targetHandles = await Promise.all(
       locators.map(async (loc) => {
         try {
@@ -803,379 +719,151 @@ export async function getAriaSnapshot({ page, refFilter }: {
       })
     )
 
+    // Match in browser context
     const matchingRefs = await page.evaluate(
-      ({ targets, candidates }) => targets.map((target) => {
-        if (!target) return null
-        return candidates.find(({ element }) => element === target)?.ref ?? null
-      }),
-      { targets: targetHandles, candidates: refHandles.map(({ ref, handle }) => ({ ref, element: handle })) }
+      ({ targets, refData }) => {
+        return targets.map((target) => {
+          if (!target) {
+            return null
+          }
+
+          // Try to find this element's ref by checking test ID attributes
+          const testIdAttrs = ['data-testid', 'data-test-id', 'data-test', 'data-cy', 'data-pw']
+          for (const attr of testIdAttrs) {
+            const value = (target as any).getAttribute(attr)
+            if (value && refData.some((r: any) => r.ref === value || r.ref.startsWith(value))) {
+              const match = refData.find((r: any) => r.ref === value || r.ref.startsWith(value))
+              return match ? match.ref : null
+            }
+          }
+
+          // Check id attribute
+          const id = (target as any).getAttribute('id')
+          if (id) {
+            const match = refData.find((r: any) => r.ref === id || r.ref.startsWith(id))
+            if (match) {
+              return match.ref
+            }
+          }
+
+          return null
+        })
+      },
+      {
+        targets: targetHandles,
+        refData: result.refs,
+      }
     )
 
     return matchingRefs.map((ref) => {
-      if (!ref) return null
+      if (!ref) {
+        return null
+      }
       const info = refToElement.get(ref)
       return info ? { ...info, ref } : null
     })
   }
 
   return {
-    snapshot: snapshotStr,
+    snapshot,
     refToElement,
-    refHandles,
+    getSelectorForRef,
     getRefsForLocators,
     getRefForLocator: async (loc) => (await getRefsForLocators([loc]))[0],
     getRefStringForLocator: async (loc) => (await getRefsForLocators([loc]))[0]?.ref ?? null,
   }
 }
 
-function extractRefInfoFromSnapshot(snapshot: string): Map<string, { role: string; name: string }> {
-  const lines = snapshot.split('\n')
-  return lines.reduce((map, line) => {
-    if (!line.trim()) {
-      return map
-    }
-    const parsed = parseSnapshotLine(line)
-    if (!parsed.ref || map.has(parsed.ref)) {
-      return map
-    }
-    map.set(parsed.ref, { role: parsed.role, name: parsed.name ?? '' })
-    return map
-  }, new Map<string, { role: string; name: string }>())
-}
-
 /**
  * Show Vimium-style labels on interactive elements.
- * Labels are yellow badges positioned above each element showing the aria ref (e.g., "e1", "e2").
+ * Labels are colored badges positioned above each element showing the ref.
  * Use with screenshots so agents can see which elements are interactive.
  *
- * Labels auto-hide after 30 seconds to prevent stale labels remaining on the page.
+ * Labels auto-hide after 30 seconds to prevent stale labels.
  * Call this function again if the page HTML changes to get fresh labels.
  *
- * By default, only shows labels for truly interactive roles (button, link, textbox, etc.)
- * to reduce visual clutter. Set `interactiveOnly: false` to show all elements with refs.
+ * @param page - Playwright page
+ * @param locator - Optional locator to scope labels to a subtree
+ * @param interactiveOnly - Only show labels for interactive elements (default: true)
  *
  * @example
  * ```ts
  * const { snapshot, labelCount } = await showAriaRefLabels({ page })
  * await page.screenshot({ path: '/tmp/screenshot.png' })
- * // Agent sees [e5] label on "Submit" button
- * await page.locator('aria-ref=e5').click()
- * // Labels auto-hide after 30 seconds, or call hideAriaRefLabels() manually
+ * // Agent sees [submit-btn] label on "Submit" button
+ * await page.locator('[data-testid="submit-btn"]').click()
  * ```
  */
-export async function showAriaRefLabels({ page, interactiveOnly = true, logger }: {
+export async function showAriaRefLabels({ page, locator, interactiveOnly = true, logger }: {
   page: Page
+  locator?: Locator
   interactiveOnly?: boolean
   logger?: { info?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
 }): Promise<{
   snapshot: string
   labelCount: number
 }> {
-  const getSnapshotStart = Date.now()
-  const { snapshot, refHandles, refToElement } = await getAriaSnapshot({
-    page,
-    refFilter: interactiveOnly ? (info) => { return INTERACTIVE_ROLES.has(info.role) } : undefined,
-  })
+  const startTime = Date.now()
+  await ensureA11yClient(page)
+
   const log = logger?.info ?? logger?.error
   if (log) {
-    log(`getAriaSnapshot: ${Date.now() - getSnapshotStart}ms`)
+    log(`ensureA11yClient: ${Date.now() - startTime}ms`)
   }
 
-  // Filter to only interactive elements if requested
-  const filteredRefs = refHandles
+  // Determine root element
+  const rootHandle = locator ? await locator.elementHandle() : null
 
-  // Build refs with role info for color coding
-  const refsWithRoles = filteredRefs.map(({ ref, handle }) => ({
-    ref,
-    element: handle,
-    role: refToElement.get(ref)?.role || 'generic',
-  }))
-
-  // Single evaluate call: create container, styles, and all labels
-  // ElementHandles get unwrapped to DOM elements in browser context
-  const labelCount = await page.evaluate(
-    // Using 'any' for browser types since this runs in browser context
-    function ({ refs, containerId, containerStyles, labelStyles, roleColors, defaultColors }: {
-      refs: Array<{
-        ref: string
-        role: string
-        element: any // Element in browser context
-      }>
-      containerId: string
-      containerStyles: string
-      labelStyles: string
-      roleColors: Record<string, [string, string, string]>
-      defaultColors: [string, string, string]
-    }) {
-      // Polyfill esbuild's __name helper which gets injected by vite-node but doesn't exist in browser
-      ;(globalThis as any).__name ||= (fn: any) => fn
-      const doc = (globalThis as any).document
-      const win = globalThis as any
-
-      // Cancel any pending auto-hide timer from previous call
-      const timerKey = '__playwriter_labels_timer__'
-      if (win[timerKey]) {
-        win.clearTimeout(win[timerKey])
-        win[timerKey] = null
+  const computeStart = Date.now()
+  const result = await page.evaluate(
+    ({ root, interactiveOnly: intOnly }) => {
+      const a11y = (globalThis as any).__a11y
+      if (!a11y) {
+        throw new Error('a11y client not loaded')
       }
-
-      // Remove existing labels if present (idempotent)
-      doc.getElementById(containerId)?.remove()
-
-      // Create container - absolute positioned, max z-index, no pointer events
-      const container = doc.createElement('div')
-      container.id = containerId
-      container.style.cssText = containerStyles
-
-      // Inject base label CSS
-      const style = doc.createElement('style')
-      style.textContent = labelStyles
-      container.appendChild(style)
-
-      // Track placed label rectangles for overlap detection
-      // Each rect is { left, top, right, bottom } in viewport coordinates
-      const placedLabels: Array<{ left: number; top: number; right: number; bottom: number }> = []
-
-      // Estimate label dimensions (12px font + padding)
-      const LABEL_HEIGHT = 17
-      const LABEL_CHAR_WIDTH = 7 // approximate width per character
-
-      // Parse alpha from rgb/rgba color string (getComputedStyle always returns these formats)
-      function getColorAlpha(color: string): number {
-        if (color === 'transparent') {
-          return 0
-        }
-        // Match rgba(r, g, b, a) or rgb(r, g, b)
-        const match = color.match(/rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(?:,\s*([\d.]+)\s*)?\)/)
-        if (match) {
-          return match[1] !== undefined ? parseFloat(match[1]) : 1
-        }
-        return 1 // Default to opaque for unrecognized formats
-      }
-
-      // Check if an element has an opaque background that would block elements behind it
-      function isOpaqueElement(el: any): boolean {
-        const style = win.getComputedStyle(el)
-
-        // Check element opacity
-        const opacity = parseFloat(style.opacity)
-        if (opacity < 0.1) {
-          return false
-        }
-
-        // Check background-color alpha
-        const bgAlpha = getColorAlpha(style.backgroundColor)
-        if (bgAlpha > 0.1) {
-          return true
-        }
-
-        // Check if has background-image (usually opaque)
-        if (style.backgroundImage !== 'none') {
-          return true
-        }
-
-        return false
-      }
-
-      // Check if element is visible (not covered by opaque overlay)
-      function isElementVisible(element: any, rect: any): boolean {
-        const centerX = rect.left + rect.width / 2
-        const centerY = rect.top + rect.height / 2
-
-        // Get all elements at this point, from top to bottom
-        const stack = doc.elementsFromPoint(centerX, centerY) as any[]
-
-        // Find our target element in the stack
-        let targetIndex = -1
-        for (let i = 0; i < stack.length; i++) {
-          if (element.contains(stack[i]) || stack[i].contains(element)) {
-            targetIndex = i
-            break
-          }
-        }
-
-        // Element not in stack at all - not visible
-        if (targetIndex === -1) {
-          return false
-        }
-
-        // Check if any opaque element is above our target
-        for (let i = 0; i < targetIndex; i++) {
-          const el = stack[i]
-          // Skip our own overlay container
-          if (el.id === containerId) {
-            continue
-          }
-          // Skip pointer-events: none elements (decorative overlays)
-          if (win.getComputedStyle(el).pointerEvents === 'none') {
-            continue
-          }
-          // If this element is opaque, our target is blocked
-          if (isOpaqueElement(el)) {
-            return false
-          }
-        }
-
-        return true
-      }
-
-      // Check if two rectangles overlap
-      function rectsOverlap(
-        a: { left: number; top: number; right: number; bottom: number },
-        b: { left: number; top: number; right: number; bottom: number }
-      ) {
-        return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
-      }
-
-      // Create SVG for connector lines
-      const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      svg.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;overflow:visible;'
-      svg.setAttribute('width', `${doc.documentElement.scrollWidth}`)
-      svg.setAttribute('height', `${doc.documentElement.scrollHeight}`)
-
-      // Create defs for arrow markers (one per color)
-      const defs = doc.createElementNS('http://www.w3.org/2000/svg', 'defs')
-      svg.appendChild(defs)
-      const markerCache: Record<string, string> = {}
-
-      function getArrowMarkerId(color: string): string {
-        if (markerCache[color]) {
-          return markerCache[color]
-        }
-        const markerId = `arrow-${color.replace('#', '')}`
-        const marker = doc.createElementNS('http://www.w3.org/2000/svg', 'marker')
-        marker.setAttribute('id', markerId)
-        marker.setAttribute('viewBox', '0 0 10 10')
-        marker.setAttribute('refX', '9')
-        marker.setAttribute('refY', '5')
-        marker.setAttribute('markerWidth', '6')
-        marker.setAttribute('markerHeight', '6')
-        marker.setAttribute('orient', 'auto-start-reverse')
-        const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path')
-        path.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z')
-        path.setAttribute('fill', color)
-        marker.appendChild(path)
-        defs.appendChild(marker)
-        markerCache[color] = markerId
-        return markerId
-      }
-
-      container.appendChild(svg)
-
-      // Create label for each interactive element
-      let count = 0
-      for (const { ref, role, element } of refs) {
-        const rect = element.getBoundingClientRect()
-
-        // Skip elements with no size (hidden)
-        if (rect.width === 0 || rect.height === 0) {
-          continue
-        }
-
-        // Skip elements that are covered by opaque overlays
-        if (!isElementVisible(element, rect)) {
-          continue
-        }
-
-        // Calculate label position and dimensions
-        const labelWidth = ref.length * LABEL_CHAR_WIDTH + 8 // +8 for padding
-        const labelLeft = rect.left
-        const labelTop = Math.max(0, rect.top - LABEL_HEIGHT)
-        const labelRect = {
-          left: labelLeft,
-          top: labelTop,
-          right: labelLeft + labelWidth,
-          bottom: labelTop + LABEL_HEIGHT,
-        }
-
-        // Skip if this label would overlap with any already-placed label
-        let overlaps = false
-        for (const placed of placedLabels) {
-          if (rectsOverlap(labelRect, placed)) {
-            overlaps = true
-            break
-          }
-        }
-        if (overlaps) {
-          continue
-        }
-
-        // Get colors for this role
-        const [gradTop, gradBottom, border] = roleColors[role] || defaultColors
-
-        // Place the label
-        const label = doc.createElement('div')
-        label.className = '__pw_label__'
-        label.textContent = ref
-        label.style.background = `linear-gradient(to bottom, ${gradTop} 0%, ${gradBottom} 100%)`
-        label.style.border = `1px solid ${border}`
-
-        // Position above element, accounting for scroll
-        label.style.left = `${win.scrollX + labelLeft}px`
-        label.style.top = `${win.scrollY + labelTop}px`
-
-        container.appendChild(label)
-
-        // Draw connector line from label bottom-center to element center with arrow
-        const line = doc.createElementNS('http://www.w3.org/2000/svg', 'line')
-        const labelCenterX = win.scrollX + labelLeft + labelWidth / 2
-        const labelBottomY = win.scrollY + labelTop + LABEL_HEIGHT
-        const elementCenterX = win.scrollX + rect.left + rect.width / 2
-        const elementCenterY = win.scrollY + rect.top + rect.height / 2
-        line.setAttribute('x1', `${labelCenterX}`)
-        line.setAttribute('y1', `${labelBottomY}`)
-        line.setAttribute('x2', `${elementCenterX}`)
-        line.setAttribute('y2', `${elementCenterY}`)
-        line.setAttribute('stroke', border)
-        line.setAttribute('stroke-width', '1.5')
-        line.setAttribute('marker-end', `url(#${getArrowMarkerId(border)})`)
-        svg.appendChild(line)
-
-        placedLabels.push(labelRect)
-        count++
-      }
-
-      doc.documentElement.appendChild(container)
-
-      // Auto-hide labels after 30 seconds to prevent stale labels
-      // Store timer ID so it can be cancelled if showAriaRefLabels is called again
-      win[timerKey] = win.setTimeout(function() {
-        doc.getElementById(containerId)?.remove()
-        win[timerKey] = null
-      }, 30000)
-
-      return count
+      const rootElement = root || document.body
+      return a11y.computeA11ySnapshot({
+        root: rootElement,
+        interactiveOnly: intOnly,
+        renderLabels: true,
+      })
     },
     {
-      refs: refsWithRoles.map(({ ref, role, element }) => ({ ref, role, element })),
-      containerId: LABELS_CONTAINER_ID,
-      containerStyles: CONTAINER_STYLES,
-      labelStyles: LABEL_STYLES,
-      roleColors: ROLE_COLORS,
-      defaultColors: DEFAULT_COLORS,
+      root: rootHandle,
+      interactiveOnly,
     }
   )
 
-  return { snapshot, labelCount }
+  if (log) {
+    log(`computeA11ySnapshot: ${Date.now() - computeStart}ms (${result.labelCount} labels)`)
+  }
+
+  return {
+    snapshot: result.snapshot,
+    labelCount: result.labelCount,
+  }
 }
 
 /**
  * Remove all aria ref labels from the page.
  */
 export async function hideAriaRefLabels({ page }: { page: Page }): Promise<void> {
-  await page.evaluate((id) => {
-    const doc = (globalThis as any).document
-    const win = globalThis as any
-
-    // Cancel any pending auto-hide timer
-    const timerKey = '__playwriter_labels_timer__'
-    if (win[timerKey]) {
-      win.clearTimeout(win[timerKey])
-      win[timerKey] = null
+  await page.evaluate(() => {
+    const a11y = (globalThis as any).__a11y
+    if (a11y) {
+      a11y.hideA11yLabels()
+    } else {
+      // Fallback if client not loaded
+      const doc = document
+      const win = window as any
+      const timerKey = '__playwriter_labels_timer__'
+      if (win[timerKey]) {
+        win.clearTimeout(win[timerKey])
+        win[timerKey] = null
+      }
+      doc.getElementById('__playwriter_labels__')?.remove()
     }
-
-    doc.getElementById(id)?.remove()
-  }, LABELS_CONTAINER_ID)
+  })
 }
 
 /**
@@ -1183,24 +871,27 @@ export async function hideAriaRefLabels({ page }: { page: Page }): Promise<void>
  * Shows Vimium-style labels, captures the screenshot, then removes the labels.
  * The screenshot is automatically included in the MCP response.
  *
+ * @param page - Playwright page
+ * @param locator - Optional locator to scope labels to a subtree
  * @param collector - Array to collect screenshots (passed by MCP execute tool)
  *
  * @example
  * ```ts
  * await screenshotWithAccessibilityLabels({ page })
  * // Screenshot is automatically included in the MCP response
- * // Use aria-ref from the snapshot to interact with elements
- * await page.locator('aria-ref=e5').click()
+ * // Use ref from the snapshot to interact with elements
+ * await page.locator('[data-testid="submit-btn"]').click()
  * ```
  */
-export async function screenshotWithAccessibilityLabels({ page, interactiveOnly = true, collector, logger }: {
+export async function screenshotWithAccessibilityLabels({ page, locator, interactiveOnly = true, collector, logger }: {
   page: Page
+  locator?: Locator
   interactiveOnly?: boolean
   collector: ScreenshotResult[]
   logger?: { info?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
 }): Promise<void> {
   const showLabelsStart = Date.now()
-  const { snapshot, labelCount } = await showAriaRefLabels({ page, interactiveOnly, logger })
+  const { snapshot, labelCount } = await showAriaRefLabels({ page, locator, interactiveOnly, logger })
   const log = logger?.info ?? logger?.error
   if (log) {
     log(`showAriaRefLabels: ${Date.now() - showLabelsStart}ms`)
@@ -1280,3 +971,6 @@ export async function screenshotWithAccessibilityLabels({ page, interactiveOnly 
     labelCount,
   })
 }
+
+// Re-export for backward compatibility
+export { getAriaSnapshot as getAriaSnapshotWithRefs }

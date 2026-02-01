@@ -3,7 +3,7 @@
  * Used by both MCP and CLI to execute Playwright code with persistent state.
  */
 
-import { Page, Browser, BrowserContext, chromium } from 'playwright-core'
+import { Page, Browser, BrowserContext, chromium, Locator } from 'playwright-core'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,7 +21,7 @@ import { Editor } from './editor.js'
 import { getStylesForLocator, formatStylesAsText, type StylesResult } from './styles.js'
 import { getReactSource, type ReactSourceLocation } from './react-source.js'
 import { ScopedFS } from './scoped-fs.js'
-import { screenshotWithAccessibilityLabels, formatSnapshot, DEFAULT_SNAPSHOT_FORMAT, type ScreenshotResult, type SnapshotFormat } from './aria-snapshot.js'
+import { screenshotWithAccessibilityLabels, formatSnapshot, DEFAULT_SNAPSHOT_FORMAT, getAriaSnapshot, type ScreenshotResult, type SnapshotFormat } from './aria-snapshot.js'
 export type { SnapshotFormat }
 import { getCleanHTML, type GetCleanHTMLOptions } from './clean-html.js'
 import { startRecording, stopRecording, isRecording, cancelRecording } from './screen-recording.js'
@@ -406,75 +406,75 @@ export class PlaywrightExecutor {
 
       const accessibilitySnapshot = async (options: {
         page: Page
+        /** Optional locator to scope the snapshot to a subtree */
+        locator?: Locator
         search?: string | RegExp
         showDiffSinceLastCall?: boolean
         /** Snapshot format: 'raw', 'compact', 'interactive', 'interactive-dedup' (default) */
         format?: SnapshotFormat
       }) => {
-        const { page: targetPage, search, showDiffSinceLastCall = false, format = DEFAULT_SNAPSHOT_FORMAT } = options
-        if ((targetPage as any)._snapshotForAI) {
-          const snapshot = await (targetPage as any)._snapshotForAI()
-          const rawStr = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot, null, 2)
-          const sanitizedStr = rawStr.toWellFormed?.() ?? rawStr
-          // Apply format transformation
-          const snapshotStr = formatSnapshot(sanitizedStr, format, this.logger)
+        const { page: targetPage, locator, search, showDiffSinceLastCall = false, format = DEFAULT_SNAPSHOT_FORMAT } = options
+        
+        // Use new in-page implementation via getAriaSnapshot
+        const { snapshot: rawSnapshot } = await getAriaSnapshot({ page: targetPage, locator })
+        const sanitizedStr = rawSnapshot.toWellFormed?.() ?? rawSnapshot
+        // Apply format transformation
+        const snapshotStr = formatSnapshot(sanitizedStr, format, this.logger)
 
-          if (showDiffSinceLastCall) {
-            const previousSnapshot = this.lastSnapshots.get(targetPage)
-            if (!previousSnapshot) {
-              this.lastSnapshots.set(targetPage, snapshotStr)
-              return 'No previous snapshot available. This is the first call for this page. Full snapshot stored for next diff.'
-            }
-            const patch = createPatch('snapshot', previousSnapshot, snapshotStr, 'previous', 'current', { context: 3 })
-            if (patch.split('\n').length <= 4) {
-              return 'No changes detected since last snapshot'
-            }
-            return patch
+        if (showDiffSinceLastCall) {
+          const previousSnapshot = this.lastSnapshots.get(targetPage)
+          if (!previousSnapshot) {
+            this.lastSnapshots.set(targetPage, snapshotStr)
+            return 'No previous snapshot available. This is the first call for this page. Full snapshot stored for next diff.'
           }
-
-          this.lastSnapshots.set(targetPage, snapshotStr)
-
-          if (!search) {
-            return snapshotStr
+          const patch = createPatch('snapshot', previousSnapshot, snapshotStr, 'previous', 'current', { context: 3 })
+          if (patch.split('\n').length <= 4) {
+            return 'No changes detected since last snapshot'
           }
-
-          const lines = snapshotStr.split('\n')
-          const matchIndices: number[] = []
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i]
-            const isMatch = isRegExp(search) ? search.test(line) : line.includes(search)
-            if (isMatch) {
-              matchIndices.push(i)
-              if (matchIndices.length >= 10) break
-            }
-          }
-
-          if (matchIndices.length === 0) {
-            return 'No matches found'
-          }
-
-          const CONTEXT_LINES = 5
-          const includedLines = new Set<number>()
-          for (const idx of matchIndices) {
-            const start = Math.max(0, idx - CONTEXT_LINES)
-            const end = Math.min(lines.length - 1, idx + CONTEXT_LINES)
-            for (let i = start; i <= end; i++) {
-              includedLines.add(i)
-            }
-          }
-
-          const sortedIndices = [...includedLines].sort((a, b) => a - b)
-          const result: string[] = []
-          for (let i = 0; i < sortedIndices.length; i++) {
-            const lineIdx = sortedIndices[i]
-            if (i > 0 && sortedIndices[i - 1] !== lineIdx - 1) {
-              result.push('---')
-            }
-            result.push(lines[lineIdx])
-          }
-          return result.join('\n')
+          return patch
         }
-        throw new Error('accessibilitySnapshot is not available on this page')
+
+        this.lastSnapshots.set(targetPage, snapshotStr)
+
+        if (!search) {
+          return snapshotStr
+        }
+
+        const lines = snapshotStr.split('\n')
+        const matchIndices: number[] = []
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          const isMatch = isRegExp(search) ? search.test(line) : line.includes(search)
+          if (isMatch) {
+            matchIndices.push(i)
+            if (matchIndices.length >= 10) break
+          }
+        }
+
+        if (matchIndices.length === 0) {
+          return 'No matches found'
+        }
+
+        const CONTEXT_LINES = 5
+        const includedLines = new Set<number>()
+        for (const idx of matchIndices) {
+          const start = Math.max(0, idx - CONTEXT_LINES)
+          const end = Math.min(lines.length - 1, idx + CONTEXT_LINES)
+          for (let i = start; i <= end; i++) {
+            includedLines.add(i)
+          }
+        }
+
+        const sortedIndices = [...includedLines].sort((a, b) => a - b)
+        const result: string[] = []
+        for (let i = 0; i < sortedIndices.length; i++) {
+          const lineIdx = sortedIndices[i]
+          if (i > 0 && sortedIndices[i - 1] !== lineIdx - 1) {
+            result.push('---')
+          }
+          result.push(lines[lineIdx])
+        }
+        return result.join('\n')
       }
 
       const getLocatorStringForElement = async (element: any) => {
