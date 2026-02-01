@@ -303,6 +303,29 @@ export function tryJsonParse(str: string) {
     }
 }
 
+/**
+ * Safely close a browser connected via connectOverCDP.
+ * 
+ * Playwright's CRConnection uses async message handling (messageWrap) that can cause
+ * a race condition where _onClose() runs before all pending _onMessage() handlers complete.
+ * This results in "Assertion error" from crConnection.js when a CDP response arrives
+ * after callbacks were cleared by dispose().
+ * 
+ * This helper waits for the message queue to drain before closing, avoiding the race.
+ * 
+ * @param browser - Browser instance from chromium.connectOverCDP()
+ * @param drainDelayMs - Time to wait for pending messages to be processed (default: 50ms)
+ */
+export async function safeCloseCDPBrowser(
+    browser: Awaited<ReturnType<typeof import('playwright-core').chromium.connectOverCDP>>,
+    drainDelayMs = 50
+): Promise<void> {
+    // Wait for any queued message handlers to run
+    // This gives Playwright's messageWrap time to process pending CDP responses
+    await new Promise(r => setTimeout(r, drainDelayMs))
+    await browser.close()
+}
+
 export type SimpleServer = {
     baseUrl: string
     close: () => Promise<void>

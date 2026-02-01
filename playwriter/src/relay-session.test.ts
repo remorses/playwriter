@@ -5,7 +5,7 @@ import { getCdpUrl } from './utils.js'
 import { getCDPSessionForPage } from './cdp-session.js'
 import { Debugger } from './debugger.js'
 import { Editor } from './editor.js'
-import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, createSseServer, type TestContext, withTimeout, js } from './test-utils.js'
+import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, createSseServer, safeCloseCDPBrowser, type TestContext, withTimeout, js } from './test-utils.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19993
@@ -992,9 +992,7 @@ describe('Service Worker Target Tests', () => {
         const title = await targetPage!.title()
         expect(title).toBeTruthy()
 
-        // Small delay to let pending CDP operations flush before closing
-        await new Promise(r => setTimeout(r, 100))
-        await browser.close()
+        await safeCloseCDPBrowser(browser)
         await page.close()
     }, 60000)
 

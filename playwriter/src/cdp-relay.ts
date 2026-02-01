@@ -210,14 +210,31 @@ export async function startPlayWriterCDPRelayServer({
 
     const messageStr = JSON.stringify(messageToSend)
 
+    // Helper to safely send to a WebSocket, catching errors from closing connections.
+    // When a Playwright client closes its WebSocket, there's a race window where:
+    // 1. Playwright's _onClose runs (clears callbacks map)
+    // 2. We might still have messages in flight or try to send
+    // This can cause "Assertion error" in Playwright's crConnection.js if a response
+    // arrives after callbacks were cleared. We wrap in try-catch to handle this gracefully.
+    const safeSend = (client: PlaywrightClient) => {
+      try {
+        client.ws.send(messageStr)
+      } catch (e) {
+        // WebSocket might be closing/closed - this is expected during disconnect
+        logger?.log(pc.gray(`[Relay] Skipped sending to closing client ${client.id}: ${(e as Error).message}`))
+      }
+    }
+
     if (clientId) {
       const client = playwrightClients.get(clientId)
       if (client) {
-        client.ws.send(messageStr)
+        safeSend(client)
       }
     } else {
-      for (const client of playwrightClients.values()) {
-        client.ws.send(messageStr)
+      // Copy the clients array to avoid issues if a client disconnects during iteration
+      const clients = Array.from(playwrightClients.values())
+      for (const client of clients) {
+        safeSend(client)
       }
     }
   }
