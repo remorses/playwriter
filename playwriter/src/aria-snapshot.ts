@@ -75,6 +75,13 @@ export interface AriaRef {
   ref: string
 }
 
+export type AriaSnapshotNode = {
+  role: string
+  name: string
+  locator?: string
+  children: AriaSnapshotNode[]
+}
+
 export interface ScreenshotResult {
   path: string
   base64: string
@@ -85,6 +92,7 @@ export interface ScreenshotResult {
 
 export interface AriaSnapshotResult {
   snapshot: string
+  tree: AriaSnapshotNode[]
   refToElement: Map<string, { role: string; name: string }>
   refToSelector: Map<string, string>
   /**
@@ -243,6 +251,13 @@ type SnapshotLine = {
   hasChildren?: boolean
 }
 
+type SnapshotNode = {
+  role: string
+  name: string
+  baseLocator?: string
+  children: SnapshotNode[]
+}
+
 function buildSnapshotLine({ role, name, baseLocator, indent, hasChildren }: {
   role: string
   name: string
@@ -273,7 +288,7 @@ function unindentLines(lines: SnapshotLine[]): SnapshotLine[] {
   })
 }
 
-function finalizeSnapshotLines(lines: SnapshotLine[]): string {
+function finalizeSnapshotOutput(lines: SnapshotLine[], nodes: SnapshotNode[]): { snapshot: string; tree: AriaSnapshotNode[] } {
   const locatorCounts = lines.reduce<Map<string, number>>((acc, line) => {
     if (!line.baseLocator) {
       return acc
@@ -283,13 +298,24 @@ function finalizeSnapshotLines(lines: SnapshotLine[]): string {
   }, new Map<string, number>())
 
   const locatorIndices = new Map<string, number>()
-  return lines.map((line) => {
+  const locatorSequence = lines.reduce<string[]>((acc, line) => {
+    if (!line.baseLocator) {
+      return acc
+    }
+    const count = locatorCounts.get(line.baseLocator) ?? 0
+    const index = locatorIndices.get(line.baseLocator) ?? 0
+    locatorIndices.set(line.baseLocator, index + 1)
+    const locator = count > 1 ? `${line.baseLocator} >> nth=${index}` : line.baseLocator
+    acc.push(locator)
+    return acc
+  }, [])
+
+  let lineLocatorIndex = 0
+  const snapshot = lines.map((line) => {
     let text = line.text
     if (line.baseLocator) {
-      const count = locatorCounts.get(line.baseLocator) ?? 0
-      const index = locatorIndices.get(line.baseLocator) ?? 0
-      locatorIndices.set(line.baseLocator, index + 1)
-      const locator = count > 1 ? `${line.baseLocator} >> nth=${index}` : line.baseLocator
+      const locator = locatorSequence[lineLocatorIndex]
+      lineLocatorIndex += 1
       text = `${text} ${locator}`
     }
     if (line.hasChildren) {
@@ -297,6 +323,22 @@ function finalizeSnapshotLines(lines: SnapshotLine[]): string {
     }
     return text
   }).join('\n')
+
+  let nodeLocatorIndex = 0
+  const applyLocators = (items: SnapshotNode[]): AriaSnapshotNode[] => {
+    return items.map((item) => {
+      const locator = item.baseLocator ? locatorSequence[nodeLocatorIndex++] : undefined
+      const children = applyLocators(item.children)
+      return {
+        role: item.role,
+        name: item.name,
+        locator,
+        children,
+      }
+    })
+  }
+
+  return { snapshot, tree: applyLocators(nodes) }
 }
 
 function buildDomIndex(nodes: Protocol.DOM.Node[]): {
@@ -514,10 +556,10 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
       indent: number,
       ancestorNames: string[],
       labelContext: boolean
-    ): { lines: SnapshotLine[]; included: boolean; names: Set<string> } => {
+    ): { lines: SnapshotLine[]; nodes: SnapshotNode[]; included: boolean; names: Set<string> } => {
       const node = axById.get(nodeId)
       if (!node) {
-        return { lines: [], included: false, names: new Set() }
+        return { lines: [], nodes: [], included: false, names: new Set() }
       }
 
       const role = getAxRole(node)
@@ -534,6 +576,9 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
       const childLines = childResults.flatMap((result) => {
         return result.lines
       })
+      const childNodes = childResults.flatMap((result) => {
+        return result.nodes
+      })
       const childIncluded = childResults.some((result) => {
         return result.included
       })
@@ -546,29 +591,31 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
 
       const inScope = isNodeInScope(node) || childIncluded
       if (!inScope) {
-        return { lines: [], included: false, names: new Set() }
+        return { lines: [], nodes: [], included: false, names: new Set() }
       }
 
       if (node.ignored) {
-        return { lines: childLines, included: true, names: childNames }
+        return { lines: childLines, nodes: childNodes, included: true, names: childNames }
       }
 
       if (isTextRole(role)) {
         if (!hasName) {
-          return { lines: childLines, included: true, names: childNames }
+          return { lines: childLines, nodes: childNodes, included: true, names: childNames }
         }
         if (interactiveOnly && !labelContext) {
-          return { lines: childLines, included: true, names: childNames }
+          return { lines: childLines, nodes: childNodes, included: true, names: childNames }
         }
         const isRedundantText = ancestorNames.some((ancestor) => {
           return ancestor.includes(name) || name.includes(ancestor)
         })
         if (isRedundantText) {
-          return { lines: childLines, included: true, names: childNames }
+          return { lines: childLines, nodes: childNodes, included: true, names: childNames }
         }
         const names = new Set(childNames)
         names.add(name)
-        return { lines: [buildTextLine(name, indent)], included: true, names }
+        const textLine = buildTextLine(name, indent)
+        const textNode: SnapshotNode = { role: 'text', name, children: [] }
+        return { lines: [textLine], nodes: [textNode], included: true, names }
       }
 
       const hasChildren = childLines.length > 0
@@ -583,21 +630,21 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
         ? includeInteractive || isLabel || isContext || hasChildren
         : includeInteractive || hasNameToUse || hasChildren
       if (!shouldInclude) {
-        return { lines: childLines, included: true, names: childNames }
+        return { lines: childLines, nodes: childNodes, included: true, names: childNames }
       }
 
       if (interactiveOnly && !includeInteractive && !isLabel && !isContext) {
         if (!hasChildren) {
-          return { lines: [], included: true, names: childNames }
+          return { lines: [], nodes: [], included: true, names: childNames }
         }
-        return { lines: unindentLines(childLines), included: true, names: childNames }
+        return { lines: unindentLines(childLines), nodes: childNodes, included: true, names: childNames }
       }
 
       if (isWrapper && !hasNameToUse) {
         if (!hasChildren) {
-          return { lines: [], included: true, names: childNames }
+          return { lines: [], nodes: [], included: true, names: childNames }
         }
-        return { lines: unindentLines(childLines), included: true, names: childNames }
+        return { lines: unindentLines(childLines), nodes: childNodes, included: true, names: childNames }
       }
 
       let baseLocator: string | undefined
@@ -615,27 +662,43 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
         indent,
         hasChildren,
       })
+      const nodeEntry: SnapshotNode = {
+        role,
+        name: nameToUse,
+        baseLocator,
+        children: childNodes,
+      }
       const names = new Set(childNames)
       if (hasNameToUse) {
         names.add(nameToUse)
       }
-      return { lines: [line, ...childLines], included: true, names }
+      return { lines: [line, ...childLines], nodes: [nodeEntry], included: true, names }
     }
 
     let snapshotLines: SnapshotLine[] = []
+    let snapshotNodes: SnapshotNode[] = []
     if (rootAxNodeId) {
       const rootNode = axById.get(rootAxNodeId)
       const rootRole = rootNode ? getAxRole(rootNode) : ''
       if (rootNode && (rootRole === 'rootwebarea' || rootRole === 'webarea') && rootNode.childIds) {
-        snapshotLines = rootNode.childIds.flatMap((childId) => {
-          return buildLines(childId, 0, [], false).lines
+        const childResults = rootNode.childIds.map((childId) => {
+          return buildLines(childId, 0, [], false)
+        })
+        snapshotLines = childResults.flatMap((result) => {
+          return result.lines
+        })
+        snapshotNodes = childResults.flatMap((result) => {
+          return result.nodes
         })
       } else {
-        snapshotLines = buildLines(rootAxNodeId, 0, [], false).lines
+        const result = buildLines(rootAxNodeId, 0, [], false)
+        snapshotLines = result.lines
+        snapshotNodes = result.nodes
       }
     }
 
-    const result = { snapshot: finalizeSnapshotLines(snapshotLines), refs }
+    const finalized = finalizeSnapshotOutput(snapshotLines, snapshotNodes)
+    const result = { snapshot: finalized.snapshot, tree: finalized.tree, refs }
 
     // Build refToElement map
     const refToElement = new Map<string, { role: string; name: string }>()
@@ -735,6 +798,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
 
     return {
       snapshot,
+      tree: result.tree,
       refToElement,
       refToSelector,
       getSelectorForRef,
