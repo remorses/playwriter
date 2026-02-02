@@ -21,3 +21,5 @@ opensrc/
 # aria snapshots
 playwriter/src/aria-snapshots/
 playwriter/src/snapshots/
+playwriter/src/__snapshots__/ax-debug/
+gmail-oauth/
