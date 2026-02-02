@@ -381,6 +381,7 @@ export class PlaywrightExecutor {
       logs.forEach(({ method, args }) => {
         const formattedArgs = args
           .map((arg) => {
+            if (typeof arg === 'string') return arg
             return util.inspect(arg, { depth: 4, colors: false, maxArrayLength: 100, breakLength: 80 })
           })
           .join(' ')
@@ -660,7 +661,10 @@ export class PlaywrightExecutor {
       if (hasExplicitReturn) {
         const resolvedResult = isPromise(result) ? await result : result
         if (resolvedResult !== undefined) {
-          const formatted = util.inspect(resolvedResult, { depth: 4, colors: false, maxArrayLength: 100, breakLength: 80 })
+
+          const formatted = typeof resolvedResult === "string"
+            ? resolvedResult
+            : util.inspect(resolvedResult, { depth: 4, colors: false, maxArrayLength: 100, breakLength: 80 })
           if (formatted.trim()) {
             responseText += `[return value] ${formatted}\n`
           }
