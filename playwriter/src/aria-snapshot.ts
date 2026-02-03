@@ -478,6 +478,15 @@ function isTextRole(role: string): boolean {
   return role === 'statictext' || role === 'inlinetextbox'
 }
 
+function isSubstringOfAny(needle: string, haystack: Set<string>): boolean {
+  for (const str of haystack) {
+    if (str.includes(needle)) {
+      return true
+    }
+  }
+  return false
+}
+
 // ============================================================================
 // Main Functions
 // ============================================================================
@@ -687,7 +696,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
       }
 
       const hasChildren = childLines.length > 0
-      const nameToUse = hasName && childNames.has(name) ? '' : name
+      const nameToUse = hasName && (childNames.has(name) || isSubstringOfAny(name, childNames)) ? '' : name
       const hasNameToUse = nameToUse.length > 0
       const isWrapper = SKIP_WRAPPER_ROLES.has(role)
       const isInteractive = INTERACTIVE_ROLES.has(role)
