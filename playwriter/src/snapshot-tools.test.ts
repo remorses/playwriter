@@ -181,7 +181,7 @@ describe('Snapshot & Screenshot Tests', () => {
             await globalThis.toggleExtensionForActiveTab()
         })
 
-        await new Promise(r => setTimeout(r, 100))
+        await new Promise(r => setTimeout(r, 400))
 
         const capturedCommands: CDPCommand[] = []
         const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
