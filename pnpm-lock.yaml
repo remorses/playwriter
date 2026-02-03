@@ -86,6 +86,9 @@ importers:
       '@xmorse/cac':
         specifier: ^6.0.7
         version: 6.0.7
+      async-sema:
+        specifier: ^3.1.1
+        version: 3.1.1
       diff:
         specifier: ^8.0.2
         version: 8.0.2
@@ -7673,6 +7676,14 @@ snapshots:
     optionalDependencies:
       vite: 7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6)
 
+  '@vitest/mocker@4.0.8(vite@7.2.2(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6))':
+    dependencies:
+      '@vitest/spy': 4.0.8
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 7.2.2(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6)
+
   '@vitest/mocker@4.0.8(vite@7.2.2(@types/node@25.2.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6))':
     dependencies:
       '@vitest/spy': 4.0.8
@@ -7724,7 +7735,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vitest: 4.0.8(@types/node@25.2.0)(@vitest/ui@4.0.8)(jiti@2.6.1)(jsdom@27.2.0(bufferutil@4.0.9))(lightningcss@1.30.2)(tsx@4.20.6)
+      vitest: 4.0.8(@types/node@24.10.1)(@vitest/ui@4.0.8)(jiti@2.6.1)(jsdom@27.2.0(bufferutil@4.0.9))(lightningcss@1.30.2)(tsx@4.20.6)
 
   '@vitest/utils@4.0.16':
     dependencies:
@@ -10577,7 +10588,7 @@ snapshots:
   vitest@4.0.8(@types/node@24.10.1)(@vitest/ui@4.0.8)(jiti@2.6.1)(jsdom@27.2.0(bufferutil@4.0.9))(lightningcss@1.30.2)(tsx@4.20.6):
     dependencies:
       '@vitest/expect': 4.0.8
-      '@vitest/mocker': 4.0.8(vite@7.2.2(@types/node@25.2.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6))
+      '@vitest/mocker': 4.0.8(vite@7.2.2(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6))
       '@vitest/pretty-format': 4.0.8
       '@vitest/runner': 4.0.8
       '@vitest/snapshot': 4.0.8

@@ -23,6 +23,7 @@ import { getReactSource, type ReactSourceLocation } from './react-source.js'
 import { ScopedFS } from './scoped-fs.js'
 import {
   screenshotWithAccessibilityLabels,
+  buildShortRefMap,
   getAriaSnapshot,
   type ScreenshotResult,
   type SnapshotFormat,
@@ -152,6 +153,7 @@ export class PlaywrightExecutor {
   private userState: Record<string, any> = {}
   private browserLogs: Map<string, string[]> = new Map()
   private lastSnapshots: WeakMap<Page, string> = new WeakMap()
+  private lastRefToLocator: WeakMap<Page, Map<string, string>> = new WeakMap()
   private cdpSessionCache: WeakMap<Page, CDPSession> = new WeakMap()
   private scopedFs: ScopedFS
   private sandboxedRequire: NodeRequire
@@ -451,13 +453,24 @@ export class PlaywrightExecutor {
         const { page: targetPage, locator, search, showDiffSinceLastCall = false, interactiveOnly = true } = options
 
         // Use new in-page implementation via getAriaSnapshot
-        const { snapshot: rawSnapshot } = await getAriaSnapshot({
+        const { snapshot: rawSnapshot, refs, getSelectorForRef } = await getAriaSnapshot({
           page: targetPage,
           locator,
           wsUrl: getCdpUrl(this.cdpConfig),
           interactiveOnly,
         })
         const snapshotStr = rawSnapshot.toWellFormed?.() ?? rawSnapshot
+
+        const refToLocator = new Map<string, string>()
+        const shortRefMap = buildShortRefMap({ refs })
+        for (const entry of refs) {
+          const locatorStr = getSelectorForRef(entry.ref)
+          if (locatorStr) {
+            const shortRef = shortRefMap.get(entry.ref) ?? entry.ref
+            refToLocator.set(shortRef, locatorStr)
+          }
+        }
+        this.lastRefToLocator.set(targetPage, refToLocator)
 
         if (showDiffSinceLastCall) {
           const previousSnapshot = this.lastSnapshots.get(targetPage)
@@ -477,7 +490,7 @@ export class PlaywrightExecutor {
         this.lastSnapshots.set(targetPage, snapshotStr)
 
         if (!search) {
-          return snapshotStr
+          return `${snapshotStr}\n\nuse refToLocator({ ref: 'e3' }) to get locators for ref strings.`
         }
 
         const lines = snapshotStr.split('\n')
@@ -515,6 +528,15 @@ export class PlaywrightExecutor {
           result.push(lines[lineIdx])
         }
         return result.join('\n')
+      }
+
+      const refToLocator = (options: { ref: string; page?: Page }): string | null => {
+        const targetPage = options.page || page
+        const map = this.lastRefToLocator.get(targetPage)
+        if (!map) {
+          return null
+        }
+        return map.get(options.ref) ?? null
       }
 
       const getLocatorStringForElement = async (element: any) => {
@@ -622,6 +644,7 @@ export class PlaywrightExecutor {
       const screenshotWithAccessibilityLabelsFn = async (options: { page: Page; interactiveOnly?: boolean }) => {
         return screenshotWithAccessibilityLabels({
           ...options,
+          wsUrl: getCdpUrl(this.cdpConfig),
           collector: screenshotCollector,
           logger: {
             info: (...args) => {
@@ -658,6 +681,7 @@ export class PlaywrightExecutor {
         state: this.userState,
         console: customConsole,
         accessibilitySnapshot,
+        refToLocator,
         getCleanHTML,
         getPageMarkdown,
         getLocatorStringForElement,

@@ -4,6 +4,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Protocol } from 'devtools-protocol'
+import { Sema } from 'async-sema'
+import type { ICDPSession } from './cdp-session.js'
 import { getCDPSessionForPage } from './cdp-session.js'
 
 // Import sharp at module level - resolves to null if not available
@@ -73,12 +75,15 @@ export interface AriaRef {
   role: string
   name: string
   ref: string
+  backendNodeId?: Protocol.DOM.BackendNodeId
 }
 
 export type AriaSnapshotNode = {
   role: string
   name: string
   locator?: string
+  ref?: string
+  backendNodeId?: Protocol.DOM.BackendNodeId
   children: AriaSnapshotNode[]
 }
 
@@ -93,6 +98,7 @@ export interface ScreenshotResult {
 export interface AriaSnapshotResult {
   snapshot: string
   tree: AriaSnapshotNode[]
+  refs: AriaRef[]
   refToElement: Map<string, { role: string; name: string }>
   refToSelector: Map<string, string>
   /**
@@ -104,6 +110,27 @@ export interface AriaSnapshotResult {
   getRefsForLocators: (locators: Array<Locator | ElementHandle>) => Promise<Array<AriaRef | null>>
   getRefForLocator: (locator: Locator | ElementHandle) => Promise<AriaRef | null>
   getRefStringForLocator: (locator: Locator | ElementHandle) => Promise<string | null>
+}
+
+type LabelBox = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+type AriaLabel = {
+  ref: string
+  role: string
+  box: LabelBox
+}
+
+export function buildShortRefMap({ refs }: { refs: AriaRef[] }): Map<string, string> {
+  const map = new Map<string, string>()
+  refs.forEach((entry, index) => {
+    map.set(entry.ref, `e${index + 1}`)
+  })
+  return map
 }
 
 // Roles that represent interactive elements
@@ -132,6 +159,8 @@ const INTERACTIVE_ROLES = new Set([
 const LABEL_ROLES = new Set([
   'labeltext',
 ])
+
+const MAX_LABEL_POSITION_CONCURRENCY = 24
 
 const CONTEXT_ROLES = new Set([
   'navigation',
@@ -255,6 +284,8 @@ type SnapshotNode = {
   role: string
   name: string
   baseLocator?: string
+  ref?: string
+  backendNodeId?: Protocol.DOM.BackendNodeId
   children: SnapshotNode[]
 }
 
@@ -333,6 +364,8 @@ function finalizeSnapshotOutput(lines: SnapshotLine[], nodes: SnapshotNode[]): {
         role: item.role,
         name: item.name,
         locator,
+        ref: item.ref,
+        backendNodeId: item.backendNodeId,
         children,
       }
     })
@@ -434,16 +467,17 @@ function isTextRole(role: string): boolean {
  * await page.locator(selector).click()
  * ```
  */
-export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interactiveOnly = false }: {
+export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interactiveOnly = false, cdp }: {
   page: Page
   locator?: Locator
   refFilter?: (info: { role: string; name: string }) => boolean
   wsUrl?: string
   interactiveOnly?: boolean
+  cdp?: ICDPSession
 }): Promise<AriaSnapshotResult> {
-  const cdp = await getCDPSessionForPage({ page, wsUrl })
-  await cdp.send('DOM.enable')
-  await cdp.send('Accessibility.enable')
+  const session = cdp || await getCDPSessionForPage({ page, wsUrl })
+  await session.send('DOM.enable')
+  await session.send('Accessibility.enable')
   const scopeAttr = 'data-pw-scope'
   const scopeValue = crypto.randomUUID()
   let scopeApplied = false
@@ -456,7 +490,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
       scopeApplied = true
     }
 
-    const { nodes: domNodes } = await cdp.send('DOM.getFlattenedDocument', { depth: -1, pierce: true })
+    const { nodes: domNodes } = await session.send('DOM.getFlattenedDocument', { depth: -1, pierce: true }) as Protocol.DOM.GetFlattenedDocumentResponse
     const { domById, domByBackendId, childrenByParent } = buildDomIndex(domNodes)
 
     let scopeRootNodeId: Protocol.DOM.NodeId | null = null
@@ -475,7 +509,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
       ? buildBackendIdSet(scopeRootNodeId, childrenByParent, domById)
       : null
 
-    const { nodes: axNodes } = await cdp.send('Accessibility.getFullAXTree')
+    const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree') as Protocol.Accessibility.GetFullAXTreeResponse
 
     const axById = new Map<Protocol.Accessibility.AXNodeId, Protocol.Accessibility.AXNode>()
     for (const node of axNodes) {
@@ -513,7 +547,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
 
     const refCounts = new Map<string, number>()
     let fallbackCounter = 0
-    const refs: Array<{ ref: string; role: string; name: string; selector?: string }> = []
+    const refs: Array<AriaRef & { selector?: string }> = []
 
     const createRefForNode = (node: Protocol.Accessibility.AXNode, role: string, name: string): string | null => {
       if (!INTERACTIVE_ROLES.has(role)) {
@@ -537,7 +571,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
         selector = buildLocatorFromStable(stable)
       }
 
-      refs.push({ ref, role, name, selector })
+      refs.push({ ref, role, name, selector, backendNodeId: node.backendDOMNodeId })
       return ref
     }
 
@@ -648,11 +682,12 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
       }
 
       let baseLocator: string | undefined
+      let ref: string | null = null
       if (includeInteractive) {
         const domInfo = node.backendDOMNodeId ? domByBackendId.get(node.backendDOMNodeId) : undefined
         const stable = domInfo ? getStableRefFromAttributes(domInfo.attributes) : null
         baseLocator = buildBaseLocator({ role, name, stable })
-        createRefForNode(node, role, name)
+        ref = createRefForNode(node, role, name)
       }
 
       const line = buildSnapshotLine({
@@ -666,6 +701,8 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
         role,
         name: nameToUse,
         baseLocator,
+        ref: ref ?? undefined,
+        backendNodeId: node.backendDOMNodeId,
         children: childNodes,
       }
       const names = new Set(childNames)
@@ -799,6 +836,7 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
     return {
       snapshot,
       tree: result.tree,
+      refs: result.refs,
       refToElement,
       refToSelector,
       getSelectorForRef,
@@ -812,7 +850,82 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
         element.removeAttribute(attr)
       }, scopeAttr)
     }
-    await cdp.detach()
+    if (!cdp) {
+      await session.detach()
+    }
+  }
+}
+
+function buildBoxFromQuad(quad?: number[]): LabelBox | null {
+  if (!quad || quad.length < 8) {
+    return null
+  }
+  const xs = [quad[0], quad[2], quad[4], quad[6]]
+  const ys = [quad[1], quad[3], quad[5], quad[7]]
+  const left = Math.min(...xs)
+  const right = Math.max(...xs)
+  const top = Math.min(...ys)
+  const bottom = Math.max(...ys)
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  }
+}
+
+function isTruthy<T>(value: T): value is NonNullable<T> {
+  return Boolean(value)
+}
+
+async function getLabelBoxesForRefs({
+  page,
+  refs,
+  wsUrl,
+  maxConcurrency = MAX_LABEL_POSITION_CONCURRENCY,
+  logger,
+  cdp,
+}: {
+  page: Page
+  refs: AriaRef[]
+  wsUrl?: string
+  maxConcurrency?: number
+  logger?: { info?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
+  cdp?: ICDPSession
+}): Promise<AriaLabel[]> {
+  const session = cdp || await getCDPSessionForPage({ page, wsUrl })
+  const sema = new Sema(maxConcurrency)
+  const labelRefs = refs.filter((ref) => {
+    return Boolean(ref.backendNodeId) && INTERACTIVE_ROLES.has(ref.role)
+  })
+
+  try {
+    const labels = await Promise.all(
+      labelRefs.map(async (ref) => {
+        if (!ref.backendNodeId) {
+          return null
+        }
+        await sema.acquire()
+        try {
+          const response = await session.send('DOM.getBoxModel', { backendNodeId: ref.backendNodeId }) as Protocol.DOM.GetBoxModelResponse
+          const box = buildBoxFromQuad(response.model.border)
+          if (!box) {
+            return null
+          }
+          return { ref: ref.ref, role: ref.role, box }
+        } catch (error) {
+          logger?.error?.('[playwriter] getBoxModel failed for', ref.ref, error)
+          return null
+        } finally {
+          sema.release()
+        }
+      })
+    )
+    return labels.filter(isTruthy)
+  } finally {
+    if (!cdp) {
+      await session.detach()
+    }
   }
 }
 
@@ -836,10 +949,11 @@ export async function getAriaSnapshot({ page, locator, refFilter, wsUrl, interac
  * await page.locator('[data-testid="submit-btn"]').click()
  * ```
  */
-export async function showAriaRefLabels({ page, locator, interactiveOnly = true, logger }: {
+export async function showAriaRefLabels({ page, locator, interactiveOnly = true, wsUrl, logger }: {
   page: Page
   locator?: Locator
   interactiveOnly?: boolean
+  wsUrl?: string
   logger?: { info?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
 }): Promise<{
   snapshot: string
@@ -853,36 +967,55 @@ export async function showAriaRefLabels({ page, locator, interactiveOnly = true,
     log(`ensureA11yClient: ${Date.now() - startTime}ms`)
   }
 
-  // Determine root element
-  const rootHandle = locator ? await locator.elementHandle() : null
+  const snapshotStart = Date.now()
+  const cdp = await getCDPSessionForPage({ page, wsUrl })
 
-  const computeStart = Date.now()
-  const result = await page.evaluate(
-    ({ root, interactiveOnly: intOnly }) => {
-      const a11y = (globalThis as any).__a11y
-      if (!a11y) {
-        throw new Error('a11y client not loaded')
-      }
-      const rootElement = root || document.body
-      return a11y.computeA11ySnapshot({
-        root: rootElement,
-        interactiveOnly: intOnly,
-        renderLabels: true,
-      })
-    },
-    {
-      root: rootHandle,
-      interactiveOnly,
+  try {
+    const { snapshot, refs } = await getAriaSnapshot({ page, locator, interactiveOnly, wsUrl, cdp })
+    const shortRefMap = buildShortRefMap({ refs })
+    if (log) {
+      log(`getAriaSnapshot: ${Date.now() - snapshotStart}ms`)
     }
-  )
 
-  if (log) {
-    log(`computeA11ySnapshot: ${Date.now() - computeStart}ms (${result.labelCount} labels)`)
-  }
+    const rootHandle = locator ? await locator.elementHandle() : null
 
-  return {
-    snapshot: result.snapshot,
-    labelCount: result.labelCount,
+    const labelsStart = Date.now()
+    const labels = await getLabelBoxesForRefs({ page, refs, wsUrl, logger, cdp })
+    const shortLabels = labels.map((label) => {
+      return {
+        ...label,
+        ref: shortRefMap.get(label.ref) ?? label.ref,
+      }
+    })
+    if (log) {
+      log(`getLabelBoxesForRefs: ${Date.now() - labelsStart}ms (${labels.length} boxes)`)
+    }
+
+    const renderStart = Date.now()
+    const labelCount = await page.evaluate(({ entries, root, interactiveOnly: intOnly }) => {
+      const a11y = (globalThis as {
+        __a11y?: {
+          renderA11yLabels?: (labels: typeof entries) => number
+          computeA11ySnapshot?: (options: { root: unknown; interactiveOnly: boolean; renderLabels: boolean }) => { labelCount: number }
+        }
+      }).__a11y
+      if (a11y?.renderA11yLabels) {
+        return a11y.renderA11yLabels(entries)
+      }
+      if (a11y?.computeA11ySnapshot) {
+        const rootElement = root || document.body
+        return a11y.computeA11ySnapshot({ root: rootElement, interactiveOnly: intOnly, renderLabels: true }).labelCount
+      }
+      throw new Error('a11y client not loaded')
+    }, { entries: shortLabels, root: rootHandle, interactiveOnly })
+
+    if (log) {
+      log(`renderA11yLabels: ${Date.now() - renderStart}ms (${labelCount} labels)`)
+    }
+
+    return { snapshot, labelCount }
+  } finally {
+    await cdp.detach()
   }
 }
 
@@ -925,15 +1058,16 @@ export async function hideAriaRefLabels({ page }: { page: Page }): Promise<void>
  * await page.locator('[data-testid="submit-btn"]').click()
  * ```
  */
-export async function screenshotWithAccessibilityLabels({ page, locator, interactiveOnly = true, collector, logger }: {
+export async function screenshotWithAccessibilityLabels({ page, locator, interactiveOnly = true, wsUrl, collector, logger }: {
   page: Page
   locator?: Locator
   interactiveOnly?: boolean
+  wsUrl?: string
   collector: ScreenshotResult[]
   logger?: { info?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
 }): Promise<void> {
   const showLabelsStart = Date.now()
-  const { snapshot, labelCount } = await showAriaRefLabels({ page, locator, interactiveOnly, logger })
+  const { snapshot, labelCount } = await showAriaRefLabels({ page, locator, interactiveOnly, wsUrl, logger })
   const log = logger?.info ?? logger?.error
   if (log) {
     log(`showAriaRefLabels: ${Date.now() - showLabelsStart}ms`)

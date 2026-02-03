@@ -232,7 +232,7 @@ After any action (click, submit, navigate), verify what happened:
 console.log('url:', page.url()); console.log(await accessibilitySnapshot({ page }).then(x => x.split('\n').slice(0, 30).join('\n')));
 ```
 
-For visually complex pages (grids, galleries, dashboards), use `screenshotWithAccessibilityLabels({ page })` instead to understand spatial layout.
+For visually complex pages (grids, galleries, dashboards), use `screenshotWithAccessibilityLabels({ page })` instead to understand spatial layout. Label refs are short `eN` strings (e.g. `e3`).
 
 If nothing changed, try `await waitForPageLoad({ page, timeout: 3000 })` or you may have clicked the wrong element.
 
@@ -264,6 +264,14 @@ Example output:
 Each interactive line ends with a Playwright locator you can pass to `page.locator()`.
 If multiple elements share the same locator, a `>> nth=N` suffix is added (0-based)
 to make it unique.
+
+If a screenshot shows ref labels like `e3`, resolve them using the last snapshot:
+
+```js
+const snapshot = await accessibilitySnapshot({ page })
+const locator = refToLocator({ ref: 'e3' })
+await page.locator(locator!).click()
+```
 
 ```js
 await page.locator('[id="nav-home"]').click()

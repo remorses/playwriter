@@ -1,16 +1,16 @@
 Console output:
-[log] '# Test Article Title\n' +
-  '\n' +
-  'Home About\n' +
-  'Test Article Title\n' +
-  '\n' +
-  'This is the first paragraph of the article content.\n' +
-  '\n' +
-  'This is the second paragraph with more details about the topic.\n' +
-  '\n' +
-  'The article continues with important information here.\n' +
-  '\n' +
-  'Related Posts\n' +
-  'Post 1\n' +
-  'Post 2\n' +
-  'Copyright 2024'
+[log] # Test Article Title
+
+Home About
+Test Article Title
+
+This is the first paragraph of the article content.
+
+This is the second paragraph with more details about the topic.
+
+The article continues with important information here.
+
+Related Posts
+Post 1
+Post 2
+Copyright 2024

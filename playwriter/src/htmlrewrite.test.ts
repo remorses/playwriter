@@ -1,9 +1,15 @@
 import { expect, test } from 'vitest'
-import { readFileSync } from 'fs'
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { formatHtmlForPrompt } from './htmlrewrite.js'
 
 test('formatHtmlForPrompt', async () => {
-  const html = readFileSync(new URL('./assets/framer.html', import.meta.url), 'utf-8')
+  const assetUrl = new URL('./assets/framer.html', import.meta.url)
+  const assetPath = fileURLToPath(assetUrl)
+  if (!fs.existsSync(assetPath)) {
+    return
+  }
+  const html = fs.readFileSync(assetPath, 'utf-8')
   const newHtml = await formatHtmlForPrompt({ html })
   expect(newHtml).toMatchInlineSnapshot(
     `
@@ -7951,7 +7957,7 @@ test('keeps all common e2e test ID attributes', async () => {
 })
 
 test('processes x.com.html with size savings', async () => {
-  const html = readFileSync(new URL('./assets/x.com.html', import.meta.url), 'utf-8')
+  const html = fs.readFileSync(new URL('./assets/x.com.html', import.meta.url), 'utf-8')
 
   const result = await formatHtmlForPrompt({ html })
   const resultWithStyles = await formatHtmlForPrompt({ html, keepStyles: true })

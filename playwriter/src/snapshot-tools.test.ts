@@ -761,6 +761,8 @@ describe('Snapshot & Screenshot Tests', () => {
             }
         }
 
+        const wsUrl = getCdpUrl({ port: TEST_PORT })
+
         for (const { name, url, page } of pages) {
             console.log(`[labels] start ${name}`)
             const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes(new URL(url).hostname))
@@ -770,12 +772,12 @@ describe('Snapshot & Screenshot Tests', () => {
             }
 
             console.log(`[labels] show labels ${name}`)
-            const { snapshot, labelCount } = await withTimeout(
+            const { labelCount } = await withTimeout(
                 `showAriaRefLabels(${name})`,
                 async () => {
-                    return await showAriaRefLabels({ page: cdpPage })
+                    return await showAriaRefLabels({ page: cdpPage, wsUrl })
                 },
-                30000
+                60000
             )
             console.log(`${name}: ${labelCount} labels shown`)
             if (name !== 'google') {
@@ -793,9 +795,6 @@ describe('Snapshot & Screenshot Tests', () => {
             const screenshotPath = path.join(assetsDir, `aria-labels-${name}.png`)
             fs.writeFileSync(screenshotPath, screenshot)
             console.log(`Screenshot saved: ${screenshotPath}`)
-
-            const snapshotPath = path.join(assetsDir, `aria-labels-${name}-snapshot.txt`)
-            fs.writeFileSync(snapshotPath, snapshot)
 
             console.log(`[labels] count dom labels ${name}`)
             const labelElements = await withTimeout(

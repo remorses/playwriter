@@ -94,7 +94,7 @@ describe('Relay Core Tests', () => {
           [
             {
               "text": "Console output:
-          [log] 'Page title:' 'Example Domain'
+          [log] Page title: Example Domain
 
           [return value] { url: 'https://example.com/', title: 'Example Domain' }",
               "type": "text",
@@ -683,12 +683,12 @@ describe('Relay Core Tests', () => {
 
         // Inline snapshot of cleaned HTML
         expect(text).toMatchInlineSnapshot(`
-          "[return value] '<div data-testid="main">\\n' +
-            ' <h1>Hello World</h1>\\n' +
-            ' <button aria-label="Click me">Submit</button>\\n' +
-            ' <a href="/about" title="About page">About</a>\\n' +
-            ' <input type="text" placeholder="Enter name">\\n' +
-            '</div>\\n'"
+          "[return value] <div data-testid="main">
+           <h1>Hello World</h1>
+           <button aria-label="Click me">Submit</button>
+           <a href="/about" title="About page">About</a>
+           <input type="text" placeholder="Enter name">
+          </div>"
         `)
 
         // Should NOT contain script/style tags (they're removed)
