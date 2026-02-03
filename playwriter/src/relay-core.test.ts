@@ -1,6 +1,6 @@
 import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { chromium } from 'playwright-core'
+import { getCDPSessionForPage } from './cdp-session.js'
 import { getCdpUrl } from './utils.js'
 import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext, withTimeout, js, tryJsonParse } from './test-utils.js'
 import './test-declarations.js'
@@ -40,9 +40,10 @@ describe('Relay Core Tests', () => {
         })
 
         const page = await browserContext.newPage()
-        await page.setContent('<html><body><button id="btn">Click</button></body></html>')
+        const html = '<html><body><button id="btn">Click</button></body></html>'
+        const dataUrl = `data:text/html,${encodeURIComponent(html)}`
+        await page.goto(dataUrl)
         await page.bringToFront()
-        const pageUrl = page.url()
 
         await withTimeout({
             promise: serviceWorker.evaluate(async () => {
@@ -53,48 +54,35 @@ describe('Relay Core Tests', () => {
         })
         await new Promise((r) => { setTimeout(r, 100) })
 
-        const browser = await withTimeout({
-            promise: chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
+        const cdpSession = await withTimeout({
+            promise: getCDPSessionForPage({ page, wsUrl: getCdpUrl({ port: TEST_PORT }) }),
             timeoutMs: 10000,
-            errorMessage: 'Timed out connecting to browser over CDP',
+            errorMessage: 'Timed out creating CDP session for page',
         })
-        const cdpPage = await withTimeout({
-            promise: (async () => {
-                for (let i = 0; i < 20; i++) {
-                    const context = browser.contexts()[0]
-                    const pages = context?.pages() ?? []
-                    const match = pages.find((p) => {
-                        return p.url() === pageUrl
-                    })
-                    if (match) {
-                        return match
-                    }
-                    await new Promise((r) => { setTimeout(r, 200) })
-                }
-                return null
-            })(),
-            timeoutMs: 5000,
-            errorMessage: `Timed out waiting for CDP page for ${pageUrl}`,
-        })
-        expect(cdpPage).toBeDefined()
 
-        const hasGlobalBefore = await cdpPage!.evaluate(() => {
+        const hasGlobalBefore = await page.evaluate(() => {
             return Boolean((globalThis as { __testGlobal?: unknown }).__testGlobal)
         })
         expect(hasGlobalBefore).toBe(false)
 
         await withTimeout({
-            promise: cdpPage!.addScriptTag({ content: 'globalThis.__testGlobal = { foo: "bar" };' }),
+            promise: (async () => {
+                await cdpSession.send('Page.enable')
+                await cdpSession.send('Page.addScriptToEvaluateOnNewDocument', {
+                    source: 'globalThis.__testGlobal = { foo: "bar" }',
+                })
+                await page.reload({ waitUntil: 'domcontentloaded' })
+            })(),
             timeoutMs: 10000,
-            errorMessage: 'Timed out adding script tag via CDP page',
+            errorMessage: 'Timed out injecting script via CDP session',
         })
 
-        const hasGlobalAfter = await cdpPage!.evaluate(() => {
+        const hasGlobalAfter = await page.evaluate(() => {
             return (globalThis as { __testGlobal?: unknown }).__testGlobal
         })
         expect(hasGlobalAfter).toEqual({ foo: 'bar' })
 
-        await browser.close()
+        cdpSession.close()
         await page.close()
     }, 60000)
 
@@ -202,7 +190,7 @@ describe('Relay Core Tests', () => {
             arguments: {
                 code: js`
           await state.page.goto('https://news.ycombinator.com/item?id=1', { waitUntil: 'domcontentloaded' });
-          const snapshot = await state.page._snapshotForAI();
+          const snapshot = await accessibilitySnapshot({ page: state.page, showDiffSinceLastCall: false });
           return snapshot;
         `,
             },
@@ -216,7 +204,7 @@ describe('Relay Core Tests', () => {
             'snapshots/hacker-news-initial-accessibility.md',
         )
         expect(result.content).toBeDefined()
-        expect(initialData).toContain('table')
+        expect(initialData).toContain('role=link')
         expect(initialData).toContain('Hacker News')
     }, 30000)
 
@@ -238,7 +226,7 @@ describe('Relay Core Tests', () => {
             arguments: {
                 code: js`
           await state.page.goto('https://ui.shadcn.com/', { waitUntil: 'domcontentloaded' });
-          const snapshot = await state.page._snapshotForAI();
+          const snapshot = await accessibilitySnapshot({ page: state.page });
           return snapshot;
         `,
             },
