@@ -40,9 +40,9 @@ export function createSmartDiff(options: CreateSmartDiffOptions): SmartDiffResul
     }
   }
 
-  // No changes
+  // No changes - return full content
   if (addedLines === 0 && removedLines === 0) {
-    return { type: 'no-change', content: 'No changes detected since last snapshot' }
+    return { type: 'no-change', content: newContent }
   }
 
   // Calculate change ratio: use max(added, removed) since a replacement counts as both
@@ -53,14 +53,6 @@ export function createSmartDiff(options: CreateSmartDiffOptions): SmartDiffResul
   const changedLines = Math.max(addedLines, removedLines)
   const changeRatio = Math.min(changedLines / maxLines, 1) // Cap at 100%
 
-  if (changeRatio >= threshold) {
-    const percentChanged = Math.round(changeRatio * 100)
-    return {
-      type: 'full',
-      content: `Content changed significantly (${percentChanged}% of lines). Full new content:\n\n${newContent}`,
-    }
-  }
-
   // Build unified diff string from structured patch
   const diffLines: string[] = [
     `--- ${label} (previous)`,
@@ -70,6 +62,12 @@ export function createSmartDiff(options: CreateSmartDiffOptions): SmartDiffResul
     diffLines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`)
     diffLines.push(...hunk.lines)
   }
+  const diffString = diffLines.join('\n')
 
-  return { type: 'diff', content: diffLines.join('\n') }
+  // Return full content if changes exceed threshold OR if diff is longer than full content
+  if (changeRatio >= threshold || diffString.length >= newContent.length) {
+    return { type: 'full', content: newContent }
+  }
+
+  return { type: 'diff', content: diffString }
 }

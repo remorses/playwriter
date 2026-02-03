@@ -2,28 +2,23 @@ import { describe, it, expect } from 'vitest'
 import { createSmartDiff } from './diff-utils.js'
 
 describe('createSmartDiff', () => {
-  it('returns no-change when content is identical', () => {
+  it('returns no-change with full content when content is identical', () => {
     const result = createSmartDiff({
       oldContent: 'hello\nworld',
       newContent: 'hello\nworld',
     })
     expect(result.type).toBe('no-change')
-    expect(result.content).toBe('No changes detected since last snapshot')
+    expect(result.content).toBe('hello\nworld')
   })
 
-  it('returns diff when diff is shorter than full content', () => {
-    // Small change on 5-line content - diff may be shorter or longer depending on overhead
+  it('returns full content when diff would be longer', () => {
+    // Small content - diff overhead makes it longer than full content
     const result = createSmartDiff({
       oldContent: 'line1\nline2\nline3\nline4\nline5',
       newContent: 'line1\nline2-modified\nline3\nline4\nline5',
     })
-    // The behavior depends on whether diff is shorter than full content
-    if (result.type === 'diff') {
-      expect(result.content).toContain('-line2')
-      expect(result.content).toContain('+line2-modified')
-    } else {
-      expect(result.content).toContain('Full new content')
-    }
+    expect(result.type).toBe('full')
+    expect(result.content).toBe('line1\nline2-modified\nline3\nline4\nline5')
   })
 
   it('returns diff for large content with small changes', () => {
@@ -46,8 +41,7 @@ describe('createSmartDiff', () => {
       newContent: 'x\ny\nz\nw',
     })
     expect(result.type).toBe('full')
-    expect(result.content).toContain('Content changed significantly')
-    expect(result.content).toContain('x\ny\nz\nw')
+    expect(result.content).toBe('x\ny\nz\nw')
   })
 
   it('respects custom threshold with large content', () => {
@@ -114,7 +108,7 @@ describe('createSmartDiff', () => {
       newContent: '',
     })
     expect(result.type).toBe('full')
-    expect(result.content).toContain('100%')
+    expect(result.content).toBe('')
   })
 
   it('handles single line changes', () => {
@@ -126,14 +120,14 @@ describe('createSmartDiff', () => {
     expect(result.type).toBe('full')
   })
 
-  it('calculates percentage correctly in output', () => {
+  it('returns full content when most lines changed', () => {
     // 4 lines changed out of 5 = 80%
     const result = createSmartDiff({
       oldContent: 'a\nb\nc\nd\ne',
       newContent: 'a\nX\nY\nZ\nW',
     })
     expect(result.type).toBe('full')
-    expect(result.content).toContain('(80% of lines)')
+    expect(result.content).toBe('a\nX\nY\nZ\nW')
   })
 
   it('includes context lines in diff output', () => {
