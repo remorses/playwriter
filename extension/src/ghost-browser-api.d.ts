@@ -37,7 +37,7 @@
  * ## API Namespaces
  *
  * - `chrome.ghostPublicAPI` - Open tabs in specific identities
- * - `chrome.ghostProxies` - Manage and assign proxies per tab/identity/session
+ * - `chrome.ghostProxies` - Manage and assign proxies per tab/identity/session (Pro plan only)
  * - `chrome.projects` - List/manage identities, sessions, workspaces
  *
  * ## Use Cases
@@ -46,6 +46,13 @@
  * - Web scraping with rotating proxies per tab
  * - Testing with different user sessions simultaneously
  * - Automation requiring isolated cookies/storage per identity
+ *
+ * ## Plan Requirements
+ *
+ * - `chrome.ghostPublicAPI` and `chrome.projects` - All plans (including Free)
+ * - `chrome.ghostProxies` methods - **Pro plan required** ($46/mo). Free plan only exposes
+ *   constants (DIRECT_PROXY, SYSTEM_PROXY). Methods like getList(), add(), setTabProxy()
+ *   throw "permission" error on Free/Basic plans.
  *
  * Note: These APIs only work in Ghost Browser. In regular Chrome, calls fail with "not available".
  */
@@ -94,6 +101,7 @@ declare namespace chrome {
 
   // ============================================================================
   // GHOST PROXIES API (chrome.ghostProxies)
+  // **Requires Ghost Browser Pro plan.** Free/Basic plans only have constants.
   // ============================================================================
 
   export namespace ghostProxies {
