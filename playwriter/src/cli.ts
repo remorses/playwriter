@@ -103,7 +103,7 @@ async function executeCode(options: {
 }): Promise<void> {
   const { code, timeout, host, token } = options
   const cwd = process.cwd()
-  const sessionId = options.sessionId || process.env.PLAYWRITER_SESSION
+  const sessionId = options.sessionId ? String(options.sessionId) : process.env.PLAYWRITER_SESSION
 
   // Session is required
   if (!sessionId) {

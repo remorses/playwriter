@@ -6,7 +6,16 @@ import { createNodeWebSocket } from '@hono/node-ws'
 import type { WSContext } from 'hono/ws'
 import type { Protocol } from './cdp-types.js'
 import type { CDPCommand, CDPResponseBase, CDPEventBase, CDPEventFor, RelayServerEvents } from './cdp-types.js'
-import type { ExtensionMessage, ExtensionEventMessage, RecordingDataMessage, RecordingCancelledMessage } from './protocol.js'
+import type {
+  ExtensionMessage,
+  ExtensionEventMessage,
+  RecordingDataMessage,
+  RecordingCancelledMessage,
+  StartRecordingBody,
+  StopRecordingParams,
+  CancelRecordingParams,
+  IsRecordingParams,
+} from './protocol.js'
 import pc from 'picocolors'
 import { EventEmitter } from 'node:events'
 import { VERSION, EXTENSION_IDS } from './utils.js'
@@ -117,6 +126,14 @@ export async function startPlayWriterCDPRelayServer({
       return extensionConnections.get(fallbackId) || null
     }
     return null
+  }
+
+  const normalizeSessionId = (value: string | number | null | undefined): string | null => {
+    if (value === undefined || value === null) {
+      return null
+    }
+    const normalized = String(value)
+    return normalized ? normalized : null
   }
 
   const startExtensionPing = (extensionId: string): void => {
@@ -1285,8 +1302,9 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/execute', async (c) => {
     try {
-      const body = await c.req.json() as { sessionId: string; code: string; timeout?: number }
-      const { sessionId, code, timeout = 10000 } = body
+      const body = await c.req.json() as { sessionId: string | number; code: string; timeout?: number }
+      const sessionId = normalizeSessionId(body.sessionId)
+      const { code, timeout = 10000 } = body
 
       if (!sessionId || !code) {
         return c.json({ error: 'sessionId and code are required' }, 400)
@@ -1308,8 +1326,8 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/reset', async (c) => {
     try {
-      const body = await c.req.json() as { sessionId: string }
-      const { sessionId } = body
+      const body = await c.req.json() as { sessionId: string | number }
+      const sessionId = normalizeSessionId(body.sessionId)
 
       if (!sessionId) {
         return c.json({ error: 'sessionId is required' }, 400)
@@ -1388,8 +1406,8 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/session/delete', async (c) => {
     try {
-      const body = await c.req.json() as { sessionId: string }
-      const { sessionId } = body
+      const body = await c.req.json() as { sessionId: string | number }
+      const sessionId = normalizeSessionId(body.sessionId)
 
       if (!sessionId) {
         return c.json({ error: 'sessionId is required' }, 400)
@@ -1413,65 +1431,74 @@ export async function startPlayWriterCDPRelayServer({
   // ============================================================================
 
   app.post('/recording/start', async (c) => {
-    const body = await c.req.json() as { outputPath?: string; sessionId?: string; frameRate?: number; audio?: boolean; videoBitsPerSecond?: number; audioBitsPerSecond?: number }
+    const body = await c.req.json() as { outputPath?: string; sessionId?: string | number; frameRate?: number; audio?: boolean; videoBitsPerSecond?: number; audioBitsPerSecond?: number }
+    const sessionId = normalizeSessionId(body.sessionId)
+    const { sessionId: _sessionId, ...recordingOptions } = body
     const manager = await getExecutorManager()
-    const executor = body.sessionId ? manager.getSession(body.sessionId) : null
-    if (body.sessionId && !executor) {
-      return c.json({ success: false, error: `Session ${body.sessionId} not found` }, 404)
+    const executor = sessionId ? manager.getSession(sessionId) : null
+    if (sessionId && !executor) {
+      return c.json({ success: false, error: `Session ${sessionId} not found` }, 404)
     }
     const extensionId = executor?.getSessionMetadata().extensionId || null
     const relay = getRecordingRelay(extensionId)
     if (!relay) {
       return c.json({ success: false, error: 'Extension not connected' }, 500)
     }
-    const result = await relay.startRecording(body as { outputPath: string } & typeof body)
+    const recordingParams = (sessionId ? { ...recordingOptions, sessionId } : recordingOptions) as StartRecordingBody
+    const result = await relay.startRecording(recordingParams)
     const status = result.success ? 200 : (result.error?.includes('required') ? 400 : 500)
     return c.json(result, status)
   })
 
   app.post('/recording/stop', async (c) => {
-    const body = await c.req.json() as { sessionId?: string }
+    const body = await c.req.json() as { sessionId?: string | number }
+    const sessionId = normalizeSessionId(body.sessionId)
     const manager = await getExecutorManager()
-    const executor = body.sessionId ? manager.getSession(body.sessionId) : null
-    if (body.sessionId && !executor) {
-      return c.json({ success: false, error: `Session ${body.sessionId} not found` }, 404)
+    const executor = sessionId ? manager.getSession(sessionId) : null
+    if (sessionId && !executor) {
+      return c.json({ success: false, error: `Session ${sessionId} not found` }, 404)
     }
     const extensionId = executor?.getSessionMetadata().extensionId || null
     const relay = getRecordingRelay(extensionId)
     if (!relay) {
       return c.json({ success: false, error: 'Extension not connected' }, 500)
     }
-    const result = await relay.stopRecording(body)
+    const stopParams: StopRecordingParams = sessionId ? { sessionId } : {}
+    const result = await relay.stopRecording(stopParams)
     const status = result.success ? 200 : (result.error?.includes('not found') ? 404 : 500)
     return c.json(result, status)
   })
 
   app.get('/recording/status', async (c) => {
-    const sessionId = c.req.query('sessionId')
+    const sessionId = normalizeSessionId(c.req.query('sessionId'))
+    const normalizedSessionId = sessionId || undefined
     const manager = await getExecutorManager()
-    const executor = sessionId ? manager.getSession(sessionId) : null
+    const executor = normalizedSessionId ? manager.getSession(normalizedSessionId) : null
     const extensionId = executor?.getSessionMetadata().extensionId || null
     const relay = getRecordingRelay(extensionId)
     if (!relay) {
       return c.json({ isRecording: false })
     }
-    const result = await relay.isRecording({ sessionId })
+    const isRecordingParams: IsRecordingParams = normalizedSessionId ? { sessionId: normalizedSessionId } : {}
+    const result = await relay.isRecording(isRecordingParams)
     return c.json(result)
   })
 
   app.post('/recording/cancel', async (c) => {
-    const body = await c.req.json() as { sessionId?: string }
+    const body = await c.req.json() as { sessionId?: string | number }
+    const sessionId = normalizeSessionId(body.sessionId)
     const manager = await getExecutorManager()
-    const executor = body.sessionId ? manager.getSession(body.sessionId) : null
-    if (body.sessionId && !executor) {
-      return c.json({ success: false, error: `Session ${body.sessionId} not found` }, 404)
+    const executor = sessionId ? manager.getSession(sessionId) : null
+    if (sessionId && !executor) {
+      return c.json({ success: false, error: `Session ${sessionId} not found` }, 404)
     }
     const extensionId = executor?.getSessionMetadata().extensionId || null
     const relay = getRecordingRelay(extensionId)
     if (!relay) {
       return c.json({ success: false, error: 'Extension not connected' }, 500)
     }
-    const result = await relay.cancelRecording(body)
+    const cancelParams: CancelRecordingParams = sessionId ? { sessionId } : {}
+    const result = await relay.cancelRecording(cancelParams)
     return c.json(result)
   })
 
