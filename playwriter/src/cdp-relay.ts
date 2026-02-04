@@ -78,6 +78,7 @@ type ExtensionConnection = {
   info: ExtensionInfo
   stableKey: string
   connectedTargets: Map<string, ConnectedTarget>
+  frameOwnerByFrameId: Map<string, string>
   pendingRequests: Map<number, { resolve: (result: any) => void; reject: (error: Error) => void }>
   messageId: number
   pingInterval: ReturnType<typeof setInterval> | null
@@ -1045,6 +1046,7 @@ export async function startPlayWriterCDPRelayServer({
           info: incomingExtensionInfo,
           stableKey,
           connectedTargets: new Map(),
+          frameOwnerByFrameId: new Map(),
           pendingRequests: new Map(),
           messageId: 0,
           pingInterval: null,
@@ -1139,6 +1141,10 @@ export async function startPlayWriterCDPRelayServer({
 
           if (method === 'Target.attachedToTarget') {
             const targetParams = params as Protocol.Target.AttachedToTargetEvent
+            const iframeParentFrameId = targetParams.targetInfo.parentFrameId
+            const iframeOwnerSessionId = targetParams.targetInfo.type === 'iframe' && iframeParentFrameId
+              ? connection.frameOwnerByFrameId.get(iframeParentFrameId)
+              : undefined
 
             // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
             if (isRestrictedTarget(targetParams.targetInfo)) {
@@ -1180,6 +1186,7 @@ export async function startPlayWriterCDPRelayServer({
             if (!alreadyConnected) {
               sendToPlaywright({
                 message: {
+                  sessionId: iframeOwnerSessionId,
                   method: 'Target.attachedToTarget',
                   params: targetParams
                 } as CDPEventBase,
@@ -1234,8 +1241,39 @@ export async function startPlayWriterCDPRelayServer({
               source: 'extension',
               extensionId: connectionId,
             })
+          } else if (method === 'Page.frameAttached') {
+            const frameParams = params as Protocol.Page.FrameAttachedEvent
+            if (sessionId) {
+              connection.frameOwnerByFrameId.set(frameParams.frameId, sessionId)
+            }
+
+            sendToPlaywright({
+              message: {
+                sessionId,
+                method,
+                params
+              } as CDPEventBase,
+              source: 'extension',
+              extensionId: connectionId,
+            })
+          } else if (method === 'Page.frameDetached') {
+            const frameParams = params as Protocol.Page.FrameDetachedEvent
+            connection.frameOwnerByFrameId.delete(frameParams.frameId)
+
+            sendToPlaywright({
+              message: {
+                sessionId,
+                method,
+                params
+              } as CDPEventBase,
+              source: 'extension',
+              extensionId: connectionId,
+            })
           } else if (method === 'Page.frameNavigated') {
             const frameParams = params as Protocol.Page.FrameNavigatedEvent
+            if (sessionId) {
+              connection.frameOwnerByFrameId.set(frameParams.frame.id, sessionId)
+            }
             if (!frameParams.frame.parentId && sessionId) {
               const target = connection.connectedTargets.get(sessionId)
               if (target) {
