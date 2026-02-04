@@ -346,9 +346,11 @@ export class PlaywrightExecutor {
           return (await fallback.json()) as { connected: boolean; activeTargets: number }
         }
         const data = await response.json() as {
-          extensions: Array<{ extensionId: string; activeTargets: number }>
+          extensions: Array<{ extensionId: string; stableKey?: string; activeTargets: number }>
         }
-        const extension = data.extensions.find((item) => item.extensionId === extensionId)
+        const extension = data.extensions.find((item) => {
+          return item.extensionId === extensionId || item.stableKey === extensionId
+        })
         if (!extension) {
           return { connected: false, activeTargets: 0 }
         }

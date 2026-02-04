@@ -179,7 +179,7 @@ async function executeCode(options: {
 cli
   .command('session new', 'Create a new session and print the session ID')
   .option('--host <host>', 'Remote relay server host')
-  .option('--browser <name>', 'Browser to use when multiple browsers are connected')
+  .option('--browser <id>', 'Browser ID to use when multiple browsers are connected')
   .action(async (options: { host?: string; browser?: string }) => {
     if (!options.host && !process.env.PLAYWRITER_HOST) {
       await ensureRelayServer({ logger: console, env: cliRelayEnv })
@@ -204,23 +204,11 @@ cli
         const shortId = extension.extensionId === 'default' ? 'default' : extension.extensionId.slice(0, 7)
         console.log(`${shortId.padEnd(7)}  ${(extension.browser || 'Chrome').padEnd(7)}  ${label}`)
       }
-      console.log('\nRun again with --browser <email, browser, or id>.')
+      console.log('\nRun again with --browser <id>.')
       process.exit(1)
     } else {
-      const byEmail = extensions.find((extension) => extension.profile?.email === options.browser)
-      const byId = extensions.find((extension) => extension.extensionId === options.browser)
-      const byBrowser = extensions.filter((extension) => (extension.browser || 'Chrome') === options.browser)
-
-      selectedExtension = byEmail || byId || null
-      if (!selectedExtension && byBrowser.length === 1) {
-        selectedExtension = byBrowser[0]
-      }
-
+      selectedExtension = extensions.find((extension) => extension.extensionId === options.browser) || null
       if (!selectedExtension) {
-        if (byBrowser.length > 1) {
-          console.error(`Browser name is ambiguous: ${options.browser}`)
-          process.exit(1)
-        }
         console.error(`Browser not found: ${options.browser}`)
         process.exit(1)
       }
