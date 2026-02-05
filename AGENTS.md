@@ -187,7 +187,7 @@ ignore everything that is outside of playwright/packages/playwright-core in the 
 
 for our playwright fork notice the types.d.ts are generated from markdown files, so adding new APIs require updating those and not the actual source files unfortunately
 
-EVERY update to playwright code that changes its api or behaviour MUST be followed by a bump in version and update in playwright-core/CHANGELOG.md file. on release of the playwriter package then the playwright-core package must be released first, always using `pnpm publish` command.
+EVERY update to playwright code that changes its api or behaviour MUST be followed by a bump in version and update in playwright-core/CHANGELOG.md file. on release of the playwriter package then the playwright-core package must be released first, always using `pnpm publish` command. no need to update version in playwriter package.json because we use the :workspace version.
 
 ### submodule setup
 
@@ -273,6 +273,12 @@ you can find the logfile for playwriter executing `playwriter logfile`. read tha
 ```bash
 jq -r '.direction + "\t" + (.message.method // "response")' /tmp/playwriter/cdp.jsonl | uniq -c
 ```
+
+## testing iframe behaviour with snapshots and out of process frames
+
+iframes are a complex feature in CDP and playwriter. to test a real world scenario follow the document ./docs/framer-iframe-snapshot-guide.md manually. using global playwriter cli. restarting relay killing port 19988 first.
+
+do this when user asks to try framer iframes.
 
 # core guidelines
 
