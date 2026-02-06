@@ -683,10 +683,11 @@ export function sendMessage(message: any): void {
 
 async function syncTabGroup(): Promise<void> {
   try {
-    // Only tabs with state 'connected' are in the group.
-    // Tabs in 'connecting' or 'error' state are removed from the group.
+    // Tabs in 'connected' or 'connecting' state belong in the group.
+    // Including 'connecting' prevents a loop where syncTabGroup removes a tab the user
+    // just dragged in (still connecting), which triggers onUpdated → disconnect → reconnect.
     const connectedTabIds = Array.from(store.getState().tabs.entries())
-      .filter(([_, info]) => info.state === 'connected')
+      .filter(([_, info]) => info.state === 'connected' || info.state === 'connecting')
       .map(([tabId]) => tabId)
 
     // Always query by title - no cached ID that can go stale
