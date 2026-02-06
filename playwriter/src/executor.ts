@@ -293,7 +293,8 @@ export class PlaywrightExecutor {
   }
 
   private setupPageConsoleListener(page: Page) {
-    const targetId = (page as any)._guid as string | undefined
+    // Use targetId() if available, fallback to internal _guid for CDP connections
+    const targetId = page.targetId() || (page as any)._guid as string | undefined
     if (!targetId) {
       return
     }
@@ -532,7 +533,8 @@ export class PlaywrightExecutor {
 
       const accessibilitySnapshot = async (options: {
         page?: Page
-        iframe?: Locator
+        /** Optional frame to scope the snapshot (e.g. from iframe.contentFrame()) */
+        frame?: Frame
         /** Optional locator to scope the snapshot to a subtree */
         locator?: Locator
         search?: string | RegExp
@@ -542,7 +544,7 @@ export class PlaywrightExecutor {
         /** Only include interactive elements (default: true) */
         interactiveOnly?: boolean
       }) => {
-        const { page: targetPage, iframe, locator, search, showDiffSinceLastCall = true, interactiveOnly = false } = options
+        const { page: targetPage, frame, locator, search, showDiffSinceLastCall = true, interactiveOnly = false } = options
         const resolvedPage = targetPage || page
         if (!resolvedPage) {
           throw new Error('accessibilitySnapshot requires a page')
@@ -551,7 +553,7 @@ export class PlaywrightExecutor {
         // Use new in-page implementation via getAriaSnapshot
         const { snapshot: rawSnapshot, refs, getSelectorForRef } = await getAriaSnapshot({
           page: resolvedPage,
-          iframe,
+          frame,
           locator,
           wsUrl: getCdpUrl(this.cdpConfig),
           interactiveOnly,
@@ -567,7 +569,7 @@ export class PlaywrightExecutor {
         }
         this.lastRefToLocator.set(resolvedPage, refToLocator)
 
-        const shouldCacheSnapshot = !iframe
+        const shouldCacheSnapshot = !frame
         const previousSnapshot = shouldCacheSnapshot ? this.lastSnapshots.get(resolvedPage) : undefined
         if (shouldCacheSnapshot) {
           this.lastSnapshots.set(resolvedPage, snapshotStr)
@@ -656,18 +658,16 @@ export class PlaywrightExecutor {
         })
       }
 
-      const getPageTargetId = async (p: Page): Promise<string> => {
-        const guid = (p as any)._guid
-        if (guid) return guid
-        throw new Error('Could not get page identifier: _guid not available')
-      }
-
       const getLatestLogs = async (options?: { page?: Page; count?: number; search?: string | RegExp }) => {
         const { page: filterPage, count, search } = options || {}
         let allLogs: string[] = []
 
         if (filterPage) {
-          const targetId = await getPageTargetId(filterPage)
+          // Use targetId() if available, fallback to internal _guid for CDP connections
+          const targetId = filterPage.targetId() || (filterPage as any)._guid as string | undefined
+          if (!targetId) {
+            throw new Error('Could not get page targetId')
+          }
           const pageLogs = this.browserLogs.get(targetId) || []
           allLogs = [...pageLogs]
         } else {
@@ -781,9 +781,8 @@ export class PlaywrightExecutor {
       ) => {
         return async (options: T = {} as T) => {
           const targetPage = options.page || page
-          // Get sessionId from cached CDP session to identify which tab to record
-          const cdp = await getCDPSession({ page: targetPage })
-          const sessionId = options.sessionId || cdp.getSessionId() || undefined
+          // Use Playwright's exposed sessionId directly
+          const sessionId = options.sessionId || targetPage.sessionId() || undefined
           return fn({ page: targetPage, sessionId, relayPort, ...options })
         }
       }

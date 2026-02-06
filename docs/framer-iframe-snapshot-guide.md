@@ -47,12 +47,12 @@ playwriter -s 1 -e "const iframe = page.locator(\"iframe[src*='plugins.framercdn
 
 - Run the accessibility snapshot on that iframe:
 ```bash
-playwriter -s 1 -e "const iframe = page.locator(\"iframe[src*='plugins.framercdn.com']\"); console.log(await accessibilitySnapshot({ page, iframe }));"
+playwriter -s 1 -e "const frame = await page.locator(\"iframe[src*='plugins.framercdn.com']\").contentFrame(); console.log(await accessibilitySnapshot({ page, frame }));"
 ```
 
 - Validate the snapshot contains MCP UI text (confirms the panel is actually loaded):
 ```bash
-playwriter -s 1 -e "const iframe = page.locator(\"iframe[src*='plugins.framercdn.com']\"); console.log(await accessibilitySnapshot({ page, iframe, search: /Control Framer with MCP|Login With Google/ }));"
+playwriter -s 1 -e "const frame = await page.locator(\"iframe[src*='plugins.framercdn.com']\").contentFrame(); console.log(await accessibilitySnapshot({ page, frame, search: /Control Framer with MCP|Login With Google/ }));"
 ```
 
 ## Expected iframe URL

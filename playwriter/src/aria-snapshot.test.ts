@@ -178,9 +178,13 @@ describe('aria-snapshot', () => {
       await page.locator('[data-testid="external-iframe"]').waitFor({ timeout: 5000 })
       await page.frameLocator('[data-testid="external-iframe"]').locator('[data-testid="iframe-button"]').waitFor({ timeout: 5000 })
 
+      // Convert iframe Locator to Frame
+      const iframeHandle = await page.locator('[data-testid="external-iframe"]').elementHandle()
+      const iframeFrame = await iframeHandle!.contentFrame()
+
       const { snapshot } = await getAriaSnapshot({
         page,
-        iframe: page.locator('[data-testid="external-iframe"]'),
+        frame: iframeFrame!,
         wsUrl: getCdpUrl({ port: TEST_PORT }),
       })
 

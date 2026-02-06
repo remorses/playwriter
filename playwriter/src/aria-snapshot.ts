@@ -1,7 +1,7 @@
 // Accessibility snapshot pipeline: build raw AX tree, filter to a
 // tree (interactive-only, labels/contexts, wrapper hoisting, ignored
 // indent preservation), then render lines and locators.
-import type { Page, Locator, ElementHandle } from '@xmorse/playwright-core'
+import type { Page, Locator, ElementHandle, Frame } from '@xmorse/playwright-core'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -205,105 +205,6 @@ function toAttributeMap(attributes?: string[]): Map<string, string> {
   }
   return result
 }
-
-function getAttributeValue(attributes: string[] | undefined, name: string): string | null {
-  if (!attributes) {
-    return null
-  }
-  const index = attributes.indexOf(name)
-  if (index === -1) {
-    return null
-  }
-  return attributes[index + 1] ?? null
-}
-
-function normalizeUrlForCompare(url: string): string {
-  try {
-    const parsed = new URL(url)
-    return `${parsed.origin}${parsed.pathname}`
-  } catch {
-    return url
-  }
-}
-
-// Resolve a locator -> iframe target session.
-// CDP flow:
-// - DOM.getDocument + DOM.querySelector + DOM.describeNode: find the iframe element and read its src + frameId.
-// - Target.getTargets: list all CDP targets (including OOPIF iframe targets).
-// - Target.attachToTarget: attach to the matching iframe target to obtain the child sessionId.
-// If no iframe target is found, we fall back to the iframe element's frameId for same-process iframes.
-async function resolveIframeTarget({
-  session,
-  iframe,
-}: {
-  session: ICDPSession
-  iframe: Locator
-}): Promise<{ sessionId: string | null; targetId: string | null; frameId: Protocol.Page.FrameId | null }> {
-  const attrName = 'data-pw-iframe-scope'
-  const attrValue = crypto.randomUUID()
-
-  await iframe.evaluate((element, data) => {
-    element.setAttribute(data.name, data.value)
-  }, { name: attrName, value: attrValue })
-
-  try {
-    const { root } = await session.send('DOM.getDocument') as Protocol.DOM.GetDocumentResponse
-    const { nodeId } = await session.send('DOM.querySelector', {
-      nodeId: root.nodeId,
-      selector: `[${attrName}="${attrValue}"]`,
-    }) as Protocol.DOM.QuerySelectorResponse
-
-    if (!nodeId) {
-      throw new Error('Iframe locator did not resolve to a DOM node')
-    }
-
-    const { node } = await session.send('DOM.describeNode', { nodeId }) as Protocol.DOM.DescribeNodeResponse
-    const iframeSrc = getAttributeValue(node.attributes, 'src')
-    if (!iframeSrc) {
-      throw new Error('Iframe element has no src attribute')
-    }
-    const frameId = node.frameId ?? null
-
-    const { targetInfos } = await session.send('Target.getTargets') as Protocol.Target.GetTargetsResponse
-    const iframeTargets = targetInfos.filter((target) => target.type === 'iframe')
-    const normalizedSrc = normalizeUrlForCompare(iframeSrc)
-
-    const exactMatch = iframeTargets.find((target) => target.url === iframeSrc)
-    const normalizedMatch = iframeTargets.find((target) => normalizeUrlForCompare(target.url) === normalizedSrc)
-    const originMatch = (() => {
-      try {
-        const { origin } = new URL(iframeSrc)
-        return iframeTargets.find((target) => target.url.startsWith(origin))
-      } catch {
-        return undefined
-      }
-    })()
-
-    const target = exactMatch || normalizedMatch || originMatch
-    if (!target) {
-      if (!frameId) {
-        throw new Error(`No iframe target found for src: ${iframeSrc}`)
-      }
-      return { sessionId: null, targetId: null, frameId }
-    }
-
-    const { sessionId } = await session.send('Target.attachToTarget', {
-      targetId: target.targetId,
-      flatten: true,
-    }) as Protocol.Target.AttachToTargetResponse
-
-    return { sessionId, targetId: target.targetId, frameId }
-  } finally {
-    try {
-      await iframe.evaluate((element, data) => {
-        element.removeAttribute(data.name)
-      }, { name: attrName })
-    } catch (error) {
-      throw new Error('Failed to cleanup iframe scope marker', { cause: error })
-    }
-  }
-}
-
 
 function getStableRefFromAttributes(attributes: Map<string, string>): { value: string; attr: string } | null {
   const id = attributes.get('id')
@@ -845,9 +746,9 @@ function isSubstringOfAny(needle: string, haystack: Set<string>): boolean {
  * await page.locator(selector).click()
  * ```
  */
-export async function getAriaSnapshot({ page, iframe, locator, refFilter, wsUrl, interactiveOnly = false, cdp }: {
+export async function getAriaSnapshot({ page, frame, locator, refFilter, wsUrl, interactiveOnly = false, cdp }: {
   page: Page
-  iframe?: Locator
+  frame?: Frame
   locator?: Locator
   refFilter?: (info: { role: string; name: string }) => boolean
   wsUrl?: string
@@ -855,28 +756,30 @@ export async function getAriaSnapshot({ page, iframe, locator, refFilter, wsUrl,
   cdp?: ICDPSession
 }): Promise<AriaSnapshotResult> {
   const session = cdp || await getCDPSessionForPage({ page, wsUrl })
-  let iframeSessionId: string | null = null
-  let iframeTargetId: string | null = null
-  let iframeFrameId: Protocol.Page.FrameId | null = null
-  if (iframe) {
-    const resolved = await resolveIframeTarget({ session, iframe })
-    iframeSessionId = resolved.sessionId
-    iframeTargetId = resolved.targetId
-    iframeFrameId = resolved.frameId
-    if (!iframeSessionId && !iframeFrameId) {
-      throw new Error('Failed to resolve iframe target or frameId')
+  
+  // For cross-origin iframes (OOPIFs), we need to attach to the iframe's target
+  // to get a separate CDP session. Same-origin iframes can use frameId directly.
+  let oopifSessionId: string | null = null
+  const frameId = frame?.frameId() ?? null
+  
+  if (frameId) {
+    const { targetInfos } = await session.send('Target.getTargets') as Protocol.Target.GetTargetsResponse
+    const frameUrl = frame!.url()
+    const iframeTarget = targetInfos.find((t) => {
+      return t.type === 'iframe' && t.url === frameUrl
+    })
+    if (iframeTarget) {
+      const { sessionId } = await session.send('Target.attachToTarget', {
+        targetId: iframeTarget.targetId,
+        flatten: true,
+      }) as Protocol.Target.AttachToTargetResponse
+      oopifSessionId = sessionId
+      await session.send('Runtime.runIfWaitingForDebugger', undefined, oopifSessionId)
     }
   }
 
-  if (iframeSessionId) {
-    try {
-      await session.send('Runtime.runIfWaitingForDebugger', undefined, iframeSessionId)
-    } catch (error) {
-      throw new Error('Failed to resume iframe target session', { cause: error })
-    }
-  }
-  await session.send('DOM.enable', undefined, iframeSessionId)
-  await session.send('Accessibility.enable', undefined, iframeSessionId)
+  await session.send('DOM.enable', undefined, oopifSessionId)
+  await session.send('Accessibility.enable', undefined, oopifSessionId)
   const scopeAttr = 'data-pw-scope'
   const scopeValue = crypto.randomUUID()
   let scopeApplied = false
@@ -890,7 +793,7 @@ export async function getAriaSnapshot({ page, iframe, locator, refFilter, wsUrl,
       scopeApplied = true
     }
 
-    const { nodes: domNodes } = await session.send('DOM.getFlattenedDocument', { depth: -1, pierce: true }, iframeSessionId) as Protocol.DOM.GetFlattenedDocumentResponse
+    const { nodes: domNodes } = await session.send('DOM.getFlattenedDocument', { depth: -1, pierce: true }, oopifSessionId) as Protocol.DOM.GetFlattenedDocumentResponse
     const { domById, domByBackendId, childrenByParent } = buildDomIndex(domNodes)
 
     let scopeRootNodeId: Protocol.DOM.NodeId | null = null
@@ -909,8 +812,8 @@ export async function getAriaSnapshot({ page, iframe, locator, refFilter, wsUrl,
       ? buildBackendIdSet(scopeRootNodeId, childrenByParent, domById)
       : null
 
-    const axParams = !iframeSessionId && iframeFrameId ? { frameId: iframeFrameId } : undefined
-    const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree', axParams, iframeSessionId) as Protocol.Accessibility.GetFullAXTreeResponse
+    const axParams = !oopifSessionId && frameId ? { frameId } : undefined
+    const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree', axParams, oopifSessionId) as Protocol.Accessibility.GetFullAXTreeResponse
 
     const axById = new Map<Protocol.Accessibility.AXNodeId, Protocol.Accessibility.AXNode>()
     for (const node of axNodes) {
@@ -1148,12 +1051,8 @@ export async function getAriaSnapshot({ page, iframe, locator, refFilter, wsUrl,
         element.removeAttribute(attr)
       }, scopeAttr)
     }
-    if (iframeSessionId) {
-      try {
-        await session.send('Target.detachFromTarget', { sessionId: iframeSessionId })
-      } catch (error) {
-        throw new Error(`Failed to detach iframe target ${iframeTargetId ?? 'unknown'}`, { cause: error })
-      }
+    if (oopifSessionId) {
+      await session.send('Target.detachFromTarget', { sessionId: oopifSessionId }).catch(() => {})
     }
     if (!cdp) {
       await session.detach()

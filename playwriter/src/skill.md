@@ -72,7 +72,8 @@ playwriter -s 1 -e "await page.screenshot({ path: 'screenshot.png', scale: 'css'
 playwriter -s 1 -e "await accessibilitySnapshot({ page })"
 
 # Get accessibility snapshot for a specific iframe
-await accessibilitySnapshot({ iframe: page.locator('iframe[src*="iframe.html"]') })
+const frame = await page.locator('iframe').contentFrame()
+await accessibilitySnapshot({ frame })
 ```
 
 **Multiline code:**
