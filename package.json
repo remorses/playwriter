@@ -8,7 +8,7 @@
         "build": "pnpm --filter playwriter --filter mcp-extension build",
         "reload": "pnpm --filter playwriter build && pnpm --filter mcp-extension reload",
         "agents.md": "agentsdotmd ./PLAYWRITER_AGENTS.md core.md typescript.md pnpm.md vitest.md changelog.md docs-writing.md github.md playwright.md zod.md gitchamber.md",
-        "release": "pnpm --filter playwriter build && cd extension && PRODUCTION=true pnpm build && cd .. && rm -f extension.zip && cd extension && zip -r ../extension.zip dist && cd .. && realpath extension.zip | pbcopy && open 'https://chrome.google.com/webstore/devconsole/a379d569-9533-44e4-9749-0368f6dbf878/jfeammnjpkecdekppnclgkkffahnhfhe/edit/package'",
+        "release": "pnpm --filter playwriter build && cd extension && PRODUCTION=true PLAYWRITER_EXTENSION_DIST=dist-release pnpm build && cd .. && rm -f extension.zip && cd extension && zip -r ../extension.zip dist-release && cd .. && realpath extension.zip | pbcopy && open 'https://chrome.google.com/webstore/devconsole/a379d569-9533-44e4-9749-0368f6dbf878/jfeammnjpkecdekppnclgkkffahnhfhe/edit/package'",
         "bootstrap": "git submodule update --init && pnpm install && node playwright/utils/generate_injected.js && node playwright/packages/playwright-core/build.mjs",
         "playwright:build": "node playwright/packages/playwright-core/build.mjs"
     },
