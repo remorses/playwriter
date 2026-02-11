@@ -255,6 +255,10 @@ Example: summarize CDP traffic counts by direction + method:
 jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
 ```
 
+## Support
+
+If Playwriter is useful to you, consider [sponsoring the project](https://github.com/sponsors/remorses).
+
 ## Known Issues
 
 - If all pages return `about:blank`, restart Chrome (Chrome bug in `chrome.debugger` API)
