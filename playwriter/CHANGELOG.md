@@ -2,8 +2,19 @@
 
 ## 0.0.57
 
+### Features
+
+- **Ghost Browser Support**: Added integration with Ghost Browser APIs (multi-identity, proxies)
+- **Multi-browser Support**: Added support for connecting to multiple browser instances/extensions
+- **Screen Recording**: Added concurrent screen recording support in MP4 format (requires extension update)
+- **Iframe Handling**: Improved iframe targeting using `Frame` objects and `Runtime.enable` routing
+- **Accessibility Snapshots**: Added support for inline locators and better filtering
+- **CDP JSONL Logging**: Added structured CDP logging to `~/.playwriter/cdp.jsonl`
+
 ### Bug Fixes
 
+- **Fix hung navigations on YouTube and similar sites**: Resume filtered targets (like service workers) to avoid blocking navigations
+- **Fix tab group infinite loop**: Prevent infinite loop when dragging tabs
 - **Fix log dir permissions on shared machines**: Move default log directory from `/tmp/playwriter` to `~/.playwriter` so each OS user gets their own directory. Fixes startup crash when `/tmp/playwriter` is owned by another user (#44).
 
 ## 0.0.56
