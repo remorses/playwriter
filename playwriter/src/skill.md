@@ -175,11 +175,11 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 ## common mistakes to avoid
 
 **1. Not verifying actions succeeded**
-Always screenshot and READ the image after important actions (form submissions, uploads, typing). Your mental model can diverge from actual browser state:
+Always check page state after important actions (form submissions, uploads, typing). Your mental model can diverge from actual browser state:
 ```js
 await page.keyboard.type('my text');
-await page.screenshotWithAccessibilityLabels({ page });
-// Then READ the screenshot file to verify text appeared correctly
+await accessibilitySnapshot({ page, search: /my text/ })
+// If verifying visual layout specifically, use screenshotWithAccessibilityLabels instead
 ```
 
 **2. Assuming paste/upload worked**
@@ -224,7 +224,36 @@ await page.keyboard.press('Enter');
 await page.keyboard.type('Line 2');
 ```
 
-**6. Assuming page content loaded**
+**6. Quote escaping in $'...' syntax**
+When using `$'...'` for multiline code, nested quotes break parsing. Use different quote styles or escape them:
+```bash
+# BAD: nested double quotes break $'...' 
+playwriter -s 1 -e $'await page.locator("[id=\"_r_a_\"]").click()'
+
+# GOOD: use single quotes inside, or template strings
+playwriter -s 1 -e $'await page.locator(\'[id="_r_a_"]\').click()'
+
+# GOOD: use heredoc for complex quoting
+playwriter -s 1 -e "$(cat <<'EOF'
+await page.locator('[id="_r_a_"]').click()
+EOF
+)"
+```
+
+**7. Using screenshots when snapshots suffice**
+Screenshots + image analysis is expensive and slow. Only use screenshots for visual/CSS issues:
+```js
+// BAD: screenshot to check if text appeared (wastes tokens on image analysis)
+await page.screenshot({ path: 'check.png', scale: 'css' });
+
+// GOOD: snapshot is text — fast, cheap, searchable
+await accessibilitySnapshot({ page, search: /expected text/i })
+
+// GOOD: evaluate DOM directly for content checks
+const text = await page.evaluate(() => document.querySelector('.message')?.textContent);
+```
+
+**8. Assuming page content loaded**
 Even after `goto()`, dynamic content may not be ready:
 ```js
 await page.goto('https://example.com');
@@ -234,7 +263,7 @@ await page.waitForSelector('article', { timeout: 10000 });
 await waitForPageLoad({ page, timeout: 5000 });
 ```
 
-**7. Login buttons that open popups**
+**9. Login buttons that open popups**
 Playwriter extension cannot control popup windows. If a login button opens a popup (common with OAuth/SSO), use cmd+click to open in a new tab instead:
 ```js
 // BAD: popup window is not controllable by playwriter
@@ -259,13 +288,17 @@ await loginPage.waitForURL('**/callback**');
 
 ## checking page state
 
-After any action (click, submit, navigate), verify what happened:
+After any action (click, submit, navigate), verify what happened. **Always prefer accessibility snapshots over screenshots** — snapshots are text (cheap, fast, searchable), screenshots require image analysis (expensive, slow).
 
 ```js
+// Default: use snapshot with optional filtering
 page.url() + '\n' + await accessibilitySnapshot({ page })
+
+// Filter for specific content when snapshot is large
+await accessibilitySnapshot({ page, search: /dialog|button|error/i })
 ```
 
-For visually complex pages (grids, galleries, dashboards), use `screenshotWithAccessibilityLabels({ page })` instead to understand spatial layout. Label refs are short `eN` strings (e.g. `e3`).
+Only use `screenshotWithAccessibilityLabels({ page })` for **visual layout issues** (CSS bugs, spatial positioning, colors). For verifying text content, button states, or form values, snapshots are always sufficient.
 
 If nothing changed, try `await waitForPageLoad({ page, timeout: 3000 })` or you may have clicked the wrong element.
 
@@ -313,6 +346,18 @@ Search for specific elements:
 ```js
 const snapshot = await accessibilitySnapshot({ page, search: /button|submit/i })
 ```
+
+**Filtering large snapshots in JS** — when the built-in `search` isn't enough (e.g., you need multiple patterns or custom logic), filter the snapshot string directly:
+
+```js
+const snap = await accessibilitySnapshot({ page, showDiffSinceLastCall: false });
+const relevant = snap.split('\n').filter(l =>
+  l.includes('dialog') || l.includes('error') || l.includes('button')
+).join('\n');
+console.log(relevant);
+```
+
+This is much cheaper than taking a screenshot — use it as your primary debugging tool for verifying text content, checking if elements exist, or confirming state changes.
 
 ## choosing between snapshot methods
 
@@ -742,6 +787,42 @@ console.log(data);
 ```
 
 Clean up listeners when done: `page.removeAllListeners('request'); page.removeAllListeners('response');`
+
+## debugging web apps
+
+When debugging why a web app isn't working (e.g., content not rendering, API errors, state issues), use these techniques **before** resorting to screenshots:
+
+**1. Console logs** — use `getLatestLogs` to check for errors:
+
+```js
+const errors = await getLatestLogs({ page, search: /error|fail/i, count: 20 });
+const appLogs = await getLatestLogs({ page, search: /myComponent|state/i });
+```
+
+**2. DOM inspection via evaluate** — check content directly without screenshots:
+
+```js
+const info = await page.evaluate(() => {
+  const msgs = document.querySelectorAll('.message');
+  return Array.from(msgs).map(m => ({
+    text: m.textContent?.slice(0, 200),
+    visible: m.offsetHeight > 0,
+  }));
+});
+console.log(JSON.stringify(info, null, 2));
+```
+
+**3. Combine snapshot + logs for full picture:**
+
+```js
+await page.keyboard.press('Enter');
+await page.waitForTimeout(2000);
+
+const snap = await accessibilitySnapshot({ page, search: /dialog|error|message/ });
+const logs = await getLatestLogs({ page, search: /error/i, count: 10 });
+console.log('UI:', snap);
+console.log('Logs:', logs);
+```
 
 ## capabilities
 
