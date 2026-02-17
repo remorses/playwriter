@@ -164,7 +164,7 @@ done
 
 **Traforo URLs are non-guessable.** Each tunnel gets a unique ID (random UUID by default). Nobody can discover your tunnel by scanning.
 
-**Token authentication is required.** When `playwriter serve` binds to `0.0.0.0`, it refuses to start without a `--token`. Every HTTP request needs `Authorization: Bearer <token>` and every WebSocket connection needs `?token=<token>`. Without the correct token, the relay returns 401.
+**Token authentication is required.** When `playwriter serve` binds to `0.0.0.0`, it refuses to start without a `--token`. Every privileged HTTP request (`/cli/*`, `/recording/*`) needs `Authorization: Bearer <token>` or `?token=<token>`, and every `/cdp` WebSocket connection needs `?token=<token>`. Without the correct token, the relay returns 401.
 
 **Extension endpoint is localhost-only.** The `/extension` WebSocket endpoint only accepts connections from `127.0.0.1` or `::1`. A remote attacker cannot impersonate the extension even with the token.
 

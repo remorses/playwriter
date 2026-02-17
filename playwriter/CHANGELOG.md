@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.63
+
+### Security
+
+- **Harden privileged HTTP routes against cross-origin attacks**: Added route-level middleware on `/cli/*` and `/recording/*` that blocks cross-origin browser requests via `Sec-Fetch-Site` header validation, rejects POST requests without `Content-Type: application/json` (prevents the CORS preflight bypass via `text/plain`), and enforces token authentication when token mode is enabled. Previously, CORS alone was relied upon, but CORS only blocks reading responses — it does not prevent "simple" POST requests from executing side effects like `/cli/execute`.
+- **Token enforcement on HTTP routes**: When `--token` is set (remote access mode), `/cli/*` and `/recording/*` routes now require `Authorization: Bearer <token>` or `?token=<token>`, matching the behavior already documented in remote-access.md.
+- **Security regression tests**: Added tests covering Sec-Fetch-Site blocking, Content-Type enforcement, token validation on privileged routes, and pass-through for legitimate Node.js clients.
+
 ## 0.0.62
 
 ### Features
