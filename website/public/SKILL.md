@@ -69,11 +69,11 @@ playwriter -s 1 -e "await page.title()"
 playwriter -s 1 -e "await page.screenshot({ path: 'screenshot.png', scale: 'css' })"
 
 # Get accessibility snapshot
-playwriter -s 1 -e "await accessibilitySnapshot({ page })"
+playwriter -s 1 -e "await snapshot({ page })"
 
 # Get accessibility snapshot for a specific iframe
 const frame = await page.locator('iframe').contentFrame()
-await accessibilitySnapshot({ frame })
+await snapshot({ frame })
 ```
 
 **Multiline code:**
@@ -179,10 +179,10 @@ Every browser interaction should follow a **observe → act → observe** loop. 
 **Core loop:**
 
 1. **Open page** — get or create your page and navigate to the target URL
-2. **Observe** — take an accessibility snapshot to understand the current state
-3. **Update priors** — read the snapshot, identify the element to interact with
+2. **Observe** — print `page.url()` and take an accessibility snapshot. Always print the URL so you know where you are — pages can redirect, and actions can trigger unexpected navigation.
+3. **Check** — read the snapshot and URL. If the page isn't ready (still loading, expected content missing, wrong URL), **wait and observe again** — don't act on stale or incomplete state. Only proceed when you can identify the element to interact with.
 4. **Act** — perform one action (click, type, submit)
-5. **Observe again** — take another snapshot to verify the action's effect
+5. **Observe again** — print URL + snapshot to verify the action's effect. If the action didn't take effect (nothing changed, page still loading), wait and observe again before proceeding.
 6. **Repeat** — continue from step 3 until the task is complete
 
 ```
@@ -191,19 +191,20 @@ Every browser interaction should follow a **observe → act → observe** loop. 
 └──────────────────┬──────────────────────────┘
                    ▼
           ┌────────────────┐
-          │    observe      │◄─────────────────┐
-          │  (snapshot)     │                   │
-          └───────┬────────┘                   │
-                  ▼                            │
-          ┌────────────────┐                   │
-          │  update priors  │                   │
-          │  (read result)  │                   │
-          └───────┬────────┘                   │
-                  ▼                            │
-          ┌────────────────┐                   │
-          │      act        │                   │
-          │  (click/type)   │──────────────────┘
-          └────────────────┘
+     ┌───►│    observe      │◄─────────────────┐
+     │    │ (url + snapshot) │                   │
+     │    └───────┬────────┘                   │
+     │            ▼                            │
+     │    ┌────────────────┐                   │
+     │    │     check       │                   │
+     │    │  (read result)  │                   │
+     │    └───┬────────┬───┘                   │
+     │  not   │        │ ready                 │
+     │  ready │        ▼                       │
+     └────────┘ ┌────────────────┐             │
+                │      act        │             │
+                │  (click/type)   │─────────────┘
+                └────────────────┘
 ```
 
 **Example: opening a Framer plugin via the command palette**
@@ -211,30 +212,33 @@ Every browser interaction should follow a **observe → act → observe** loop. 
 Each step is a separate execute call. Notice how every action is followed by a snapshot to verify what happened:
 
 ```js
-// 1. Open page and observe
+// 1. Open page and observe — always print URL first
 state.myPage = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
 await state.myPage.goto('https://framer.com/projects/my-project', { waitUntil: 'domcontentloaded' });
-await accessibilitySnapshot({ page: state.myPage }).then(console.log)
+console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage }).then(console.log)
 ```
 
 ```js
 // 2. Act: open command palette → observe result
 await state.myPage.keyboard.press('Meta+k');
-await accessibilitySnapshot({ page: state.myPage, search: /dialog|Search/ }).then(console.log)
+console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage, search: /dialog|Search/ }).then(console.log)
+// If dialog didn't appear, observe again before retrying
 ```
 
 ```js
 // 3. Act: type search query → observe result
 await state.myPage.keyboard.type('MCP');
-await accessibilitySnapshot({ page: state.myPage, search: /MCP/ }).then(console.log)
+console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage, search: /MCP/ }).then(console.log)
 ```
 
 ```js
 // 4. Act: press Enter → observe plugin loaded
 await state.myPage.keyboard.press('Enter');
 await state.myPage.waitForTimeout(1000);
+console.log('URL:', state.myPage.url());
 const frame = state.myPage.frames().find(f => f.url().includes('plugins.framercdn.com'));
-await accessibilitySnapshot({ page: state.myPage, frame: frame || undefined }).then(console.log)
+await snapshot({ page: state.myPage, frame: frame || undefined }).then(console.log)
+// If frame not found, wait and observe again — plugin may still be loading
 ```
 
 **Other ways to observe action results:**
@@ -261,7 +265,7 @@ Snapshots are the primary feedback mechanism, but some actions have side effects
 Always check page state after important actions (form submissions, uploads, typing). Your mental model can diverge from actual browser state:
 ```js
 await page.keyboard.type('my text');
-await accessibilitySnapshot({ page, search: /my text/ })
+await snapshot({ page, search: /my text/ })
 // If verifying visual layout specifically, use screenshotWithAccessibilityLabels instead
 ```
 
@@ -283,7 +287,7 @@ Locators (especially ones with `>> nth=`) can change when the page updates. Alwa
 await page.locator('[id="old-id"]').click();  // element may have changed
 
 // GOOD: get fresh snapshot, then immediately use locators from it
-await accessibilitySnapshot({ page, showDiffSinceLastCall: true })
+await snapshot({ page, showDiffSinceLastCall: true })
 // Now use the NEW locators from this output
 ```
 
@@ -330,7 +334,7 @@ Screenshots + image analysis is expensive and slow. Only use screenshots for vis
 await page.screenshot({ path: 'check.png', scale: 'css' });
 
 // GOOD: snapshot is text — fast, cheap, searchable
-await accessibilitySnapshot({ page, search: /expected text/i })
+await snapshot({ page, search: /expected text/i })
 
 // GOOD: evaluate DOM directly for content checks
 const text = await page.evaluate(() => document.querySelector('.message')?.textContent);
@@ -374,11 +378,11 @@ await loginPage.waitForURL('**/callback**');
 After any action (click, submit, navigate), verify what happened. **Always prefer accessibility snapshots over screenshots** — snapshots are text (cheap, fast, searchable), screenshots require image analysis (expensive, slow).
 
 ```js
-// Default: use snapshot with optional filtering
-page.url() + '\n' + await accessibilitySnapshot({ page })
+// Always print URL first, then snapshot
+console.log('URL:', page.url()); await snapshot({ page }).then(console.log)
 
 // Filter for specific content when snapshot is large
-await accessibilitySnapshot({ page, search: /dialog|button|error/i })
+console.log('URL:', page.url()); await snapshot({ page, search: /dialog|button|error/i }).then(console.log)
 ```
 
 Only use `screenshotWithAccessibilityLabels({ page })` for **visual layout issues** (CSS bugs, spatial positioning, colors). For verifying text content, button states, or form values, snapshots are always sufficient.
@@ -388,8 +392,10 @@ If nothing changed, try `await waitForPageLoad({ page, timeout: 3000 })` or you 
 ## accessibility snapshots
 
 ```js
-await accessibilitySnapshot({ page, search?, showDiffSinceLastCall? })
+await snapshot({ page, search?, showDiffSinceLastCall? })
 ```
+
+`accessibilitySnapshot` is still available as an alias for backward compatibility.
 
 - `search` - string/regex to filter results (returns first 10 matching lines)
 - `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`). Pass `false` to get full snapshot.
@@ -413,7 +419,7 @@ to make it unique.
 If a screenshot shows ref labels like `e3`, resolve them using the last snapshot:
 
 ```js
-const snapshot = await accessibilitySnapshot({ page })
+const snap = await snapshot({ page })
 const locator = refToLocator({ ref: 'e3' })
 await page.locator(locator!).click()
 ```
@@ -427,13 +433,13 @@ await page.locator('role=link[name="Blog"]').click()
 Search for specific elements:
 
 ```js
-const snapshot = await accessibilitySnapshot({ page, search: /button|submit/i })
+const snap = await snapshot({ page, search: /button|submit/i })
 ```
 
 **Filtering large snapshots in JS** — when the built-in `search` isn't enough (e.g., you need multiple patterns or custom logic), filter the snapshot string directly:
 
 ```js
-const snap = await accessibilitySnapshot({ page, showDiffSinceLastCall: false });
+const snap = await snapshot({ page, showDiffSinceLastCall: false });
 const relevant = snap.split('\n').filter(l =>
   l.includes('dialog') || l.includes('error') || l.includes('button')
 ).join('\n');
@@ -444,9 +450,9 @@ This is much cheaper than taking a screenshot — use it as your primary debuggi
 
 ## choosing between snapshot methods
 
-Both `accessibilitySnapshot` and `screenshotWithAccessibilityLabels` use the same ref system, so you can combine them effectively.
+Both `snapshot` and `screenshotWithAccessibilityLabels` use the same ref system, so you can combine them effectively.
 
-**Use `accessibilitySnapshot` when:**
+**Use `snapshot` when:**
 - Page has simple, semantic structure (articles, forms, lists)
 - You need to search for specific text or patterns
 - Token usage matters (text is smaller than images)
@@ -458,11 +464,11 @@ Both `accessibilitySnapshot` and `screenshotWithAccessibilityLabels` use the sam
 - DOM order doesn't match visual order
 - You need to understand the visual hierarchy
 
-**Combining both:** Use screenshot first to understand layout and identify target elements visually, then use `accessibilitySnapshot({ search: /pattern/ })` for efficient searching in subsequent calls.
+**Combining both:** Use screenshot first to understand layout and identify target elements visually, then use `snapshot({ search: /pattern/ })` for efficient searching in subsequent calls.
 
 ## selector best practices
 
-**For unknown websites**: use `accessibilitySnapshot()` - it shows what's actually interactive with stable locators.
+**For unknown websites**: use `snapshot()` - it shows what's actually interactive with stable locators.
 
 **For development** (when you have source code access), prefer stable selectors in this order:
 
@@ -746,7 +752,7 @@ await editor.edit({ url: matches[0].url, oldString: 'DEBUG = false', newString: 
 
 **screenshotWithAccessibilityLabels** - take a screenshot with Vimium-style visual labels overlaid on interactive elements. Shows labels, captures screenshot, then removes labels. The image and accessibility snapshot are automatically included in the response. Can be called multiple times to capture multiple screenshots. Use a timeout of **20 seconds** for complex pages.
 
-Prefer this for pages with grids, image galleries, maps, or complex visual layouts where spatial position matters. For simple text-heavy pages, `accessibilitySnapshot` with search is faster and uses fewer tokens.
+Prefer this for pages with grids, image galleries, maps, or complex visual layouts where spatial position matters. For simple text-heavy pages, `snapshot` with search is faster and uses fewer tokens.
 
 ```js
 await screenshotWithAccessibilityLabels({ page });
@@ -904,7 +910,7 @@ console.log(JSON.stringify(info, null, 2));
 await page.keyboard.press('Enter');
 await page.waitForTimeout(2000);
 
-const snap = await accessibilitySnapshot({ page, search: /dialog|error|message/ });
+const snap = await snapshot({ page, search: /dialog|error|message/ });
 const logs = await getLatestLogs({ page, search: /error/i, count: 10 });
 console.log('UI:', snap);
 console.log('Logs:', logs);

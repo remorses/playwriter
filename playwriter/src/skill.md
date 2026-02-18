@@ -179,10 +179,10 @@ Every browser interaction should follow a **observe → act → observe** loop. 
 **Core loop:**
 
 1. **Open page** — get or create your page and navigate to the target URL
-2. **Observe** — take an accessibility snapshot to understand the current state
-3. **Update priors** — read the snapshot, identify the element to interact with
+2. **Observe** — print `page.url()` and take an accessibility snapshot. Always print the URL so you know where you are — pages can redirect, and actions can trigger unexpected navigation.
+3. **Check** — read the snapshot and URL. If the page isn't ready (still loading, expected content missing, wrong URL), **wait and observe again** — don't act on stale or incomplete state. Only proceed when you can identify the element to interact with.
 4. **Act** — perform one action (click, type, submit)
-5. **Observe again** — take another snapshot to verify the action's effect
+5. **Observe again** — print URL + snapshot to verify the action's effect. If the action didn't take effect (nothing changed, page still loading), wait and observe again before proceeding.
 6. **Repeat** — continue from step 3 until the task is complete
 
 ```
@@ -191,19 +191,20 @@ Every browser interaction should follow a **observe → act → observe** loop. 
 └──────────────────┬──────────────────────────┘
                    ▼
           ┌────────────────┐
-          │    observe      │◄─────────────────┐
-          │  (snapshot)     │                   │
-          └───────┬────────┘                   │
-                  ▼                            │
-          ┌────────────────┐                   │
-          │  update priors  │                   │
-          │  (read result)  │                   │
-          └───────┬────────┘                   │
-                  ▼                            │
-          ┌────────────────┐                   │
-          │      act        │                   │
-          │  (click/type)   │──────────────────┘
-          └────────────────┘
+     ┌───►│    observe      │◄─────────────────┐
+     │    │ (url + snapshot) │                   │
+     │    └───────┬────────┘                   │
+     │            ▼                            │
+     │    ┌────────────────┐                   │
+     │    │     check       │                   │
+     │    │  (read result)  │                   │
+     │    └───┬────────┬───┘                   │
+     │  not   │        │ ready                 │
+     │  ready │        ▼                       │
+     └────────┘ ┌────────────────┐             │
+                │      act        │             │
+                │  (click/type)   │─────────────┘
+                └────────────────┘
 ```
 
 **Example: opening a Framer plugin via the command palette**
@@ -211,30 +212,33 @@ Every browser interaction should follow a **observe → act → observe** loop. 
 Each step is a separate execute call. Notice how every action is followed by a snapshot to verify what happened:
 
 ```js
-// 1. Open page and observe
+// 1. Open page and observe — always print URL first
 state.myPage = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
 await state.myPage.goto('https://framer.com/projects/my-project', { waitUntil: 'domcontentloaded' });
-await snapshot({ page: state.myPage }).then(console.log)
+console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage }).then(console.log)
 ```
 
 ```js
 // 2. Act: open command palette → observe result
 await state.myPage.keyboard.press('Meta+k');
-await snapshot({ page: state.myPage, search: /dialog|Search/ }).then(console.log)
+console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage, search: /dialog|Search/ }).then(console.log)
+// If dialog didn't appear, observe again before retrying
 ```
 
 ```js
 // 3. Act: type search query → observe result
 await state.myPage.keyboard.type('MCP');
-await snapshot({ page: state.myPage, search: /MCP/ }).then(console.log)
+console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage, search: /MCP/ }).then(console.log)
 ```
 
 ```js
 // 4. Act: press Enter → observe plugin loaded
 await state.myPage.keyboard.press('Enter');
 await state.myPage.waitForTimeout(1000);
+console.log('URL:', state.myPage.url());
 const frame = state.myPage.frames().find(f => f.url().includes('plugins.framercdn.com'));
 await snapshot({ page: state.myPage, frame: frame || undefined }).then(console.log)
+// If frame not found, wait and observe again — plugin may still be loading
 ```
 
 **Other ways to observe action results:**
@@ -374,11 +378,11 @@ await loginPage.waitForURL('**/callback**');
 After any action (click, submit, navigate), verify what happened. **Always prefer accessibility snapshots over screenshots** — snapshots are text (cheap, fast, searchable), screenshots require image analysis (expensive, slow).
 
 ```js
-// Default: use snapshot with optional filtering
-page.url() + '\n' + await snapshot({ page })
+// Always print URL first, then snapshot
+console.log('URL:', page.url()); await snapshot({ page }).then(console.log)
 
 // Filter for specific content when snapshot is large
-await snapshot({ page, search: /dialog|button|error/i })
+console.log('URL:', page.url()); await snapshot({ page, search: /dialog|button|error/i }).then(console.log)
 ```
 
 Only use `screenshotWithAccessibilityLabels({ page })` for **visual layout issues** (CSS bugs, spatial positioning, colors). For verifying text content, button states, or form values, snapshots are always sufficient.
