@@ -219,6 +219,7 @@ export class PlaywrightExecutor {
   private browserLogs: Map<string, string[]> = new Map()
   private lastSnapshots: WeakMap<Page, string> = new WeakMap()
   private lastRefToLocator: WeakMap<Page, Map<string, string>> = new WeakMap()
+  private popupWarnings: string[] = []
 
   private scopedFs: ScopedFS
   private sandboxedRequire: NodeRequire
@@ -303,6 +304,28 @@ export class PlaywrightExecutor {
       this.logger.log(warning)
       this.hasWarnedExtensionOutdated = true
     }
+  }
+
+  private setupPageListeners(page: Page) {
+    this.setupPageConsoleListener(page)
+    this.setupPopupDetection(page)
+  }
+
+  private setupPopupDetection(page: Page) {
+    // Check if this page was opened by window.open() (has an opener)
+    const opener = page.opener()
+    if (!opener) {
+      return
+    }
+    const context = page.context()
+    const pages = context.pages()
+    const pageIndex = pages.indexOf(page)
+    const url = page.url()
+    this.popupWarnings.push(
+      `Popup window detected (page index ${pageIndex}, url: ${url}). ` +
+        `Popup windows cannot be controlled by playwriter. ` +
+        `Repeat the interaction in a way that does not open a popup, or navigate to the URL directly in a new tab.`,
+    )
   }
 
   private setupPageConsoleListener(page: Page) {
@@ -410,7 +433,7 @@ export class PlaywrightExecutor {
     const context = contexts.length > 0 ? contexts[0] : await browser.newContext()
 
     context.on('page', (page) => {
-      this.setupPageConsoleListener(page)
+      this.setupPageListeners(page)
     })
 
     context.pages().forEach((p) => this.setupPageConsoleListener(p))
@@ -485,7 +508,7 @@ export class PlaywrightExecutor {
     const context = contexts.length > 0 ? contexts[0] : await browser.newContext()
 
     context.on('page', (page) => {
-      this.setupPageConsoleListener(page)
+      this.setupPageListeners(page)
     })
 
     context.pages().forEach((p) => this.setupPageConsoleListener(p))
@@ -859,6 +882,12 @@ export class PlaywrightExecutor {
             responseText += `[return value] ${formatted}\n`
           }
         }
+      }
+
+      // Drain any popup warnings that fired during execution
+      if (this.popupWarnings.length > 0) {
+        responseText += this.popupWarnings.map((w) => `[WARNING] ${w}`).join('\n') + '\n'
+        this.popupWarnings = []
       }
 
       if (!responseText.trim()) {
