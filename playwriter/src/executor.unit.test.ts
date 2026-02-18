@@ -6,6 +6,7 @@ describe('shouldAutoReturn', () => {
     expect(shouldAutoReturn('1 + 2')).toBe(true)
     expect(shouldAutoReturn('page.title()')).toBe(true)
     expect(shouldAutoReturn('await page.title()')).toBe(true)
+    expect(shouldAutoReturn('snapshot({ page })')).toBe(true)
     expect(shouldAutoReturn('accessibilitySnapshot({ page })')).toBe(true)
     expect(shouldAutoReturn('context.pages().map(p => p.url())')).toBe(true)
   })

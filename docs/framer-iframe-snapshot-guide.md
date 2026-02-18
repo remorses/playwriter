@@ -1,9 +1,9 @@
 ---
 title: Framer Plugin Iframe Snapshot Guide
-description: Step-by-step instructions to open the Framer MCP plugin iframe and run accessibilitySnapshot on it.
+description: Step-by-step instructions to open the Framer MCP plugin iframe and run snapshot on it.
 prompt: |
   Create a concise step-by-step guide to open the Framer plugin iframe and
-  verify accessibilitySnapshot on that iframe using playwriter CLI. Include the
+  verify snapshot on that iframe using playwriter CLI. Include the
   exact Framer project URL and the plugins.framercdn iframe URL. Also document
   the Command+K workflow to open the MCP plugin: press Command+K, search for MCP
   in the command palette, press Enter, then wait ~1 second for the iframe to
@@ -33,7 +33,7 @@ playwriter -s 1 -e "const target = 'https://framer.com/projects/unframer-source-
 
 - Verify the palette is open (look for the command dialog and MCP entry in the snapshot output):
 ```bash
-playwriter -s 1 -e "console.log(await accessibilitySnapshot({ page, search: /dialog|Search…|MCP/ }));"
+playwriter -s 1 -e "console.log(await snapshot({ page, search: /dialog|Search…|MCP/ }));"
 ```
 
 - Search for **MCP**, press Enter, then wait about 1 second for the plugin iframe to appear.
@@ -55,17 +55,17 @@ playwriter -s 1 -e "const iframe = page.locator(\"iframe[src*='plugins.framercdn
 
 - Run the accessibility snapshot on that iframe using `contentFrame()` (FrameLocator is auto-resolved to Frame):
 ```bash
-playwriter -s 1 -e "const frame = await page.locator(\"iframe[src*='plugins.framercdn.com']\").contentFrame(); console.log(await accessibilitySnapshot({ page, frame }));"
+playwriter -s 1 -e "const frame = await page.locator(\"iframe[src*='plugins.framercdn.com']\").contentFrame(); console.log(await snapshot({ page, frame }));"
 ```
 
 - Alternative: use `page.frames()` to get the Frame directly:
 ```bash
-playwriter -s 1 -e "const frame = page.frames().find(f => f.url().includes('plugins.framercdn.com')); console.log(await accessibilitySnapshot({ page, frame }));"
+playwriter -s 1 -e "const frame = page.frames().find(f => f.url().includes('plugins.framercdn.com')); console.log(await snapshot({ page, frame }));"
 ```
 
 - Validate the snapshot contains MCP UI text (confirms the panel is actually loaded):
 ```bash
-playwriter -s 1 -e "const frame = await page.locator(\"iframe[src*='plugins.framercdn.com']\").contentFrame(); console.log(await accessibilitySnapshot({ page, frame, search: /Control Framer with MCP|Login With Google/ }));"
+playwriter -s 1 -e "const frame = await page.locator(\"iframe[src*='plugins.framercdn.com']\").contentFrame(); console.log(await snapshot({ page, frame, search: /Control Framer with MCP|Login With Google/ }));"
 ```
 
 ## Expected iframe URL

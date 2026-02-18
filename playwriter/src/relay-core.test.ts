@@ -172,7 +172,7 @@ describe('Relay Core Tests', () => {
         })
     }, 30000)
 
-    const accessibilitySnapshotTestCases = [
+    const snapshotTestCases = [
         {
             name: 'hacker-news',
             url: 'https://news.ycombinator.com/item?id=1',
@@ -185,7 +185,7 @@ describe('Relay Core Tests', () => {
         },
     ]
 
-    for (const testCase of accessibilitySnapshotTestCases) {
+    for (const testCase of snapshotTestCases) {
         it(`should get accessibility snapshot of ${testCase.name}`, async () => {
             await client.callTool({
                 name: 'execute',
@@ -205,8 +205,8 @@ describe('Relay Core Tests', () => {
                 arguments: {
                     code: js`
               await state.page.goto('${testCase.url}', { waitUntil: 'domcontentloaded' });
-              const snapshot = await accessibilitySnapshot({ page: state.page, showDiffSinceLastCall: false, interactiveOnly: true });
-              return snapshot;
+              const snap = await snapshot({ page: state.page, showDiffSinceLastCall: false, interactiveOnly: true });
+              return snap;
             `,
                 },
             })
@@ -228,8 +228,8 @@ describe('Relay Core Tests', () => {
                 name: 'execute',
                 arguments: {
                     code: js`
-              const snapshot = await accessibilitySnapshot({ page: state.page, showDiffSinceLastCall: false, interactiveOnly: false });
-              return snapshot;
+              const snap = await snapshot({ page: state.page, showDiffSinceLastCall: false, interactiveOnly: false });
+              return snap;
             `,
                 },
             })

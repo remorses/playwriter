@@ -57,7 +57,7 @@ to test CLI changes without publishing:
  Get-NetTCPConnection -LocalPort 19988 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
  
  tsx playwriter/src/cli.ts -s 1 -e "await page.goto('https://example.com')"
- tsx playwriter/src/cli.ts -s 1 -e "console.log(await accessibilitySnapshot({ page }))"
+ tsx playwriter/src/cli.ts -s 1 -e "console.log(await snapshot({ page }))"
  tsx playwriter/src/cli.ts session new
  tsx playwriter/src/cli.ts -s 1 -e "await page.click('button')"
 ```

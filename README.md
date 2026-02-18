@@ -33,7 +33,7 @@
 ```bash
 playwriter session new  # creates stateful sandbox, outputs session id (e.g. 1)
 playwriter -s 1 -e "await page.goto('https://example.com')"
-playwriter -s 1 -e "console.log(await accessibilitySnapshot({ page }))"
+playwriter -s 1 -e "console.log(await snapshot({ page }))"
 playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"
 ```
 

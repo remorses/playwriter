@@ -99,7 +99,7 @@ The **CLI with the skill** is the recommended approach. The skill file (`playwri
 ```bash
 playwriter session new          # outputs: 1
 playwriter -s 1 -e "await page.goto('https://example.com')"
-playwriter -s 1 -e "console.log(await accessibilitySnapshot({ page }))"
+playwriter -s 1 -e "console.log(await snapshot({ page }))"
 ```
 
 Alternatively, pass host and token as flags instead of env vars:

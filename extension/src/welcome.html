@@ -325,7 +325,7 @@ playwriter session new
 # navigate to a URL
 playwriter -s 1 -e "await page.goto('https://example.com')"
 # get the accessibility tree of the page
-playwriter -s 1 -e "console.log(await accessibilitySnapshot({ page }))"
+playwriter -s 1 -e "console.log(await snapshot({ page }))"
 # click an element by its accessibility reference
 playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"</code></pre>
       </section>

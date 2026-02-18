@@ -548,7 +548,7 @@ export class PlaywrightExecutor {
         },
       }
 
-      const accessibilitySnapshot = async (options: {
+      const snapshot = async (options: {
         page?: Page
         /** Optional frame to scope the snapshot (e.g. from iframe.contentFrame() or page.frames()) */
         frame?: Frame | FrameLocator
@@ -564,7 +564,7 @@ export class PlaywrightExecutor {
         const { page: targetPage, frame, locator, search, showDiffSinceLastCall = true, interactiveOnly = false } = options
         const resolvedPage = targetPage || page
         if (!resolvedPage) {
-          throw new Error('accessibilitySnapshot requires a page')
+          throw new Error('snapshot requires a page')
         }
 
         // Use new in-page implementation via getAriaSnapshot
@@ -800,7 +800,8 @@ export class PlaywrightExecutor {
         context,
         state: this.userState,
         console: customConsole,
-        accessibilitySnapshot,
+        snapshot,
+        accessibilitySnapshot: snapshot, // backward compat alias
         refToLocator,
         getCleanHTML,
         getPageMarkdown,
