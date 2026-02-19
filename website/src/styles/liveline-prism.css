@@ -1,0 +1,135 @@
+/*
+ * Prism.js light theme matching benji.org's GitHub-style syntax highlighting.
+ *
+ * Color palette extracted from the original:
+ * - Keywords (import, function, return): #CF222E (red)
+ * - Strings: #0A3069 (dark blue)
+ * - Functions/components: #8250DF (purple)
+ * - Parameters/properties: #953800 (orange-brown)
+ * - HTML tags: #116329 (green)
+ * - Attributes/numbers: #0550AE (blue)
+ * - Punctuation/text: #1F2328 (near-black)
+ */
+
+/* Base code style - override Prism defaults */
+code[class*="language-"],
+pre[class*="language-"] {
+  color: #1f2328;
+  background: none;
+  text-shadow: none;
+  font-family: "SF Mono", "SFMono-Regular", "Consolas", "Liberation Mono",
+    Menlo, Courier, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  word-wrap: normal;
+  tab-size: 2;
+  hyphens: none;
+}
+
+/* Keywords: import, from, function, return, const, let, var, export, default */
+.token.keyword,
+.token.module,
+.token.imports,
+.token.control-flow {
+  color: #cf222e;
+}
+
+/* Strings and template literals */
+.token.string,
+.token.template-string,
+.token.attr-value {
+  color: #0a3069;
+}
+
+/* Function names */
+.token.function,
+.token.class-name {
+  color: #8250df;
+}
+
+/* Object properties, parameters, variables in destructuring */
+.token.property,
+.token.parameter {
+  color: #953800;
+}
+
+/* HTML/JSX tag names */
+.token.tag .token.tag {
+  color: #116329;
+}
+
+/* Also color component names (PascalCase tags) in JSX */
+.token.tag .token.class-name {
+  color: #116329;
+}
+
+/* Attributes in JSX/HTML */
+.token.tag .token.attr-name,
+.token.attr-name {
+  color: #0550ae;
+}
+
+/* Numbers */
+.token.number {
+  color: #0550ae;
+}
+
+/* Operators: =, ===, =>, +, - */
+.token.operator {
+  color: #cf222e;
+}
+
+/* Punctuation: brackets, parens, commas, semicolons */
+.token.punctuation {
+  color: #1f2328;
+}
+
+/* Booleans, null, undefined */
+.token.boolean,
+.token.constant,
+.token.builtin {
+  color: #0550ae;
+}
+
+/* Comments */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #6e7781;
+  font-style: italic;
+}
+
+/* JSX specific: tag punctuation < > / */
+.token.tag .token.punctuation {
+  color: #1f2328;
+}
+
+/* Spread operator, rest */
+.token.spread {
+  color: #cf222e;
+}
+
+/* Plain text inside tags */
+.token.plain-text {
+  color: #1f2328;
+}
+
+/* Regex */
+.token.regex {
+  color: #0a3069;
+}
+
+/* Shell/bash specific */
+.language-bash .token.function {
+  color: #0550ae;
+}
+
+/* No text shadow on any token */
+.token {
+  text-shadow: none;
+}

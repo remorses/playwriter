@@ -1,0 +1,147 @@
+/*
+ * Liveline page styles - recreating benji.org's editorial design system.
+ *
+ * Key design decisions from the original:
+ * - Inter variable font at weight 460 (between normal and medium)
+ * - Near-black text (#111) not pure black, with 40% opacity for secondary
+ * - Narrow 550px content column for optimal reading
+ * - Negative letter-spacing on headings for tight, refined feel
+ * - 7-layer box shadows for realistic depth
+ * - Display P3 accent colors (wider gamut than sRGB)
+ * - Staggered entrance animations with subtle translateY
+ * - Custom cubic-bezier easings with slight overshoot ("snappy", "swift")
+ * - Fading header gradient pseudo-element
+ * - Small font sizes (14px body) for editorial/compact aesthetic
+ */
+
+/* ========================================================================
+   Design tokens
+   ======================================================================== */
+
+.liveline-page {
+  --ll-font-primary: "Inter var", "Inter", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ll-font-secondary: "Newsreader", Georgia, "Times New Roman", serif;
+  --ll-font-code: "SF Mono", "SFMono-Regular", "Consolas", "Liberation Mono",
+    Menlo, Courier, monospace;
+
+  /* Spacing scale */
+  --ll-spacing-xxs: 0.5rem;
+  --ll-spacing-xs: 1rem;
+  --ll-spacing-sm: 1.5rem;
+  --ll-spacing-md: 2rem;
+  --ll-spacing-lg: 2.5rem;
+  --ll-spacing-xl: 3rem;
+  --ll-spacing-xxl: 3.5rem;
+
+  /* Timing */
+  --ll-duration-snappy: 220ms;
+  --ll-ease-snappy: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+  --ll-duration-swift: 800ms;
+  --ll-ease-swift: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ll-duration-smooth: 300ms;
+  --ll-ease-smooth: cubic-bezier(0.19, 1, 0.22, 1);
+
+  /* Colors - near-black, not pure black */
+  --ll-text-primary: rgb(17, 17, 17);
+  --ll-text-secondary: rgba(0, 0, 0, 0.4);
+  --ll-text-tertiary: rgba(0, 0, 0, 0.25);
+  --ll-bg: #fff;
+  --ll-border: #e3e3e3;
+  --ll-code-bg: rgba(0, 0, 0, 0.02);
+  --ll-selection-bg: rgba(0, 0, 0, 0.08);
+
+  /* P3 accent colors (wider gamut) */
+  --ll-primary: #3e9fff;
+  --ll-secondary: #f09637;
+
+  /* Overlay / glass */
+  --ll-overlay-filter: blur(1rem);
+  --ll-overlay-bg: hsla(0, 0%, 100%, 0.8);
+  --ll-overlay-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 1.625rem 3.375rem rgba(0, 0, 0, 0.04),
+    0 1rem 2rem rgba(0, 0, 0, 0.03),
+    0 0.625rem 1rem rgba(0, 0, 0, 0.024),
+    0 0.3125rem 0.5rem rgba(0, 0, 0, 0.02),
+    0 0.125rem 0.25rem rgba(0, 0, 0, 0.016),
+    0 0 0.125rem rgba(0, 0, 0, 0.01);
+}
+
+@supports (color: color(display-p3 1 1 1)) {
+  .liveline-page {
+    --ll-primary: color(display-p3 0.243137 0.623529 1 / 1);
+    --ll-secondary: color(display-p3 0.941176 0.588235 0.215686 / 1);
+  }
+}
+
+/* ========================================================================
+   Selection
+   ======================================================================== */
+
+.liveline-page {
+  font-optical-sizing: auto;
+  font-feature-settings: "liga" 1, "calt" 1;
+}
+
+.liveline-page ::selection {
+  background: var(--ll-selection-bg);
+}
+
+/* ========================================================================
+   Stagger-in animation
+   ======================================================================== */
+
+@keyframes ll-stagger-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.liveline-article > * {
+  animation: ll-stagger-in 0.5s ease both;
+}
+
+.liveline-article > :nth-child(1) { animation-delay: 0s; }
+.liveline-article > :nth-child(2) { animation-delay: 0.05s; }
+.liveline-article > :nth-child(3) { animation-delay: 0.1s; }
+.liveline-article > :nth-child(4) { animation-delay: 0.15s; }
+.liveline-article > :nth-child(5) { animation-delay: 0.2s; }
+.liveline-article > :nth-child(6) { animation-delay: 0.25s; }
+.liveline-article > :nth-child(7) { animation-delay: 0.3s; }
+.liveline-article > :nth-child(8) { animation-delay: 0.35s; }
+.liveline-article > :nth-child(n + 9) { animation-delay: 0.4s; }
+
+/* ========================================================================
+   Header fade gradient
+   ======================================================================== */
+
+.liveline-page::before {
+  content: "";
+  pointer-events: none;
+  z-index: 9;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8rem;
+  background: linear-gradient(
+    rgb(255, 255, 255) 0px,
+    rgba(255, 255, 255, 0.737) 19%,
+    rgba(255, 255, 255, 0.541) 34%,
+    rgba(255, 255, 255, 0.382) 47%,
+    rgba(255, 255, 255, 0.278) 56.5%,
+    rgba(255, 255, 255, 0.194) 65%,
+    rgba(255, 255, 255, 0.126) 73%,
+    rgba(255, 255, 255, 0.075) 80.2%,
+    rgba(255, 255, 255, 0.042) 86.1%,
+    rgba(255, 255, 255, 0.021) 91%,
+    rgba(255, 255, 255, 0.008) 95.2%,
+    rgba(255, 255, 255, 0.002) 98.2%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
