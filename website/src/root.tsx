@@ -11,10 +11,19 @@ import {
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html className="" lang="en">
+    <html className="" lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/*
+          Apply .dark class based on OS prefers-color-scheme.
+          Inline in <head> to prevent FOUC. Listener handles live OS changes.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var d=document.documentElement.classList,m=matchMedia('(prefers-color-scheme:dark)');function a(){d.toggle('dark',m.matches)}a();m.addEventListener('change',a)})()`,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"

@@ -46,10 +46,20 @@
   --ll-text-primary: rgb(17, 17, 17);
   --ll-text-secondary: rgba(0, 0, 0, 0.4);
   --ll-text-tertiary: rgba(0, 0, 0, 0.25);
+  --ll-text-muted: rgba(0, 0, 0, 0.35);
+  --ll-text-hover: rgba(0, 0, 0, 0.7);
   --ll-bg: #fff;
   --ll-border: #e3e3e3;
+  --ll-divider: rgb(242, 242, 242);
   --ll-code-bg: rgba(0, 0, 0, 0.02);
+  --ll-code-line-nr: rgba(0, 0, 0, 0.15);
   --ll-selection-bg: rgba(0, 0, 0, 0.08);
+
+  /* Button / back button */
+  --ll-btn-bg: #fff;
+  --ll-btn-shadow: rgba(0, 0, 0, 0.08) 0px 2px 8px,
+    rgba(0, 0, 0, 0.04) 0px 4px 16px,
+    rgba(0, 0, 0, 0.06) 0px 0px 0px 1px inset;
 
   /* P3 accent colors (wider gamut) */
   --ll-primary: #3e9fff;
@@ -65,6 +75,68 @@
     0 0.3125rem 0.5rem rgba(0, 0, 0, 0.02),
     0 0.125rem 0.25rem rgba(0, 0, 0, 0.016),
     0 0 0.125rem rgba(0, 0, 0, 0.01);
+
+  /* Header fade gradient stops (white) */
+  --ll-fade-0: rgb(255, 255, 255);
+  --ll-fade-1: rgba(255, 255, 255, 0.737);
+  --ll-fade-2: rgba(255, 255, 255, 0.541);
+  --ll-fade-3: rgba(255, 255, 255, 0.382);
+  --ll-fade-4: rgba(255, 255, 255, 0.278);
+  --ll-fade-5: rgba(255, 255, 255, 0.194);
+  --ll-fade-6: rgba(255, 255, 255, 0.126);
+  --ll-fade-7: rgba(255, 255, 255, 0.075);
+  --ll-fade-8: rgba(255, 255, 255, 0.042);
+  --ll-fade-9: rgba(255, 255, 255, 0.021);
+  --ll-fade-10: rgba(255, 255, 255, 0.008);
+  --ll-fade-11: rgba(255, 255, 255, 0.002);
+  --ll-fade-12: rgba(255, 255, 255, 0);
+}
+
+/* Dark mode overrides */
+.dark .liveline-page {
+  --ll-text-primary: rgba(255, 255, 255, 0.9);
+  --ll-text-secondary: rgba(255, 255, 255, 0.45);
+  --ll-text-tertiary: rgba(255, 255, 255, 0.25);
+  --ll-text-muted: rgba(255, 255, 255, 0.35);
+  --ll-text-hover: rgba(255, 255, 255, 0.7);
+  --ll-bg: rgb(17, 17, 17);
+  --ll-border: rgba(255, 255, 255, 0.1);
+  --ll-divider: rgba(255, 255, 255, 0.06);
+  --ll-code-bg: rgba(255, 255, 255, 0.05);
+  --ll-code-line-nr: rgba(255, 255, 255, 0.15);
+  --ll-selection-bg: rgba(255, 255, 255, 0.1);
+
+  --ll-btn-bg: rgb(30, 30, 30);
+  --ll-btn-shadow: rgba(255, 255, 255, 0.05) 0px 2px 8px,
+    rgba(255, 255, 255, 0.02) 0px 4px 16px,
+    rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
+
+  --ll-primary: #60a5fa;
+  --ll-secondary: #f5a623;
+
+  --ll-overlay-bg: hsla(0, 0%, 7%, 0.8);
+  --ll-overlay-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 1.625rem 3.375rem rgba(0, 0, 0, 0.3),
+    0 1rem 2rem rgba(0, 0, 0, 0.2),
+    0 0.625rem 1rem rgba(0, 0, 0, 0.15),
+    0 0.3125rem 0.5rem rgba(0, 0, 0, 0.1),
+    0 0.125rem 0.25rem rgba(0, 0, 0, 0.08),
+    0 0 0.125rem rgba(0, 0, 0, 0.05);
+
+  /* Header fade gradient stops (dark) */
+  --ll-fade-0: rgb(17, 17, 17);
+  --ll-fade-1: rgba(17, 17, 17, 0.737);
+  --ll-fade-2: rgba(17, 17, 17, 0.541);
+  --ll-fade-3: rgba(17, 17, 17, 0.382);
+  --ll-fade-4: rgba(17, 17, 17, 0.278);
+  --ll-fade-5: rgba(17, 17, 17, 0.194);
+  --ll-fade-6: rgba(17, 17, 17, 0.126);
+  --ll-fade-7: rgba(17, 17, 17, 0.075);
+  --ll-fade-8: rgba(17, 17, 17, 0.042);
+  --ll-fade-9: rgba(17, 17, 17, 0.021);
+  --ll-fade-10: rgba(17, 17, 17, 0.008);
+  --ll-fade-11: rgba(17, 17, 17, 0.002);
+  --ll-fade-12: rgba(17, 17, 17, 0);
 }
 
 @supports (color: color(display-p3 1 1 1)) {
@@ -130,18 +202,18 @@
   right: 0;
   height: 8rem;
   background: linear-gradient(
-    rgb(255, 255, 255) 0px,
-    rgba(255, 255, 255, 0.737) 19%,
-    rgba(255, 255, 255, 0.541) 34%,
-    rgba(255, 255, 255, 0.382) 47%,
-    rgba(255, 255, 255, 0.278) 56.5%,
-    rgba(255, 255, 255, 0.194) 65%,
-    rgba(255, 255, 255, 0.126) 73%,
-    rgba(255, 255, 255, 0.075) 80.2%,
-    rgba(255, 255, 255, 0.042) 86.1%,
-    rgba(255, 255, 255, 0.021) 91%,
-    rgba(255, 255, 255, 0.008) 95.2%,
-    rgba(255, 255, 255, 0.002) 98.2%,
-    rgba(255, 255, 255, 0) 100%
+    var(--ll-fade-0) 0px,
+    var(--ll-fade-1) 19%,
+    var(--ll-fade-2) 34%,
+    var(--ll-fade-3) 47%,
+    var(--ll-fade-4) 56.5%,
+    var(--ll-fade-5) 65%,
+    var(--ll-fade-6) 73%,
+    var(--ll-fade-7) 80.2%,
+    var(--ll-fade-8) 86.1%,
+    var(--ll-fade-9) 91%,
+    var(--ll-fade-10) 95.2%,
+    var(--ll-fade-11) 98.2%,
+    var(--ll-fade-12) 100%
   );
 }

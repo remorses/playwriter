@@ -15,6 +15,7 @@ import "prismjs/components/prism-bash";
 import "website/src/styles/liveline.css";
 import "website/src/styles/liveline-prism.css";
 
+
 /* =========================================================================
    TOC sidebar (fixed left)
    ========================================================================= */
@@ -109,15 +110,15 @@ function TableOfContents() {
             lineHeight: "20px",
             letterSpacing: "-0.09px",
             padding: "4px 0",
-            color: "rgba(0, 0, 0, 0.4)",
+            color: "var(--ll-text-secondary)",
             fontFamily: "var(--ll-font-primary)",
             marginBottom: "8px",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = "rgba(0, 0, 0, 0.7)";
+            e.currentTarget.style.color = "var(--ll-text-hover)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = "rgba(0, 0, 0, 0.4)";
+            e.currentTarget.style.color = "var(--ll-text-secondary)";
           }}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -133,7 +134,7 @@ function TableOfContents() {
         </a>
         {tocItems.map((item) => {
           const isActive = `#${activeId}` === item.href;
-          const defaultColor = isActive ? "rgba(0, 0, 0, 0.9)" : "rgba(0, 0, 0, 0.4)";
+          const defaultColor = isActive ? "var(--ll-text-primary)" : "var(--ll-text-secondary)";
           return (
             <a
               key={item.href}
@@ -151,7 +152,7 @@ function TableOfContents() {
               }}
               onMouseEnter={(e) => {
                 if (!isActive) {
-                  e.currentTarget.style.color = "rgba(0, 0, 0, 0.7)";
+                  e.currentTarget.style.color = "var(--ll-text-hover)";
                 }
               }}
               onMouseLeave={(e) => {
@@ -175,19 +176,19 @@ function BackButton() {
   return (
     <a
       href="/"
-      className="fixed top-5 right-5 z-[100000] flex items-center justify-center w-10 h-10 rounded-full bg-white no-underline"
+      className="fixed top-5 right-5 z-[100000] flex items-center justify-center w-10 h-10 rounded-full no-underline"
       style={{
-        color: "rgba(0, 0, 0, 0.4)",
-        boxShadow:
-          "rgba(0, 0, 0, 0.08) 0px 2px 8px, rgba(0, 0, 0, 0.04) 0px 4px 16px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px inset",
+        background: "var(--ll-btn-bg)",
+        color: "var(--ll-text-secondary)",
+        boxShadow: "var(--ll-btn-shadow)",
         transition: "color 0.15s, transform 0.15s",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.color = "rgba(0, 0, 0, 0.7)";
+        e.currentTarget.style.color = "var(--ll-text-hover)";
         e.currentTarget.style.transform = "scale(1.05)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.color = "rgba(0, 0, 0, 0.4)";
+        e.currentTarget.style.color = "var(--ll-text-secondary)";
         e.currentTarget.style.transform = "scale(1)";
       }}
       onMouseDown={(e) => {
@@ -264,7 +265,7 @@ function Caption({ children }: { children: React.ReactNode }) {
         fontWeight: 475,
         lineHeight: "20px",
         letterSpacing: "-0.09px",
-        color: "rgba(0, 0, 0, 0.4)",
+        color: "var(--ll-text-secondary)",
         margin: 0,
       }}
     >
@@ -278,7 +279,7 @@ function Divider() {
     <div
       style={{
         height: "1px",
-        background: "rgb(242, 242, 242)",
+        background: "var(--ll-divider)",
         margin: 0,
       }}
     />
@@ -358,7 +359,7 @@ function CodeBlock({ children, lang = "jsx" }: { children: string; lang?: string
               className="select-none shrink-0"
               aria-hidden="true"
               style={{
-                color: "rgba(0, 0, 0, 0.15)",
+                color: "var(--ll-code-line-nr)",
                 textAlign: "right",
                 paddingRight: "20px",
                 minWidth: "28px",
@@ -487,7 +488,7 @@ function PropsTable({
             fontFamily: "var(--ll-font-primary)",
             fontSize: "11px",
             fontWeight: 400,
-            color: "rgba(0, 0, 0, 0.35)",
+            color: "var(--ll-text-muted)",
             textTransform: "uppercase",
             letterSpacing: "0.02em",
             padding: "0 0 6px",
@@ -515,7 +516,7 @@ function PropsTable({
                     fontSize: "11px",
                     fontWeight: 400,
                     fontFamily: "var(--ll-font-primary)",
-                    color: "rgba(0, 0, 0, 0.35)",
+                    color: "var(--ll-text-muted)",
                     borderBottom: "1px solid var(--ll-border)",
                   }}
                 >
@@ -548,7 +549,7 @@ function PropsTable({
                     fontSize: "11px",
                     fontWeight: 400,
                     fontFamily: "var(--ll-font-code)",
-                    color: "rgba(0, 0, 0, 0.35)",
+                    color: "var(--ll-text-muted)",
                     borderBottom: "1px solid var(--ll-border)",
                     whiteSpace: "nowrap",
                   }}
@@ -561,7 +562,7 @@ function PropsTable({
                     fontSize: "11px",
                     fontWeight: 400,
                     fontFamily: "var(--ll-font-code)",
-                    color: "rgba(0, 0, 0, 0.35)",
+                    color: "var(--ll-text-muted)",
                     borderBottom: "1px solid var(--ll-border)",
                   }}
                 >
@@ -608,7 +609,7 @@ export default function LivelinePage() {
               fontWeight: 475,
               lineHeight: "15.6px",
               letterSpacing: "-0.04px",
-              color: "rgba(18, 18, 18, 0.4)",
+              color: "var(--ll-text-secondary)",
               margin: 0,
               padding: "0 0 16px",
             }}
@@ -622,7 +623,7 @@ export default function LivelinePage() {
               fontWeight: 400,
               lineHeight: "15.6px",
               letterSpacing: "-0.04px",
-              color: "rgba(18, 18, 18, 0.25)",
+              color: "var(--ll-text-tertiary)",
             }}
           >
             2025
