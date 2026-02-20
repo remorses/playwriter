@@ -63,7 +63,7 @@ export default function LivelinePage() {
     <EditorialPage toc={tocItems} logo="playwriter">
 
       <P>
-        Playwriter lets you control your Chrome browser with the full
+        Playwriter lets you <strong>control your Chrome browser</strong> with the full
         Playwright API. A Chrome extension, a local relay, and a CLI. No new
         browser windows, no Chrome flags, no context bloat.{" "}
         <A href="https://github.com/remorses/playwriter">Star on GitHub</A>.
@@ -84,7 +84,7 @@ export default function LivelinePage() {
         Every browser automation MCP I tried either spawns a new Chrome
         instance or forces you into a limited set of predefined tools. Playwriter
         does neither. It connects to the browser you already have open,
-        exposes the full Playwright API through a single{" "}
+        exposes the <strong>full Playwright API</strong> through a single{" "}
         <Code>execute</Code> tool, and gets out of the way.
         One tool. Any Playwright code. No wrappers.
       </P>
@@ -92,7 +92,7 @@ export default function LivelinePage() {
       <Section id="getting-started" title="Getting started">
 
         <P>
-          Three steps. Extension, icon click, then you&apos;re automating.
+          <strong>Three steps.</strong> Extension, icon click, then you&apos;re automating.
         </P>
 
         <OL>
@@ -110,7 +110,7 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          The extension connects your browser to a local WebSocket relay on{" "}
+          The extension connects your browser to a <strong>local WebSocket relay</strong> on{" "}
           <Code>localhost:19988</Code>. The CLI sends Playwright
           code through the relay. No remote servers, no accounts, nothing
           leaves your machine.
@@ -135,8 +135,8 @@ export default function LivelinePage() {
           The extension uses <Code>chrome.debugger</Code> to
           attach to tabs where you clicked the icon. It opens a WebSocket
           connection to a local relay server. The CLI (or MCP, or your own
-          Playwright script) connects to the same relay. CDP commands flow
-          through; the extension forwards them to Chrome and sends responses
+          Playwright script) connects to the same relay. <strong>CDP commands flow
+          through</strong>; the extension forwards them to Chrome and sends responses
           back.
         </P>
 
@@ -158,9 +158,9 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          No Chrome restart required. No <Code>--remote-debugging-port</Code>{" "}
+          <strong>No Chrome restart required.</strong> No <Code>--remote-debugging-port</Code>{" "}
           flags. The extension handles the CDP attachment transparently, and
-          the relay multiplexes sessions so multiple agents or CLI instances
+          the relay <strong>multiplexes sessions</strong> so multiple agents or CLI instances
           can work with the same browser simultaneously.
         </P>
 
@@ -187,9 +187,9 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          Each line ends with a locator you can pass directly to{" "}
+          Each line ends with a <strong>locator</strong> you can pass directly to{" "}
           <Code>page.locator()</Code>. Subsequent calls return a
-          diff, so you only see what changed. Use{" "}
+          <strong> diff</strong>, so you only see what changed. Use{" "}
           <Code>search</Code> to filter large pages.
         </P>
 
@@ -202,8 +202,8 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          Snapshots are text. They cost a fraction of what screenshots cost in
-          tokens. Use them as your primary debugging tool. Only reach for
+          Snapshots are <strong>text</strong>. They cost a fraction of what screenshots cost in
+          tokens. Use them as your <strong>primary debugging tool</strong>. Only reach for
           screenshots when spatial layout matters &mdash; grids, dashboards, maps.
         </P>
 
@@ -217,8 +217,8 @@ export default function LivelinePage() {
 
         <P>
           For pages where spatial layout matters,{" "}
-          <Code>screenshotWithAccessibilityLabels</Code> overlays
-          Vimium-style labels on every interactive element. Take a screenshot,
+          <Code>screenshotWithAccessibilityLabels</Code> overlays{" "}
+          <strong>Vimium-style labels</strong> on every interactive element. Take a screenshot,
           read the labels, click by reference.
         </P>
 
@@ -230,7 +230,7 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          Labels are color-coded by element type: yellow for links, orange for
+          Labels are <strong>color-coded by element type</strong>: yellow for links, orange for
           buttons, coral for inputs, pink for checkboxes, peach for sliders,
           salmon for menus, amber for tabs. The ref system is shared with{" "}
           <Code>snapshot()</Code>, so you can switch between text
@@ -246,7 +246,7 @@ export default function LivelinePage() {
       <Section id="sessions" title="Sessions">
 
         <P>
-          Each session runs in an isolated sandbox with its own{" "}
+          Each session runs in an <strong>isolated sandbox</strong> with its own{" "}
           <Code>state</Code> object. Variables, pages, listeners
           persist between calls within a session. Different sessions get
           different state. Browser tabs are shared.
@@ -265,7 +265,7 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          Create your own page to avoid interference from other agents. Reuse
+          Create your own page to <strong>avoid interference</strong> from other agents. Reuse
           an existing <Code>about:blank</Code> tab or create a
           fresh one, and store it in <Code>state</Code>.
         </P>
@@ -282,7 +282,7 @@ export default function LivelinePage() {
       <Section id="debugger-and-editor" title="Debugger & editor">
 
         <P>
-          Full Chrome DevTools Protocol access. Set breakpoints, step through
+          <strong>Full Chrome DevTools Protocol access.</strong> Set breakpoints, step through
           code, inspect variables at runtime. Live-edit page scripts and CSS
           without reloading.
         </P>
@@ -299,7 +299,7 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          Edits are in-memory and persist until the page reloads. Useful for
+          Edits are <strong>in-memory</strong> and persist until the page reloads. Useful for
           toggling debug flags, patching broken code, or testing quick fixes
           without touching source files. The editor also supports{" "}
           <Code>grep</Code> across all loaded scripts.
@@ -314,7 +314,7 @@ export default function LivelinePage() {
       <Section id="network-interception" title="Network interception">
 
         <P>
-          Intercept requests and responses to reverse-engineer APIs, scrape
+          <strong>Intercept requests and responses</strong> to reverse-engineer APIs, scrape
           data, or debug network issues. Store captured data in{" "}
           <Code>state</Code> and analyze across calls.
         </P>
@@ -332,7 +332,7 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          This is faster than scrolling through DOM. Capture the real API
+          This is <strong>faster than scrolling through DOM</strong>. Capture the real API
           calls, inspect their schemas, and replay them with different
           parameters. Works for pagination, authenticated endpoints, and
           anything behind JavaScript rendering.
@@ -343,9 +343,9 @@ export default function LivelinePage() {
       <Section id="screen-recording" title="Screen recording">
 
         <P>
-          Record the active tab as video using{" "}
+          <strong>Record the active tab as video</strong> using{" "}
           <Code>chrome.tabCapture</Code>. The recording runs in
-          the extension context, so it survives page navigation. Video is saved
+          the extension context, so it <strong>survives page navigation</strong>. Video is saved
           as MP4.
         </P>
 
@@ -363,7 +363,7 @@ export default function LivelinePage() {
 
         <P>
           Unlike <Code>getDisplayMedia</Code>, this approach
-          persists across navigations because the extension holds the{" "}
+          <strong> persists across navigations</strong> because the extension holds the{" "}
           <Code>MediaRecorder</Code>, not the page. You can also
           check recording status with <Code>isRecording</Code> or
           cancel without saving with <Code>cancelRecording</Code>.
@@ -424,11 +424,11 @@ export default function LivelinePage() {
       <Section id="remote-access" title="Remote access">
 
         <P>
-          Control Chrome on any machine from anywhere over the internet.
+          Control Chrome on <strong>any machine from anywhere</strong> over the internet.
           The relay runs on the host alongside Chrome.
           A{" "}
           <A href="https://traforo.dev">traforo</A>{" "}
-          tunnel exposes it through Cloudflare, giving you a secure public URL.
+          tunnel exposes it through Cloudflare, giving you a <strong>secure public URL</strong>.
           No VPN, no firewall rules, no port forwarding.
         </P>
 
@@ -443,7 +443,7 @@ export default function LivelinePage() {
         `}</CodeBlock>
 
         <P>
-          Also works on a LAN without tunnels &mdash; just set{" "}
+          Also works on a <strong>LAN without tunnels</strong> &mdash; just set{" "}
           <Code>PLAYWRITER_HOST=192.168.1.10</Code>. Works for MCP
           too &mdash; set <Code>PLAYWRITER_HOST</Code> and{" "}
           <Code>PLAYWRITER_TOKEN</Code> in your MCP client env config.
@@ -456,7 +456,7 @@ export default function LivelinePage() {
       <Section id="security" title="Security">
 
         <P>
-          Playwriter is local by default. The relay runs on{" "}
+          Playwriter is <strong>local by default</strong>. The relay runs on{" "}
           <Code>localhost:19988</Code> and only accepts connections
           from the extension. There&apos;s no remote server, no account, no
           telemetry.

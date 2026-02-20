@@ -1,25 +1,27 @@
 /*
- * Prism.js light theme matching benji.org's GitHub-style syntax highlighting.
+ * Prism.js light theme — more saturated, brighter variant of GitHub Light.
  *
- * Color palette extracted from the original:
- * - Keywords (import, function, return): #CF222E (red)
- * - Strings: #0A3069 (dark blue)
- * - Functions/components: #8250DF (purple)
- * - Parameters/properties: #953800 (orange-brown)
- * - HTML tags: #116329 (green)
- * - Attributes/numbers: #0550AE (blue)
- * - Punctuation/text: #1F2328 (near-black)
+ * Color palette:
+ * - Keywords (import, function, return): #d1242f (vivid red)
+ * - Strings: #0550ae (rich blue)
+ * - Functions/components: #7c3aed (vivid purple)
+ * - Parameters/properties: #b45309 (warm amber)
+ * - HTML tags: #16a34a (bright green)
+ * - Attributes/numbers: #2563eb (bright blue)
+ * - Punctuation/text: #1e293b (slate)
  */
 
 /* Base code style - override Prism defaults */
 code[class*="language-"],
 pre[class*="language-"] {
-  color: #1f2328;
+  color: #1e293b;
   background: none;
   text-shadow: none;
   font-family: var(--ll-font-code, "SF Mono", "SFMono-Regular", "Consolas",
     "Liberation Mono", Menlo, Courier, monospace);
   font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   line-height: 18px;
   text-align: left;
   white-space: pre;
@@ -35,64 +37,64 @@ pre[class*="language-"] {
 .token.module,
 .token.imports,
 .token.control-flow {
-  color: #cf222e;
+  color: #d1242f;
 }
 
 /* Strings and template literals */
 .token.string,
 .token.template-string,
 .token.attr-value {
-  color: #0a3069;
+  color: #0550ae;
 }
 
 /* Function names */
 .token.function,
 .token.class-name {
-  color: #8250df;
+  color: #7c3aed;
 }
 
 /* Object properties, parameters, variables in destructuring */
 .token.property,
 .token.parameter {
-  color: #953800;
+  color: #b45309;
 }
 
 /* HTML/JSX tag names */
 .token.tag .token.tag {
-  color: #116329;
+  color: #16a34a;
 }
 
 /* Also color component names (PascalCase tags) in JSX */
 .token.tag .token.class-name {
-  color: #116329;
+  color: #16a34a;
 }
 
 /* Attributes in JSX/HTML */
 .token.tag .token.attr-name,
 .token.attr-name {
-  color: #0550ae;
+  color: #2563eb;
 }
 
 /* Numbers */
 .token.number {
-  color: #0550ae;
+  color: #2563eb;
 }
 
 /* Operators: =, ===, =>, +, - */
 .token.operator {
-  color: #cf222e;
+  color: #d1242f;
 }
 
 /* Punctuation: brackets, parens, commas, semicolons */
 .token.punctuation {
-  color: #1f2328;
+  color: #1e293b;
 }
 
 /* Booleans, null, undefined */
 .token.boolean,
 .token.constant,
 .token.builtin {
-  color: #0550ae;
+  color: #2563eb;
 }
 
 /* Comments */
@@ -100,33 +102,33 @@ pre[class*="language-"] {
 .token.prolog,
 .token.doctype,
 .token.cdata {
-  color: #6e7781;
+  color: #6b7280;
   font-style: italic;
 }
 
 /* JSX specific: tag punctuation < > / */
 .token.tag .token.punctuation {
-  color: #1f2328;
+  color: #1e293b;
 }
 
 /* Spread operator, rest */
 .token.spread {
-  color: #cf222e;
+  color: #d1242f;
 }
 
 /* Plain text inside tags */
 .token.plain-text {
-  color: #1f2328;
+  color: #1e293b;
 }
 
 /* Regex */
 .token.regex {
-  color: #0a3069;
+  color: #0550ae;
 }
 
 /* Shell/bash specific */
 .language-bash .token.function {
-  color: #0550ae;
+  color: #2563eb;
 }
 
 /* No text shadow on any token */

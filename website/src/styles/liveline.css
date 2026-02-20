@@ -244,9 +244,9 @@
   display: inline-block;
   font-family: var(--ll-font-code);
   font-size: 12.6px;
-  font-weight: 460;
+  font-weight: 500;
   line-height: 12.6px;
-  letter-spacing: -0.09px;
+  letter-spacing: 0.02em;
   padding: 1.6px 3.2px;
   color: rgba(0, 0, 0, 0.75);
 }
