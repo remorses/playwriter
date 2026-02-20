@@ -377,7 +377,7 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
               fontFamily: "var(--font-code)",
               fontSize: "12px",
               fontWeight: 400,
-              lineHeight: "18px",
+              lineHeight: "24px",
               letterSpacing: "normal",
               color: "var(--text-primary)",
               tabSize: 2,
