@@ -40,8 +40,8 @@
     "SFMono-Regular", "Consolas", "Liberation Mono", Menlo, Courier, monospace;
 
   /* Bleed: code blocks & images extend beyond prose column.
-     36px = 8px div padding-left + 28px line-number span (border-box includes its 20px paddingRight) */
-  --ll-bleed: 36px;
+     44px = 8px div padding-left + 36px line-number width (border-box, includes 20px paddingRight) */
+  --ll-bleed: 44px;
 
   /* Spacing scale */
   --ll-spacing-xxs: 0.5rem;
@@ -70,7 +70,7 @@
   --ll-border: #e3e3e3;
   --ll-divider: rgb(242, 242, 242);
   --ll-code-bg: rgba(0, 0, 0, 0.02);
-  --ll-code-line-nr: rgba(0, 0, 0, 0.15);
+  --ll-code-line-nr: rgba(0, 0, 0, 0.3);
   --ll-selection-bg: rgba(0, 0, 0, 0.08);
 
   /* Button / back button */
@@ -125,7 +125,7 @@
   --ll-border: rgba(255, 255, 255, 0.1);
   --ll-divider: rgba(255, 255, 255, 0.06);
   --ll-code-bg: rgba(255, 255, 255, 0.05);
-  --ll-code-line-nr: rgba(255, 255, 255, 0.15);
+  --ll-code-line-nr: rgba(255, 255, 255, 0.3);
   --ll-selection-bg: rgba(255, 255, 255, 0.1);
 
   --ll-btn-bg: rgb(30, 30, 30);

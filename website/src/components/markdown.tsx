@@ -363,7 +363,7 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
         <pre
           className="overflow-x-auto"
           style={{
-            background: "var(--ll-code-bg)",
+            // background: "var(--ll-code-bg)",
             borderRadius: "8px",
             margin: 0,
             padding: 0,
@@ -389,7 +389,7 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
                 color: "var(--ll-code-line-nr)",
                 textAlign: "right",
                 paddingRight: "20px",
-                minWidth: "28px",
+                width: "36px",
                 userSelect: "none",
               }}
             >
