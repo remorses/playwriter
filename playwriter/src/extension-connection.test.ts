@@ -303,6 +303,119 @@ describe('Extension Connection Tests', () => {
         await pageB.close()
     })
 
+    it('should warn and switch page when the active page closes', async () => {
+        const browserContext = getBrowserContext()
+        const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+        const pageA = await browserContext.newPage()
+        await pageA.goto('https://example.com/close-warning-a')
+        await pageA.bringToFront()
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+
+        const pageB = await browserContext.newPage()
+        await pageB.goto('https://example.com/close-warning-b')
+        await pageB.bringToFront()
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+
+        const closeResult = await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+          state.page = page;
+          const closedUrl = state.page.url();
+          await state.page.close();
+          return { closedUrl, remainingPages: context.pages().length };
+        `,
+            },
+        })
+
+        const closeOutput = (closeResult as any).content[0].text
+        expect(closeOutput).toContain('[WARNING] The current page in state.page was closed')
+        expect(closeOutput).toContain('Switched active page to index')
+        expect((closeResult as any).isError).not.toBe(true)
+
+        const nextResult = await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+          return { pageUrl: page.url(), pagesCount: context.pages().length };
+        `,
+            },
+        })
+
+        const nextOutput = (nextResult as any).content[0].text
+        expect(nextOutput).toContain('pagesCount')
+        expect(nextOutput).not.toContain('No Playwright pages are available')
+        expect(nextOutput).not.toContain('[WARNING] The current page was closed')
+        expect((nextResult as any).isError).not.toBe(true)
+
+        if (!pageA.isClosed()) {
+            await pageA.close()
+        }
+        if (!pageB.isClosed()) {
+            await pageB.close()
+        }
+    })
+
+    it('should switch page without warning when closed page is not stored in state', async () => {
+        const browserContext = getBrowserContext()
+        const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+        const pageA = await browserContext.newPage()
+        await pageA.goto('https://example.com/close-no-state-warning-a')
+        await pageA.bringToFront()
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+
+        const pageB = await browserContext.newPage()
+        await pageB.goto('https://example.com/close-no-state-warning-b')
+        await pageB.bringToFront()
+        await serviceWorker.evaluate(async () => {
+            await globalThis.toggleExtensionForActiveTab()
+        })
+
+        const closeResult = await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+          const closedUrl = page.url();
+          await page.close();
+          return { closedUrl, remainingPages: context.pages().length };
+        `,
+            },
+        })
+
+        const closeOutput = (closeResult as any).content[0].text
+        expect(closeOutput).not.toContain('[WARNING] The current page in state.page was closed')
+        expect(closeOutput).not.toContain('Switched active page to index')
+        expect((closeResult as any).isError).not.toBe(true)
+
+        const nextResult = await client.callTool({
+            name: 'execute',
+            arguments: {
+                code: js`
+          return { pageUrl: page.url(), pagesCount: context.pages().length };
+        `,
+            },
+        })
+
+        const nextOutput = (nextResult as any).content[0].text
+        expect(nextOutput).toContain('pagesCount')
+        expect((nextResult as any).isError).not.toBe(true)
+
+        if (!pageA.isClosed()) {
+            await pageA.close()
+        }
+        if (!pageB.isClosed()) {
+            await pageB.close()
+        }
+    })
+
     it('should show correct url when enabling extension after navigation', async () => {
         const browserContext = getBrowserContext()
         const serviceWorker = await getExtensionServiceWorker(browserContext)

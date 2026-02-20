@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.0.66
+
+### Internal
+
+- **Simplify warning scope tracking**: Replaced warning-scope map + execution ID counter with a direct set of scope objects, keeping the same concurrent warning behavior with less executor state.
+
+## 0.0.65
+
+### Improvements
+
+- **State-aware page-close warnings**: Executor now emits page-close warnings only when the closed page is referenced in session state (for example `state.page`), and warning text includes the exact state key(s) that must be reassigned.
+- **Safer active page fallback messaging**: When the active page closes and a replacement tab is available, warning text now includes both fallback index/URL and the affected state key(s).
+
+### Docs
+
+- **Standardize examples on `state.page`**: Updated skill examples and guidance to consistently initialize and use `state.page` at task start, reducing cross-agent tab confusion.
+
+## 0.0.64
+
+### Improvements
+
+- **Warn when active page closes**: Executor now listens for page close events and emits explicit `[WARNING]` messages when the current page is closed, including the closed URL and automatic fallback behavior.
+- **Automatic page fallback after close**: When possible, executor switches `page` to another open tab and reports which page index/URL it selected so agents understand context changes immediately.
+- **Concurrency-safe warning delivery**: Warning buffering now tracks warning scopes per execute call so concurrent executions do not lose page-close or popup warnings.
+
+### Tests
+
+- **Add active-page-close integration test**: New extension connection test verifies warning emission and successful continuation on a replacement page after closing the active page.
+
 ## 0.0.63
 
 ### Security

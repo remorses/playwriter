@@ -173,6 +173,15 @@ export interface ExecuteResult {
   isError: boolean
 }
 
+interface WarningEvent {
+  id: number
+  message: string
+}
+
+interface WarningScope {
+  cursor: number
+}
+
 export interface ExecutorLogger {
   log(...args: any[]): void
   error(...args: any[]): void
@@ -219,7 +228,12 @@ export class PlaywrightExecutor {
   private browserLogs: Map<string, string[]> = new Map()
   private lastSnapshots: WeakMap<Page, string> = new WeakMap()
   private lastRefToLocator: WeakMap<Page, Map<string, string>> = new WeakMap()
-  private popupWarnings: string[] = []
+  private warningEvents: WarningEvent[] = []
+  private nextWarningEventId = 0
+  private lastDeliveredWarningEventId = 0
+  private activeWarningScopes = new Set<WarningScope>()
+  private pagesWithListeners = new WeakSet<Page>()
+  private suppressPageCloseWarnings = false
 
   private scopedFs: ScopedFS
   private sandboxedRequire: NodeRequire
@@ -295,6 +309,49 @@ export class PlaywrightExecutor {
     this.context = null
   }
 
+  private enqueueWarning(message: string) {
+    this.nextWarningEventId += 1
+    this.warningEvents.push({ id: this.nextWarningEventId, message })
+  }
+
+  private beginWarningScope(): WarningScope {
+    const scope: WarningScope = {
+      cursor: this.nextWarningEventId,
+    }
+    this.activeWarningScopes.add(scope)
+    return scope
+  }
+
+  private flushWarningsForScope(scope: WarningScope): string {
+    const relevantWarnings = this.warningEvents.filter((warning) => {
+      return warning.id > scope.cursor
+    })
+    const latestWarningId = relevantWarnings.at(-1)?.id
+    if (latestWarningId && latestWarningId > this.lastDeliveredWarningEventId) {
+      this.lastDeliveredWarningEventId = latestWarningId
+    }
+
+    this.activeWarningScopes.delete(scope)
+    this.pruneDeliveredWarnings()
+
+    if (relevantWarnings.length === 0) {
+      return ''
+    }
+
+    return `${relevantWarnings.map((warning) => `[WARNING] ${warning.message}`).join('\n')}\n`
+  }
+
+  private pruneDeliveredWarnings() {
+    const activeCursors = [...this.activeWarningScopes].map((scope) => {
+      return scope.cursor
+    })
+    const minActiveCursor = activeCursors.length > 0 ? Math.min(...activeCursors) : this.lastDeliveredWarningEventId
+    const pruneBeforeOrAt = Math.min(this.lastDeliveredWarningEventId, minActiveCursor)
+    this.warningEvents = this.warningEvents.filter((warning) => {
+      return warning.id > pruneBeforeOrAt
+    })
+  }
+
   private warnIfExtensionOutdated(playwriterVersion: string | null) {
     if (this.hasWarnedExtensionOutdated) {
       return
@@ -307,8 +364,72 @@ export class PlaywrightExecutor {
   }
 
   private setupPageListeners(page: Page) {
+    if (this.pagesWithListeners.has(page)) {
+      return
+    }
+    this.pagesWithListeners.add(page)
+    this.setupPageCloseDetection(page)
     this.setupPageConsoleListener(page)
     this.setupPopupDetection(page)
+  }
+
+  private setupPageCloseDetection(page: Page) {
+    page.on('close', () => {
+      const stateKeysForClosedPage = Object.entries(this.userState)
+        .filter(([, value]) => {
+          return value === page
+        })
+        .map(([key]) => key)
+
+      const wasCurrentPage = this.page === page
+      let replacementPageInfo: { index: string; url: string } | null = null
+
+      if (wasCurrentPage) {
+        this.page = null
+        const context = this.context || page.context()
+        const openPages = context.pages().filter((candidate) => {
+          return !candidate.isClosed()
+        })
+        if (openPages.length > 0) {
+          const replacementPage = openPages[0]
+          this.page = replacementPage
+          const replacementIndex = context.pages().indexOf(replacementPage)
+          replacementPageInfo = {
+            index: replacementIndex >= 0 ? String(replacementIndex) : 'unknown',
+            url: replacementPage.url() || 'unknown',
+          }
+        }
+      }
+
+      if (!this.isConnected || this.suppressPageCloseWarnings || stateKeysForClosedPage.length === 0) {
+        return
+      }
+
+      const stateKeyLabel = stateKeysForClosedPage.map((key) => `state.${key}`).join(', ')
+      const closedUrl = page.url() || 'unknown'
+
+      if (!wasCurrentPage) {
+        this.enqueueWarning(
+          `Page closed (url: ${closedUrl}) for ${stateKeyLabel}. ` +
+            `Assign a new open page to ${stateKeyLabel} before reusing it.`,
+        )
+        return
+      }
+
+      if (replacementPageInfo) {
+        this.enqueueWarning(
+          `The current page in ${stateKeyLabel} was closed (url: ${closedUrl}). ` +
+            `Switched active page to index ${replacementPageInfo.index} (url: ${replacementPageInfo.url}). ` +
+            `Reassign ${stateKeyLabel} before using it again.`,
+        )
+        return
+      }
+
+      this.enqueueWarning(
+        `The current page in ${stateKeyLabel} was closed (url: ${closedUrl}). ` +
+          `No open pages remain. Open a tab with Playwriter enabled, then reassign ${stateKeyLabel}.`,
+      )
+    })
   }
 
   private setupPopupDetection(page: Page) {
@@ -321,7 +442,7 @@ export class PlaywrightExecutor {
       const rawIndex = pages.indexOf(popup)
       const pageIndex = rawIndex >= 0 ? String(rawIndex) : 'unknown'
       const url = popup.url()
-      this.popupWarnings.push(
+      this.enqueueWarning(
         `Popup window detected (page index ${pageIndex}, url: ${url}). ` +
           `Popup windows cannot be controlled by playwriter. ` +
           `Repeat the interaction in a way that does not open a popup, or navigate to the URL directly in a new tab.`,
@@ -479,10 +600,13 @@ export class PlaywrightExecutor {
 
   async reset(): Promise<{ page: Page; context: BrowserContext }> {
     if (this.browser) {
+      this.suppressPageCloseWarnings = true
       try {
         await this.browser.close()
       } catch (e) {
         this.logger.error('Error closing browser:', e)
+      } finally {
+        this.suppressPageCloseWarnings = false
       }
     }
 
@@ -528,6 +652,7 @@ export class PlaywrightExecutor {
 
   async execute(code: string, timeout = 10000): Promise<ExecuteResult> {
     const consoleLogs: Array<{ method: string; args: any[] }> = []
+    const warningScope = this.beginWarningScope()
 
     const formatConsoleLogs = (logs: Array<{ method: string; args: any[] }>, prefix = 'Console output') => {
       if (logs.length === 0) {
@@ -885,11 +1010,7 @@ export class PlaywrightExecutor {
         }
       }
 
-      // Drain any popup warnings that fired during execution
-      if (this.popupWarnings.length > 0) {
-        responseText += this.popupWarnings.map((w) => `[WARNING] ${w}`).join('\n') + '\n'
-        this.popupWarnings = []
-      }
+      responseText += this.flushWarningsForScope(warningScope)
 
       if (!responseText.trim()) {
         responseText = 'Code executed successfully (no output)'
@@ -919,16 +1040,13 @@ export class PlaywrightExecutor {
       this.logger.error('Error in execute:', errorStack)
 
       const logsText = formatConsoleLogs(consoleLogs, 'Console output (before error)')
-      const popupText = this.popupWarnings.length > 0
-        ? this.popupWarnings.map((w) => `[WARNING] ${w}`).join('\n') + '\n'
-        : ''
-      this.popupWarnings = []
+      const warningText = this.flushWarningsForScope(warningScope)
       const resetHint = isTimeoutError
         ? ''
         : '\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call reset to reconnect.]'
 
       return {
-        text: `${logsText}${popupText}\nError executing code: ${error.message}\n${errorStack}${resetHint}`,
+        text: `${logsText}${warningText}\nError executing code: ${error.message}\n${errorStack}${resetHint}`,
         images: [],
         isError: true,
       }
@@ -962,7 +1080,7 @@ export class PlaywrightExecutor {
     }
 
     const page = await context.newPage()
-    this.setupPageConsoleListener(page)
+    this.setupPageListeners(page)
     const pageUrl = page.url()
     if (pageUrl === 'about:blank') {
       return page
