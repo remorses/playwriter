@@ -96,54 +96,52 @@
   --ll-fade-12: rgba(255, 255, 255, 0);
 }
 
-/* Dark mode overrides — uses @variant dark so it follows whatever
-   strategy is configured in @custom-variant dark (globals.css) */
-@variant dark {
-  .liveline-page {
-    --ll-text-primary: rgba(255, 255, 255, 0.9);
-    --ll-text-secondary: rgba(255, 255, 255, 0.45);
-    --ll-text-tertiary: rgba(255, 255, 255, 0.25);
-    --ll-text-muted: rgba(255, 255, 255, 0.35);
-    --ll-text-hover: rgba(255, 255, 255, 0.7);
-    --ll-bg: rgb(17, 17, 17);
-    --ll-border: rgba(255, 255, 255, 0.1);
-    --ll-divider: rgba(255, 255, 255, 0.06);
-    --ll-code-bg: rgba(255, 255, 255, 0.05);
-    --ll-code-line-nr: rgba(255, 255, 255, 0.15);
-    --ll-selection-bg: rgba(255, 255, 255, 0.1);
+/* Dark mode overrides — plain CSS, not processed by Tailwind.
+   Uses .dark ancestor selector matching @custom-variant dark in globals.css */
+.dark .liveline-page {
+  --ll-text-primary: rgba(255, 255, 255, 0.9);
+  --ll-text-secondary: rgba(255, 255, 255, 0.45);
+  --ll-text-tertiary: rgba(255, 255, 255, 0.25);
+  --ll-text-muted: rgba(255, 255, 255, 0.35);
+  --ll-text-hover: rgba(255, 255, 255, 0.7);
+  --ll-bg: rgb(17, 17, 17);
+  --ll-border: rgba(255, 255, 255, 0.1);
+  --ll-divider: rgba(255, 255, 255, 0.06);
+  --ll-code-bg: rgba(255, 255, 255, 0.05);
+  --ll-code-line-nr: rgba(255, 255, 255, 0.15);
+  --ll-selection-bg: rgba(255, 255, 255, 0.1);
 
-    --ll-btn-bg: rgb(30, 30, 30);
-    --ll-btn-shadow: rgba(255, 255, 255, 0.05) 0px 2px 8px,
-      rgba(255, 255, 255, 0.02) 0px 4px 16px,
-      rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
+  --ll-btn-bg: rgb(30, 30, 30);
+  --ll-btn-shadow: rgba(255, 255, 255, 0.05) 0px 2px 8px,
+    rgba(255, 255, 255, 0.02) 0px 4px 16px,
+    rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
 
-    --ll-primary: #60a5fa;
-    --ll-secondary: #f5a623;
+  --ll-primary: #60a5fa;
+  --ll-secondary: #f5a623;
 
-    --ll-overlay-bg: hsla(0, 0%, 7%, 0.8);
-    --ll-overlay-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 1.625rem 3.375rem rgba(0, 0, 0, 0.3),
-      0 1rem 2rem rgba(0, 0, 0, 0.2),
-      0 0.625rem 1rem rgba(0, 0, 0, 0.15),
-      0 0.3125rem 0.5rem rgba(0, 0, 0, 0.1),
-      0 0.125rem 0.25rem rgba(0, 0, 0, 0.08),
-      0 0 0.125rem rgba(0, 0, 0, 0.05);
+  --ll-overlay-bg: hsla(0, 0%, 7%, 0.8);
+  --ll-overlay-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 1.625rem 3.375rem rgba(0, 0, 0, 0.3),
+    0 1rem 2rem rgba(0, 0, 0, 0.2),
+    0 0.625rem 1rem rgba(0, 0, 0, 0.15),
+    0 0.3125rem 0.5rem rgba(0, 0, 0, 0.1),
+    0 0.125rem 0.25rem rgba(0, 0, 0, 0.08),
+    0 0 0.125rem rgba(0, 0, 0, 0.05);
 
-    /* Header fade gradient stops (dark) */
-    --ll-fade-0: rgb(17, 17, 17);
-    --ll-fade-1: rgba(17, 17, 17, 0.737);
-    --ll-fade-2: rgba(17, 17, 17, 0.541);
-    --ll-fade-3: rgba(17, 17, 17, 0.382);
-    --ll-fade-4: rgba(17, 17, 17, 0.278);
-    --ll-fade-5: rgba(17, 17, 17, 0.194);
-    --ll-fade-6: rgba(17, 17, 17, 0.126);
-    --ll-fade-7: rgba(17, 17, 17, 0.075);
-    --ll-fade-8: rgba(17, 17, 17, 0.042);
-    --ll-fade-9: rgba(17, 17, 17, 0.021);
-    --ll-fade-10: rgba(17, 17, 17, 0.008);
-    --ll-fade-11: rgba(17, 17, 17, 0.002);
-    --ll-fade-12: rgba(17, 17, 17, 0);
-  }
+  /* Header fade gradient stops (dark) */
+  --ll-fade-0: rgb(17, 17, 17);
+  --ll-fade-1: rgba(17, 17, 17, 0.737);
+  --ll-fade-2: rgba(17, 17, 17, 0.541);
+  --ll-fade-3: rgba(17, 17, 17, 0.382);
+  --ll-fade-4: rgba(17, 17, 17, 0.278);
+  --ll-fade-5: rgba(17, 17, 17, 0.194);
+  --ll-fade-6: rgba(17, 17, 17, 0.126);
+  --ll-fade-7: rgba(17, 17, 17, 0.075);
+  --ll-fade-8: rgba(17, 17, 17, 0.042);
+  --ll-fade-9: rgba(17, 17, 17, 0.021);
+  --ll-fade-10: rgba(17, 17, 17, 0.008);
+  --ll-fade-11: rgba(17, 17, 17, 0.002);
+  --ll-fade-12: rgba(17, 17, 17, 0);
 }
 
 @supports (color: color(display-p3 1 1 1)) {
@@ -211,6 +209,41 @@
     margin-left: 0;
     margin-right: 0;
   }
+}
+
+/* ========================================================================
+   Inline code — subtle background pill via ::before pseudo-element.
+   Matches benji.org/liveline: position relative, ::before with absolute
+   inset creates a pill that extends slightly above/below the text.
+   ======================================================================== */
+
+.ll-inline-code {
+  position: relative;
+  display: inline-block;
+  font-family: var(--ll-font-code);
+  font-size: 12.6px;
+  font-weight: 460;
+  line-height: 12.6px;
+  letter-spacing: -0.09px;
+  padding: 1.6px 3.2px;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.ll-inline-code::before {
+  content: "";
+  position: absolute;
+  inset: -1.26px 0;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  z-index: -1;
+}
+
+.dark .ll-inline-code {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.dark .ll-inline-code::before {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ========================================================================

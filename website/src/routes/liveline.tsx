@@ -382,16 +382,7 @@ function CodeBlock({ children, lang = "jsx" }: { children: string; lang?: string
 
 function InlineCode({ children }: { children: React.ReactNode }) {
   return (
-    <code
-      style={{
-        fontFamily: "var(--ll-font-code)",
-        fontSize: "12.25px",
-        fontWeight: 475,
-        lineHeight: "12.25px",
-        letterSpacing: "-0.09px",
-        padding: "0 4px",
-      }}
-    >
+    <code className="ll-inline-code">
       {children}
     </code>
   );
