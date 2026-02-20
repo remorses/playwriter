@@ -114,7 +114,7 @@ export function TableOfContents({
                 fontWeight: 475,
                 lineHeight: "15.6px",
                 letterSpacing: "-0.04px",
-                padding: "3px 0",
+                padding: "5px 0",
                 color: defaultColor,
                 fontFamily: "var(--ll-font-primary)",
                 transition: "color 0.15s ease",
@@ -249,6 +249,29 @@ export function Caption({ children }: { children: React.ReactNode }) {
   );
 }
 
+export function A({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: "var(--ll-accent, #0969da)",
+        fontWeight: 600,
+        textDecoration: "none",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.textDecoration = "underline";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.textDecoration = "none";
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 export function Code({ children }: { children: React.ReactNode }) {
   return (
     <code className="ll-inline-code">
@@ -275,6 +298,25 @@ export function Section({ id, title, children }: { id: string; title: string; ch
       <SectionHeading id={id}>{title}</SectionHeading>
       {children}
     </>
+  );
+}
+
+export function OL({ children }: { children: React.ReactNode }) {
+  return (
+    <ol
+      className="m-0 pl-5"
+      style={{
+        fontFamily: "var(--ll-font-primary)",
+        fontSize: "14px",
+        fontWeight: 475,
+        lineHeight: "20px",
+        letterSpacing: "-0.09px",
+        color: "var(--ll-text-primary)",
+        listStyleType: "decimal",
+      }}
+    >
+      {children}
+    </ol>
   );
 }
 
@@ -564,7 +606,6 @@ export function EditorialPage({
         textRendering: "optimizeLegibility",
       }}
     >
-      <BackButton />
       <TableOfContents items={toc} logo={logo} />
 
       <div

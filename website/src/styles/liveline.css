@@ -79,6 +79,9 @@
     rgba(0, 0, 0, 0.04) 0px 4px 16px,
     rgba(0, 0, 0, 0.06) 0px 0px 0px 1px inset;
 
+  /* Link accent color */
+  --ll-accent: #0969da;
+
   /* P3 accent colors (wider gamut) */
   --ll-primary: #3e9fff;
   --ll-secondary: #f09637;
@@ -130,6 +133,7 @@
     rgba(255, 255, 255, 0.02) 0px 4px 16px,
     rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
 
+  --ll-accent: #58a6ff;
   --ll-primary: #60a5fa;
   --ll-secondary: #f5a623;
 
