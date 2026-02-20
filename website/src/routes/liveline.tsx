@@ -47,7 +47,13 @@ export default function LivelinePage() {
         <A href="https://github.com/remorses/playwriter">Star on GitHub</A>.
       </P>
 
-      <ChartPlaceholder height={300} label="demo" />
+      <div className="ll-bleed" style={{ display: "flex", justifyContent: "center" }}>
+        <img
+          src="/screenshot@2x.png"
+          alt="Playwriter controlling Chrome with accessibility labels overlay"
+          style={{ display: "block", maxWidth: "100%" }}
+        />
+      </div>
       <Caption>
         Your existing Chrome session. Extensions, logins, cookies &mdash; all there.
       </Caption>
@@ -114,20 +120,20 @@ export default function LivelinePage() {
         </P>
 
         <CodeBlock lang="bash">{dedent`
-          ┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-          │   BROWSER           │     │   LOCALHOST          │     │   CLIENT        │
-          │                     │     │                      │     │                 │
-          │  ┌───────────────┐  │     │ WebSocket Server     │     │  ┌───────────┐  │
-          │  │   Extension   │<───────┬───>  :19988          │     │  │ CLI / MCP │  │
-          │  └───────┬───────┘  │ WS  │                      │     │  └───────────┘  │
-          │          │          │     │  /extension          │     │        │        │
-          │    chrome.debugger  │     │       │              │     │        v        │
-          │          v          │     │       v              │     │  ┌────────────┐ │
-          │  ┌───────────────┐  │     │  /cdp/:id <───────────────>│  │ execute    │ │
-          │  │ Tab 1 (green) │  │     └──────────────────────┘  WS │  └────────────┘ │
-          │  │ Tab 2 (green) │  │                                  │        │        │
-          │  │ Tab 3 (gray)  │  │     Tab 3 not controlled         │ Playwright API  │
-          └─────────────────────┘     (extension not clicked)      └─────────────────┘
+        ┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+        │   BROWSER           │     │   LOCALHOST          │     │   CLIENT        │
+        │                     │     │                      │     │                 │
+        │  ┌───────────────┐  │     │ WebSocket Server     │     │  ┌───────────┐  │
+        │  │   Extension   │<───────┬───>  :19988          │     │  │ CLI / MCP │  │
+        │  └───────┬───────┘  │ WS  │                      │     │  └───────────┘  │
+        │          │          │     │  /extension          │     │        │        │
+        │    chrome.debugger  │     │       │              │     │        v        │
+        │          v          │     │       v              │     │  ┌────────────┐ │
+        │  ┌───────────────┐  │     │  /cdp/:id <───────────────>│  │ execute    │ │
+        │  │ Tab 1 (green) │  │     └──────────────────────┘  WS │  └────────────┘ │
+        │  │ Tab 2 (green) │  │                                  │        │        │
+        │  │ Tab 3 (gray)  │  │     Tab 3 not controlled         │ Playwright API  │
+        └─────────────────────┘     (extension not clicked)      └─────────────────┘
         `}</CodeBlock>
 
         <P>
