@@ -652,20 +652,20 @@ playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"`}</CodeBlock>
             back.
           </Paragraph>
 
-          <CodeBlock lang="bash">{`+---------------------+     +-------------------+     +-----------------+
-|   BROWSER           |     |   LOCALHOST        |     |   CLIENT        |
-|                     |     |                    |     |                 |
-|  +---------------+  |     | WebSocket Server   |     |  +-----------+ |
-|  |   Extension   |<--------->  :19988          |     |  | CLI / MCP | |
-|  +-------+-------+  | WS  |                    |     |  +-----------+ |
-|          |          |     |  /extension        |     |        |       |
-|    chrome.debugger  |     |       |            |     |        v       |
-|          v          |     |       v            |     |  +-----------+ |
-|  +---------------+  |     |  /cdp/:id <------------> |  | execute   | |
-|  | Tab 1 (green) |  |     +--------------------+  WS |  +-----------+ |
-|  | Tab 2 (green) |  |                                |        |       |
-|  | Tab 3 (gray)  |  |     Tab 3 not controlled       | Playwright API |
-+---------------------+     (extension not clicked)    +-----------------+`}</CodeBlock>
+          <CodeBlock lang="bash">{`┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────┐
+│   BROWSER           │     │   LOCALHOST          │     │   CLIENT        │
+│                     │     │                      │     │                 │
+│  ┌───────────────┐  │     │ WebSocket Server     │     │  ┌───────────┐ │
+│  │   Extension   │<----------->  :19988          │     │  │ CLI / MCP │ │
+│  └───────┬───────┘  │ WS  │                      │     │  └───────────┘ │
+│          │          │     │  /extension           │     │        │       │
+│    chrome.debugger  │     │       │               │     │        v       │
+│          v          │     │       v               │     │  ┌───────────┐ │
+│  ┌───────────────┐  │     │  /cdp/:id <--------------->│  │ execute   │ │
+│  │ Tab 1 (green) │  │     └──────────────────────┘  WS │  └───────────┘ │
+│  │ Tab 2 (green) │  │                                  │        │       │
+│  │ Tab 3 (gray)  │  │     Tab 3 not controlled         │ Playwright API │
+└─────────────────────┘     (extension not clicked)      └─────────────────┘`}</CodeBlock>
 
           <Paragraph>
             No Chrome restart required. No <InlineCode>--remote-debugging-port</InlineCode>{" "}

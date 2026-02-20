@@ -15,6 +15,20 @@
  */
 
 /* ========================================================================
+   JetBrainsMono Nerd Font Mono — patched with box-drawing glyphs that
+   tile perfectly (no gaps). Only load regular 400 to keep payload small.
+   Source: github.com/ryanoasis/nerd-fonts
+   ======================================================================== */
+
+@font-face {
+  font-family: "JetBrainsMono NF Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("https://raw.githubusercontent.com/ryanoasis/nerd-fonts/refs/tags/v3.3.0/patched-fonts/JetBrainsMono/Ligatures/Regular/JetBrainsMonoNerdFontMono-Regular.ttf") format("truetype");
+}
+
+/* ========================================================================
    Design tokens
    ======================================================================== */
 
@@ -22,8 +36,8 @@
   --ll-font-primary: "Inter var", "Inter", system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --ll-font-secondary: "Newsreader", Georgia, "Times New Roman", serif;
-  --ll-font-code: "SF Mono", "SFMono-Regular", "Consolas", "Liberation Mono",
-    Menlo, Courier, monospace;
+  --ll-font-code: "JetBrainsMono NF Mono", "JetBrains Mono", "SF Mono",
+    "SFMono-Regular", "Consolas", "Liberation Mono", Menlo, Courier, monospace;
 
   /* Bleed: code blocks & images extend beyond prose column.
      36px = 8px div padding-left + 28px line-number span (border-box includes its 20px paddingRight) */
