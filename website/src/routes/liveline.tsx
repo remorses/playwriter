@@ -330,7 +330,7 @@ function CodeBlock({ children, lang = "jsx" }: { children: string; lang?: string
   }, [children]);
 
   return (
-    <figure className="m-0">
+    <figure className="m-0 ll-bleed">
       <div className="relative">
         <pre
           className="overflow-x-auto"
@@ -408,7 +408,7 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 
 function ChartPlaceholder({ height = 200, label }: { height?: number; label?: string }) {
   return (
-    <div className="my-4">
+    <div className="my-4 ll-bleed">
       <div
         className="w-full rounded-lg overflow-hidden relative"
         style={{
@@ -584,7 +584,7 @@ function PropsTable({
 export default function LivelinePage() {
   return (
     <div
-      className="liveline-page relative min-h-screen"
+      className="liveline-page relative min-h-screen overflow-x-hidden"
       style={{
         background: "var(--ll-bg)",
         color: "var(--ll-text-primary)",

@@ -25,6 +25,10 @@
   --ll-font-code: "SF Mono", "SFMono-Regular", "Consolas", "Liberation Mono",
     Menlo, Courier, monospace;
 
+  /* Bleed: code blocks & images extend beyond prose column.
+     36px = 8px div padding-left + 28px line-number span (border-box includes its 20px paddingRight) */
+  --ll-bleed: 36px;
+
   /* Spacing scale */
   --ll-spacing-xxs: 0.5rem;
   --ll-spacing-xs: 1rem;
@@ -187,6 +191,24 @@
 .liveline-article > :nth-child(7) { animation-delay: 0.3s; }
 .liveline-article > :nth-child(8) { animation-delay: 0.35s; }
 .liveline-article > :nth-child(n + 9) { animation-delay: 0.4s; }
+
+/* ========================================================================
+   Bleed — code blocks and images extend beyond the prose column so that
+   the code text (after line numbers) aligns with the prose left edge.
+   36px = 8px div padding-left + 28px line-number span (border-box, includes padding).
+   ======================================================================== */
+
+.ll-bleed {
+  margin-left: calc(-1 * var(--ll-bleed));
+  margin-right: calc(-1 * var(--ll-bleed));
+}
+
+@media (max-width: 650px) {
+  .ll-bleed {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
 
 /* ========================================================================
    Header fade gradient
