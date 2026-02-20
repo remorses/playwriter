@@ -135,92 +135,96 @@ pre[class*="language-"] {
 }
 
 /* ======================================================================
-   Dark mode - GitHub Dark inspired palette
+   Dark mode - GitHub Dark inspired palette.
+   Uses @variant dark so it follows whatever strategy is configured
+   in @custom-variant dark (globals.css).
    ====================================================================== */
 
-.dark code[class*="language-"],
-.dark pre[class*="language-"] {
-  color: #e6edf3;
-}
+@variant dark {
+  code[class*="language-"],
+  pre[class*="language-"] {
+    color: #e6edf3;
+  }
 
-.dark .token.keyword,
-.dark .token.module,
-.dark .token.imports,
-.dark .token.control-flow {
-  color: #ff7b72;
-}
+  .token.keyword,
+  .token.module,
+  .token.imports,
+  .token.control-flow {
+    color: #ff7b72;
+  }
 
-.dark .token.string,
-.dark .token.template-string,
-.dark .token.attr-value {
-  color: #a5d6ff;
-}
+  .token.string,
+  .token.template-string,
+  .token.attr-value {
+    color: #a5d6ff;
+  }
 
-.dark .token.function,
-.dark .token.class-name {
-  color: #d2a8ff;
-}
+  .token.function,
+  .token.class-name {
+    color: #d2a8ff;
+  }
 
-.dark .token.property,
-.dark .token.parameter {
-  color: #ffa657;
-}
+  .token.property,
+  .token.parameter {
+    color: #ffa657;
+  }
 
-.dark .token.tag .token.tag {
-  color: #7ee787;
-}
+  .token.tag .token.tag {
+    color: #7ee787;
+  }
 
-.dark .token.tag .token.class-name {
-  color: #7ee787;
-}
+  .token.tag .token.class-name {
+    color: #7ee787;
+  }
 
-.dark .token.tag .token.attr-name,
-.dark .token.attr-name {
-  color: #79c0ff;
-}
+  .token.tag .token.attr-name,
+  .token.attr-name {
+    color: #79c0ff;
+  }
 
-.dark .token.number {
-  color: #79c0ff;
-}
+  .token.number {
+    color: #79c0ff;
+  }
 
-.dark .token.operator {
-  color: #ff7b72;
-}
+  .token.operator {
+    color: #ff7b72;
+  }
 
-.dark .token.punctuation {
-  color: #e6edf3;
-}
+  .token.punctuation {
+    color: #e6edf3;
+  }
 
-.dark .token.boolean,
-.dark .token.constant,
-.dark .token.builtin {
-  color: #79c0ff;
-}
+  .token.boolean,
+  .token.constant,
+  .token.builtin {
+    color: #79c0ff;
+  }
 
-.dark .token.comment,
-.dark .token.prolog,
-.dark .token.doctype,
-.dark .token.cdata {
-  color: #8b949e;
-  font-style: italic;
-}
+  .token.comment,
+  .token.prolog,
+  .token.doctype,
+  .token.cdata {
+    color: #8b949e;
+    font-style: italic;
+  }
 
-.dark .token.tag .token.punctuation {
-  color: #e6edf3;
-}
+  .token.tag .token.punctuation {
+    color: #e6edf3;
+  }
 
-.dark .token.spread {
-  color: #ff7b72;
-}
+  .token.spread {
+    color: #ff7b72;
+  }
 
-.dark .token.plain-text {
-  color: #e6edf3;
-}
+  .token.plain-text {
+    color: #e6edf3;
+  }
 
-.dark .token.regex {
-  color: #a5d6ff;
-}
+  .token.regex {
+    color: #a5d6ff;
+  }
 
-.dark .language-bash .token.function {
-  color: #79c0ff;
+  .language-bash .token.function {
+    color: #79c0ff;
+  }
 }
