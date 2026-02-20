@@ -103,14 +103,14 @@ function TableOfContents() {
       <nav>
         <a
           href="/"
-          className="no-underline transition-colors flex items-center gap-1"
+          className="no-underline transition-colors block"
           style={{
             fontSize: "14px",
-            fontWeight: 475,
+            fontWeight: 700,
             lineHeight: "20px",
             letterSpacing: "-0.09px",
             padding: "4px 0",
-            color: "var(--ll-text-secondary)",
+            color: "var(--ll-text-primary)",
             fontFamily: "var(--ll-font-primary)",
             marginBottom: "8px",
           }}
@@ -118,19 +118,10 @@ function TableOfContents() {
             e.currentTarget.style.color = "var(--ll-text-hover)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = "var(--ll-text-secondary)";
+            e.currentTarget.style.color = "var(--ll-text-primary)";
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path
-              d="M12.25 7H1.75M1.75 7L6.125 2.625M1.75 7L6.125 11.375"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          {" "}Index
+          playwriter
         </a>
         {tocItems.map((item) => {
           const isActive = `#${activeId}` === item.href;
@@ -410,7 +401,7 @@ function ChartPlaceholder({ height = 200, label }: { height?: number; label?: st
   return (
     <div className="my-4 ll-bleed">
       <div
-        className="w-full rounded-lg overflow-hidden relative"
+        className="w-full overflow-hidden relative"
         style={{
           height: `${height}px`,
           background: "rgb(17, 17, 17)",
@@ -600,35 +591,8 @@ export default function LivelinePage() {
         className="mx-auto"
         style={{ width: "550px", maxWidth: "calc(100% - 2rem)", padding: "0 1rem 6rem" }}
       >
-        {/* Page header */}
-        <header style={{ padding: "80px 0 40px" }}>
-          <h2
-            style={{
-              fontFamily: "var(--ll-font-primary)",
-              fontSize: "13px",
-              fontWeight: 475,
-              lineHeight: "15.6px",
-              letterSpacing: "-0.04px",
-              color: "var(--ll-text-secondary)",
-              margin: 0,
-              padding: "0 0 16px",
-            }}
-          >
-            Playwriter
-          </h2>
-          <time
-            style={{
-              fontFamily: "var(--ll-font-primary)",
-              fontSize: "13px",
-              fontWeight: 400,
-              lineHeight: "15.6px",
-              letterSpacing: "-0.04px",
-              color: "var(--ll-text-tertiary)",
-            }}
-          >
-            2025
-          </time>
-        </header>
+        {/* Top spacer */}
+        <div style={{ height: "80px" }} />
 
         <article className="liveline-article flex flex-col gap-[16px]">
           {/* Intro */}
