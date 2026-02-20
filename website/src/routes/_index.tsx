@@ -1,7 +1,7 @@
 /*
  * Playwriter editorial page — content only.
  * Components imported from website/src/components/markdown.tsx.
- * Styles from liveline.css and liveline-prism.css.
+ * Styles from globals.css (editorial tokens) and liveline-prism.css.
  */
 
 import type { MetaFunction } from "react-router";
@@ -34,7 +34,7 @@ export const meta: MetaFunction = () => {
     { property: "og:image:width", content: "1200" },
     { property: "og:image:height", content: "630" },
     { property: "og:type", content: "website" },
-    { property: "og:url", content: "https://playwriter.dev/liveline" },
+    { property: "og:url", content: "https://playwriter.dev" },
     { name: "twitter:card", content: "summary_large_image" },
     { name: "twitter:title", content: title },
     { name: "twitter:description", content: description },
@@ -56,7 +56,7 @@ const tocItems = [
   { label: "Security", href: "#security" },
 ];
 
-export default function LivelinePage() {
+export default function IndexPage() {
   return (
     <EditorialPage toc={tocItems} logo="playwriter">
 
@@ -67,7 +67,7 @@ export default function LivelinePage() {
         <A href="https://github.com/remorses/playwriter">Star on GitHub</A>.
       </P>
 
-      <div className="ll-bleed" style={{ display: "flex", justifyContent: "center" }}>
+      <div className="bleed" style={{ display: "flex", justifyContent: "center" }}>
         <img
           src="/screenshot@2x.png"
           alt="Playwriter controlling Chrome with accessibility labels overlay"

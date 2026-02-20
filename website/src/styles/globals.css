@@ -6,6 +6,7 @@
 @plugin "@tailwindcss/typography";
 
 :root {
+    /* ===== shadcn/ui tokens ===== */
     --background: oklch(1 0 0);
     --foreground: oklch(0.141 0.005 285.823);
     --card: oklch(1 0 0);
@@ -40,9 +41,90 @@
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.871 0.006 286.286);
 
+    /* ===== Editorial design tokens ===== */
+    --font-primary: "Inter var", "Inter", system-ui, -apple-system,
+      BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-secondary: "Newsreader", Georgia, "Times New Roman", serif;
+    --font-code: "JetBrainsMono NF Mono", "JetBrains Mono", "SF Mono",
+      "SFMono-Regular", "Consolas", "Liberation Mono", Menlo, Courier, monospace;
+
+    /* Bleed: code blocks & images extend beyond prose column.
+       44px = 8px div padding-left + 36px line-number width */
+    --bleed: 44px;
+
+    /* Spacing scale */
+    --spacing-xxs: 0.5rem;
+    --spacing-xs: 1rem;
+    --spacing-sm: 1.5rem;
+    --spacing-md: 2rem;
+    --spacing-lg: 2.5rem;
+    --spacing-xl: 3rem;
+    --spacing-xxl: 3.5rem;
+
+    /* Timing */
+    --duration-snappy: 220ms;
+    --ease-snappy: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+    --duration-swift: 800ms;
+    --ease-swift: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    --duration-smooth: 300ms;
+    --ease-smooth: cubic-bezier(0.19, 1, 0.22, 1);
+
+    /* Colors — near-black, not pure black */
+    --text-primary: rgb(17, 17, 17);
+    --text-secondary: rgba(0, 0, 0, 0.4);
+    --text-tertiary: rgba(0, 0, 0, 0.25);
+    --text-muted: rgba(0, 0, 0, 0.5);
+    --text-hover: rgba(0, 0, 0, 0.7);
+    --bg: #fff;
+    --page-border: #e3e3e3;
+    --divider: rgb(242, 242, 242);
+    --code-bg: rgba(0, 0, 0, 0.02);
+    --code-line-nr: rgba(0, 0, 0, 0.3);
+    --selection-bg: rgba(0, 0, 0, 0.08);
+
+    /* Button / back button */
+    --btn-bg: #fff;
+    --btn-shadow: rgba(0, 0, 0, 0.08) 0px 2px 8px,
+      rgba(0, 0, 0, 0.04) 0px 4px 16px,
+      rgba(0, 0, 0, 0.06) 0px 0px 0px 1px inset;
+
+    /* Link accent color (renamed from --accent to avoid shadcn conflict) */
+    --link-accent: #0969da;
+
+    /* P3 accent colors (renamed from --primary/--secondary to avoid shadcn conflict) */
+    --brand-primary: #3e9fff;
+    --brand-secondary: #f09637;
+
+    /* Overlay / glass */
+    --overlay-filter: blur(1rem);
+    --overlay-bg: hsla(0, 0%, 100%, 0.8);
+    --overlay-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04),
+      0 1.625rem 3.375rem rgba(0, 0, 0, 0.04),
+      0 1rem 2rem rgba(0, 0, 0, 0.03),
+      0 0.625rem 1rem rgba(0, 0, 0, 0.024),
+      0 0.3125rem 0.5rem rgba(0, 0, 0, 0.02),
+      0 0.125rem 0.25rem rgba(0, 0, 0, 0.016),
+      0 0 0.125rem rgba(0, 0, 0, 0.01);
+
+    /* Header fade gradient stops (white) */
+    --fade-0: rgb(255, 255, 255);
+    --fade-1: rgba(255, 255, 255, 0.737);
+    --fade-2: rgba(255, 255, 255, 0.541);
+    --fade-3: rgba(255, 255, 255, 0.382);
+    --fade-4: rgba(255, 255, 255, 0.278);
+    --fade-5: rgba(255, 255, 255, 0.194);
+    --fade-6: rgba(255, 255, 255, 0.126);
+    --fade-7: rgba(255, 255, 255, 0.075);
+    --fade-8: rgba(255, 255, 255, 0.042);
+    --fade-9: rgba(255, 255, 255, 0.021);
+    --fade-10: rgba(255, 255, 255, 0.008);
+    --fade-11: rgba(255, 255, 255, 0.002);
+    --fade-12: rgba(255, 255, 255, 0);
+
     /* Dark mode overrides — uses prefers-color-scheme media query
        via @custom-variant dark above */
     @variant dark {
+        /* shadcn/ui dark */
         --background: oklch(0.21 0.006 285.885);
         --foreground: oklch(0.985 0 0);
         --card: oklch(0.21 0.006 285.885);
@@ -75,6 +157,60 @@
         --sidebar-accent-foreground: oklch(0.871 0.006 286.286);
         --sidebar-border: oklch(0.274 0.006 286.033);
         --sidebar-ring: oklch(0.442 0.017 285.786);
+
+        /* Editorial dark */
+        --text-primary: rgba(255, 255, 255, 0.9);
+        --text-secondary: rgba(255, 255, 255, 0.45);
+        --text-tertiary: rgba(255, 255, 255, 0.25);
+        --text-muted: rgba(255, 255, 255, 0.35);
+        --text-hover: rgba(255, 255, 255, 0.7);
+        --bg: rgb(17, 17, 17);
+        --page-border: rgba(255, 255, 255, 0.1);
+        --divider: rgba(255, 255, 255, 0.06);
+        --code-bg: rgba(255, 255, 255, 0.05);
+        --code-line-nr: rgba(255, 255, 255, 0.3);
+        --selection-bg: rgba(255, 255, 255, 0.1);
+
+        --btn-bg: rgb(30, 30, 30);
+        --btn-shadow: rgba(255, 255, 255, 0.05) 0px 2px 8px,
+          rgba(255, 255, 255, 0.02) 0px 4px 16px,
+          rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
+
+        --link-accent: #58a6ff;
+        --brand-primary: #60a5fa;
+        --brand-secondary: #f5a623;
+
+        --overlay-bg: hsla(0, 0%, 7%, 0.8);
+        --overlay-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
+          0 1.625rem 3.375rem rgba(0, 0, 0, 0.3),
+          0 1rem 2rem rgba(0, 0, 0, 0.2),
+          0 0.625rem 1rem rgba(0, 0, 0, 0.15),
+          0 0.3125rem 0.5rem rgba(0, 0, 0, 0.1),
+          0 0.125rem 0.25rem rgba(0, 0, 0, 0.08),
+          0 0 0.125rem rgba(0, 0, 0, 0.05);
+
+        /* Header fade gradient stops (dark) */
+        --fade-0: rgb(17, 17, 17);
+        --fade-1: rgba(17, 17, 17, 0.737);
+        --fade-2: rgba(17, 17, 17, 0.541);
+        --fade-3: rgba(17, 17, 17, 0.382);
+        --fade-4: rgba(17, 17, 17, 0.278);
+        --fade-5: rgba(17, 17, 17, 0.194);
+        --fade-6: rgba(17, 17, 17, 0.126);
+        --fade-7: rgba(17, 17, 17, 0.075);
+        --fade-8: rgba(17, 17, 17, 0.042);
+        --fade-9: rgba(17, 17, 17, 0.021);
+        --fade-10: rgba(17, 17, 17, 0.008);
+        --fade-11: rgba(17, 17, 17, 0.002);
+        --fade-12: rgba(17, 17, 17, 0);
+    }
+}
+
+/* P3 wide-gamut accent colors */
+@supports (color: color(display-p3 1 1 1)) {
+    :root {
+        --brand-primary: color(display-p3 0.243137 0.623529 1 / 1);
+        --brand-secondary: color(display-p3 0.941176 0.588235 0.215686 / 1);
     }
 }
 

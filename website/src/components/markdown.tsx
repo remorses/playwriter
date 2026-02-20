@@ -1,9 +1,9 @@
 /*
- * Editorial markdown components for the liveline-style pages.
- * Extracted from liveline.tsx so page files are content-only.
+ * Editorial markdown components.
  *
- * All components use CSS variables from liveline.css (--ll-*).
- * Import liveline.css and liveline-prism.css in the page file.
+ * All components use CSS variables from globals.css (no prefix).
+ * Conflicting names with shadcn: --brand-primary, --brand-secondary,
+ * --link-accent, --page-border.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -88,22 +88,22 @@ export function TableOfContents({
             lineHeight: "20px",
             letterSpacing: "-0.09px",
             padding: "4px 0",
-            color: "var(--ll-text-primary)",
-            fontFamily: "var(--ll-font-primary)",
+            color: "var(--text-primary)",
+            fontFamily: "var(--font-primary)",
             marginBottom: "8px",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = "var(--ll-text-hover)";
+            e.currentTarget.style.color = "var(--text-hover)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = "var(--ll-text-primary)";
+            e.currentTarget.style.color = "var(--text-primary)";
           }}
         >
           {logo ?? "index"}
         </a>
         {items.map((item) => {
           const isActive = `#${activeId}` === item.href;
-          const defaultColor = isActive ? "var(--ll-text-primary)" : "var(--ll-text-secondary)";
+          const defaultColor = isActive ? "var(--text-primary)" : "var(--text-secondary)";
           return (
             <a
               key={item.href}
@@ -116,12 +116,12 @@ export function TableOfContents({
                 letterSpacing: "-0.04px",
                 padding: "5px 0",
                 color: defaultColor,
-                fontFamily: "var(--ll-font-primary)",
+                fontFamily: "var(--font-primary)",
                 transition: "color 0.15s ease",
               }}
               onMouseEnter={(e) => {
                 if (!isActive) {
-                  e.currentTarget.style.color = "var(--ll-text-hover)";
+                  e.currentTarget.style.color = "var(--text-hover)";
                 }
               }}
               onMouseLeave={(e) => {
@@ -147,17 +147,17 @@ export function BackButton() {
       href="/"
       className="fixed top-5 right-5 z-[100000] flex items-center justify-center w-10 h-10 rounded-full no-underline"
       style={{
-        background: "var(--ll-btn-bg)",
-        color: "var(--ll-text-secondary)",
-        boxShadow: "var(--ll-btn-shadow)",
+        background: "var(--btn-bg)",
+        color: "var(--text-secondary)",
+        boxShadow: "var(--btn-shadow)",
         transition: "color 0.15s, transform 0.15s",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.color = "var(--ll-text-hover)";
+        e.currentTarget.style.color = "var(--text-hover)";
         e.currentTarget.style.transform = "scale(1.05)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.color = "var(--ll-text-secondary)";
+        e.currentTarget.style.color = "var(--text-secondary)";
         e.currentTarget.style.transform = "scale(1)";
       }}
       onMouseDown={(e) => {
@@ -190,12 +190,12 @@ export function SectionHeading({ id, children }: { id: string; children: React.R
       id={id}
       className="scroll-mt-[5.25rem]"
       style={{
-        fontFamily: "var(--ll-font-primary)",
+        fontFamily: "var(--font-primary)",
         fontSize: "14px",
         fontWeight: 560,
         lineHeight: "20px",
         letterSpacing: "-0.09px",
-        color: "var(--ll-text-primary)",
+        color: "var(--text-primary)",
         margin: 0,
         padding: 0,
         display: "flex",
@@ -206,7 +206,7 @@ export function SectionHeading({ id, children }: { id: string; children: React.R
       }}
     >
       <span style={{ whiteSpace: "nowrap" }}>{children}</span>
-      <span style={{ flex: 1, height: "1px", background: "var(--ll-divider)" }} />
+      <span style={{ flex: 1, height: "1px", background: "var(--divider)" }} />
     </h1>
   );
 }
@@ -214,14 +214,14 @@ export function SectionHeading({ id, children }: { id: string; children: React.R
 export function P({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <p
-      className={`ll-prose ${className}`}
+      className={`editorial-prose ${className}`}
       style={{
-        fontFamily: "var(--ll-font-primary)",
+        fontFamily: "var(--font-primary)",
         fontSize: "14px",
         fontWeight: 475,
         lineHeight: "22px",
         letterSpacing: "-0.09px",
-        color: "var(--ll-text-primary)",
+        color: "var(--text-primary)",
         opacity: 0.82,
         margin: 0,
       }}
@@ -235,13 +235,13 @@ export function Caption({ children }: { children: React.ReactNode }) {
   return (
     <p
       style={{
-        fontFamily: "var(--ll-font-primary)",
+        fontFamily: "var(--font-primary)",
         fontSize: "12px",
         fontWeight: 475,
         textAlign: "center",
         lineHeight: "20px",
         letterSpacing: "-0.09px",
-        color: "var(--ll-text-secondary)",
+        color: "var(--text-secondary)",
         margin: 0,
       }}
     >
@@ -257,7 +257,7 @@ export function A({ href, children }: { href: string; children: React.ReactNode 
       target="_blank"
       rel="noopener noreferrer"
       style={{
-        color: "var(--ll-accent, #0969da)",
+        color: "var(--link-accent, #0969da)",
         fontWeight: 600,
         textDecoration: "none",
       }}
@@ -275,7 +275,7 @@ export function A({ href, children }: { href: string; children: React.ReactNode 
 
 export function Code({ children }: { children: React.ReactNode }) {
   return (
-    <code className="ll-inline-code">
+    <code className="inline-code">
       {children}
     </code>
   );
@@ -288,7 +288,7 @@ export function Code({ children }: { children: React.ReactNode }) {
 export function Divider() {
   return (
     <div style={{ padding: "24px 0", display: "flex", alignItems: "center" }}>
-      <div style={{ height: "1px", background: "var(--ll-divider)", flex: 1 }} />
+      <div style={{ height: "1px", background: "var(--divider)", flex: 1 }} />
     </div>
   );
 }
@@ -307,12 +307,12 @@ export function OL({ children }: { children: React.ReactNode }) {
     <ol
       className="m-0 pl-5"
       style={{
-        fontFamily: "var(--ll-font-primary)",
+        fontFamily: "var(--font-primary)",
         fontSize: "14px",
         fontWeight: 475,
         lineHeight: "20px",
         letterSpacing: "-0.09px",
-        color: "var(--ll-text-primary)",
+        color: "var(--text-primary)",
         listStyleType: "decimal",
       }}
     >
@@ -326,12 +326,12 @@ export function List({ children }: { children: React.ReactNode }) {
     <ul
       className="m-0 pl-5"
       style={{
-        fontFamily: "var(--ll-font-primary)",
+        fontFamily: "var(--font-primary)",
         fontSize: "14px",
         fontWeight: 475,
         lineHeight: "20px",
         letterSpacing: "-0.09px",
-        color: "var(--ll-text-primary)",
+        color: "var(--text-primary)",
         listStyleType: "disc",
       }}
     >
@@ -359,12 +359,12 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
   }, [children]);
 
   return (
-    <figure className="m-0 ll-bleed">
+    <figure className="m-0 bleed">
       <div className="relative">
         <pre
           className="overflow-x-auto"
           style={{
-            // background: "var(--ll-code-bg)",
+            // background: "var(--code-bg)",
             borderRadius: "8px",
             margin: 0,
             padding: 0,
@@ -374,12 +374,12 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
             className="flex"
             style={{
               padding: "12px 8px 8px",
-              fontFamily: "var(--ll-font-code)",
+              fontFamily: "var(--font-code)",
               fontSize: "12px",
               fontWeight: 400,
               lineHeight: "18px",
               letterSpacing: "normal",
-              color: "var(--ll-text-primary)",
+              color: "var(--text-primary)",
               tabSize: 2,
             }}
           >
@@ -387,7 +387,7 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
               className="select-none shrink-0"
               aria-hidden="true"
               style={{
-                color: "var(--ll-code-line-nr)",
+                color: "var(--code-line-nr)",
                 textAlign: "right",
                 paddingRight: "20px",
                 width: "36px",
@@ -422,7 +422,7 @@ export function CodeBlock({ children, lang = "jsx" }: { children: string; lang?:
 
 export function ChartPlaceholder({ height = 200, label }: { height?: number; label?: string }) {
   return (
-    <div className="ll-bleed">
+    <div className="bleed">
       <div
         className="w-full overflow-hidden relative"
         style={{
@@ -462,7 +462,7 @@ export function ChartPlaceholder({ height = 200, label }: { height?: number; lab
             style={{
               background: "rgba(59, 130, 246, 0.15)",
               color: "#3b82f6",
-              fontFamily: "var(--ll-font-code)",
+              fontFamily: "var(--font-code)",
               fontWeight: 475,
               fontSize: "11px",
             }}
@@ -493,10 +493,10 @@ export function ComparisonTable({
       {title && (
         <div
           style={{
-            fontFamily: "var(--ll-font-primary)",
+            fontFamily: "var(--font-primary)",
             fontSize: "11px",
             fontWeight: 400,
-            color: "var(--ll-text-muted)",
+            color: "var(--text-muted)",
             textTransform: "uppercase",
             letterSpacing: "0.02em",
             padding: "0 0 6px",
@@ -523,9 +523,9 @@ export function ComparisonTable({
                     padding: "4.8px 12px 4.8px 0",
                     fontSize: "11px",
                     fontWeight: 400,
-                    fontFamily: "var(--ll-font-primary)",
-                    color: "var(--ll-text-muted)",
-                    borderBottom: "1px solid var(--ll-border)",
+                    fontFamily: "var(--font-primary)",
+                    color: "var(--text-muted)",
+                    borderBottom: "1px solid var(--page-border)",
                   }}
                 >
                   {header}
@@ -543,9 +543,9 @@ export function ComparisonTable({
                     padding: "4.8px 12px 4.8px 0",
                     fontSize: "11px",
                     fontWeight: 500,
-                    fontFamily: "var(--ll-font-code)",
-                    color: "var(--ll-text-primary)",
-                    borderBottom: "1px solid var(--ll-border)",
+                    fontFamily: "var(--font-code)",
+                    color: "var(--text-primary)",
+                    borderBottom: "1px solid var(--page-border)",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -556,9 +556,9 @@ export function ComparisonTable({
                     padding: "4.8px 12px 4.8px 0",
                     fontSize: "11px",
                     fontWeight: 500,
-                    fontFamily: "var(--ll-font-code)",
-                    color: "var(--ll-text-primary)",
-                    borderBottom: "1px solid var(--ll-border)",
+                    fontFamily: "var(--font-code)",
+                    color: "var(--text-primary)",
+                    borderBottom: "1px solid var(--page-border)",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -569,9 +569,9 @@ export function ComparisonTable({
                     padding: "4.8px 12px 4.8px 0",
                     fontSize: "11px",
                     fontWeight: 500,
-                    fontFamily: "var(--ll-font-code)",
-                    color: "var(--ll-text-primary)",
-                    borderBottom: "1px solid var(--ll-border)",
+                    fontFamily: "var(--font-code)",
+                    color: "var(--text-primary)",
+                    borderBottom: "1px solid var(--page-border)",
                   }}
                 >
                   {us}
@@ -600,11 +600,11 @@ export function EditorialPage({
 }) {
   return (
     <div
-      className="liveline-page relative min-h-screen overflow-x-hidden"
+      className="editorial-page relative min-h-screen overflow-x-hidden"
       style={{
-        background: "var(--ll-bg)",
-        color: "var(--ll-text-primary)",
-        fontFamily: "var(--ll-font-primary)",
+        background: "var(--bg)",
+        color: "var(--text-primary)",
+        fontFamily: "var(--font-primary)",
         WebkitFontSmoothing: "antialiased",
         textRendering: "optimizeLegibility",
       }}
@@ -617,7 +617,7 @@ export function EditorialPage({
       >
         <div style={{ height: "80px" }} />
 
-        <article className="liveline-article flex flex-col gap-[32px]">
+        <article className="editorial-article flex flex-col gap-[32px]">
           {children}
         </article>
       </div>

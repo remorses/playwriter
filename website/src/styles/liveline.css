@@ -1,7 +1,7 @@
 /*
- * Liveline page styles - recreating benji.org's editorial design system.
+ * Editorial page styles.
  *
- * Key design decisions from the original:
+ * Key design decisions:
  * - Inter variable font at weight 460 (between normal and medium)
  * - Near-black text (#111) not pure black, with 40% opacity for secondary
  * - Narrow 550px content column for optimal reading
@@ -12,6 +12,10 @@
  * - Custom cubic-bezier easings with slight overshoot ("snappy", "swift")
  * - Fading header gradient pseudo-element
  * - Small font sizes (14px body) for editorial/compact aesthetic
+ *
+ * Design tokens are defined in globals.css :root (no prefix).
+ * Conflicting names with shadcn: --brand-primary, --brand-secondary,
+ * --link-accent, --page-border.
  */
 
 /* ========================================================================
@@ -29,165 +33,21 @@
 }
 
 /* ========================================================================
-   Design tokens
-   ======================================================================== */
-
-.liveline-page {
-  --ll-font-primary: "Inter var", "Inter", system-ui, -apple-system,
-    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --ll-font-secondary: "Newsreader", Georgia, "Times New Roman", serif;
-  --ll-font-code: "JetBrainsMono NF Mono", "JetBrains Mono", "SF Mono",
-    "SFMono-Regular", "Consolas", "Liberation Mono", Menlo, Courier, monospace;
-
-  /* Bleed: code blocks & images extend beyond prose column.
-     44px = 8px div padding-left + 36px line-number width (border-box, includes 20px paddingRight) */
-  --ll-bleed: 44px;
-
-  /* Spacing scale */
-  --ll-spacing-xxs: 0.5rem;
-  --ll-spacing-xs: 1rem;
-  --ll-spacing-sm: 1.5rem;
-  --ll-spacing-md: 2rem;
-  --ll-spacing-lg: 2.5rem;
-  --ll-spacing-xl: 3rem;
-  --ll-spacing-xxl: 3.5rem;
-
-  /* Timing */
-  --ll-duration-snappy: 220ms;
-  --ll-ease-snappy: cubic-bezier(0.175, 0.885, 0.32, 1.1);
-  --ll-duration-swift: 800ms;
-  --ll-ease-swift: cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  --ll-duration-smooth: 300ms;
-  --ll-ease-smooth: cubic-bezier(0.19, 1, 0.22, 1);
-
-  /* Colors - near-black, not pure black */
-  --ll-text-primary: rgb(17, 17, 17);
-  --ll-text-secondary: rgba(0, 0, 0, 0.4);
-  --ll-text-tertiary: rgba(0, 0, 0, 0.25);
-  --ll-text-muted: rgba(0, 0, 0, 0.5);
-  --ll-text-hover: rgba(0, 0, 0, 0.7);
-  --ll-bg: #fff;
-  --ll-border: #e3e3e3;
-  --ll-divider: rgb(242, 242, 242);
-  --ll-code-bg: rgba(0, 0, 0, 0.02);
-  --ll-code-line-nr: rgba(0, 0, 0, 0.3);
-  --ll-selection-bg: rgba(0, 0, 0, 0.08);
-
-  /* Button / back button */
-  --ll-btn-bg: #fff;
-  --ll-btn-shadow: rgba(0, 0, 0, 0.08) 0px 2px 8px,
-    rgba(0, 0, 0, 0.04) 0px 4px 16px,
-    rgba(0, 0, 0, 0.06) 0px 0px 0px 1px inset;
-
-  /* Link accent color */
-  --ll-accent: #0969da;
-
-  /* P3 accent colors (wider gamut) */
-  --ll-primary: #3e9fff;
-  --ll-secondary: #f09637;
-
-  /* Overlay / glass */
-  --ll-overlay-filter: blur(1rem);
-  --ll-overlay-bg: hsla(0, 0%, 100%, 0.8);
-  --ll-overlay-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04),
-    0 1.625rem 3.375rem rgba(0, 0, 0, 0.04),
-    0 1rem 2rem rgba(0, 0, 0, 0.03),
-    0 0.625rem 1rem rgba(0, 0, 0, 0.024),
-    0 0.3125rem 0.5rem rgba(0, 0, 0, 0.02),
-    0 0.125rem 0.25rem rgba(0, 0, 0, 0.016),
-    0 0 0.125rem rgba(0, 0, 0, 0.01);
-
-  /* Header fade gradient stops (white) */
-  --ll-fade-0: rgb(255, 255, 255);
-  --ll-fade-1: rgba(255, 255, 255, 0.737);
-  --ll-fade-2: rgba(255, 255, 255, 0.541);
-  --ll-fade-3: rgba(255, 255, 255, 0.382);
-  --ll-fade-4: rgba(255, 255, 255, 0.278);
-  --ll-fade-5: rgba(255, 255, 255, 0.194);
-  --ll-fade-6: rgba(255, 255, 255, 0.126);
-  --ll-fade-7: rgba(255, 255, 255, 0.075);
-  --ll-fade-8: rgba(255, 255, 255, 0.042);
-  --ll-fade-9: rgba(255, 255, 255, 0.021);
-  --ll-fade-10: rgba(255, 255, 255, 0.008);
-  --ll-fade-11: rgba(255, 255, 255, 0.002);
-  --ll-fade-12: rgba(255, 255, 255, 0);
-}
-
-/* Dark mode overrides — @variant dark works here because globals.css
-   imports this file via CSS @import (part of Tailwind compilation chain).
-   Must be nested inside a selector, not at the top level. */
-.liveline-page {
-  @variant dark {
-    --ll-text-primary: rgba(255, 255, 255, 0.9);
-    --ll-text-secondary: rgba(255, 255, 255, 0.45);
-    --ll-text-tertiary: rgba(255, 255, 255, 0.25);
-    --ll-text-muted: rgba(255, 255, 255, 0.35);
-    --ll-text-hover: rgba(255, 255, 255, 0.7);
-    --ll-bg: rgb(17, 17, 17);
-    --ll-border: rgba(255, 255, 255, 0.1);
-    --ll-divider: rgba(255, 255, 255, 0.06);
-    --ll-code-bg: rgba(255, 255, 255, 0.05);
-    --ll-code-line-nr: rgba(255, 255, 255, 0.3);
-    --ll-selection-bg: rgba(255, 255, 255, 0.1);
-
-    --ll-btn-bg: rgb(30, 30, 30);
-    --ll-btn-shadow: rgba(255, 255, 255, 0.05) 0px 2px 8px,
-      rgba(255, 255, 255, 0.02) 0px 4px 16px,
-      rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset;
-
-    --ll-accent: #58a6ff;
-    --ll-primary: #60a5fa;
-    --ll-secondary: #f5a623;
-
-    --ll-overlay-bg: hsla(0, 0%, 7%, 0.8);
-    --ll-overlay-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 1.625rem 3.375rem rgba(0, 0, 0, 0.3),
-      0 1rem 2rem rgba(0, 0, 0, 0.2),
-      0 0.625rem 1rem rgba(0, 0, 0, 0.15),
-      0 0.3125rem 0.5rem rgba(0, 0, 0, 0.1),
-      0 0.125rem 0.25rem rgba(0, 0, 0, 0.08),
-      0 0 0.125rem rgba(0, 0, 0, 0.05);
-
-    /* Header fade gradient stops (dark) */
-    --ll-fade-0: rgb(17, 17, 17);
-    --ll-fade-1: rgba(17, 17, 17, 0.737);
-    --ll-fade-2: rgba(17, 17, 17, 0.541);
-    --ll-fade-3: rgba(17, 17, 17, 0.382);
-    --ll-fade-4: rgba(17, 17, 17, 0.278);
-    --ll-fade-5: rgba(17, 17, 17, 0.194);
-    --ll-fade-6: rgba(17, 17, 17, 0.126);
-    --ll-fade-7: rgba(17, 17, 17, 0.075);
-    --ll-fade-8: rgba(17, 17, 17, 0.042);
-    --ll-fade-9: rgba(17, 17, 17, 0.021);
-    --ll-fade-10: rgba(17, 17, 17, 0.008);
-    --ll-fade-11: rgba(17, 17, 17, 0.002);
-    --ll-fade-12: rgba(17, 17, 17, 0);
-  }
-}
-
-@supports (color: color(display-p3 1 1 1)) {
-  .liveline-page {
-    --ll-primary: color(display-p3 0.243137 0.623529 1 / 1);
-    --ll-secondary: color(display-p3 0.941176 0.588235 0.215686 / 1);
-  }
-}
-
-/* ========================================================================
    Selection
    ======================================================================== */
 
-.liveline-page {
+.editorial-page {
   font-optical-sizing: auto;
   font-feature-settings: "liga" 1, "calt" 1;
 }
 
-.liveline-page ::selection {
-  background: var(--ll-selection-bg);
+.editorial-page ::selection {
+  background: var(--selection-bg);
 }
 
 /* Bold and inline code inside prose punch through the reduced opacity */
-.ll-prose strong,
-.ll-prose .ll-inline-code {
+.editorial-prose strong,
+.editorial-prose .inline-code {
   opacity: calc(1 / 0.82);
 }
 
@@ -195,7 +55,7 @@
    Stagger-in animation
    ======================================================================== */
 
-@keyframes ll-stagger-in {
+@keyframes stagger-in {
   0% {
     opacity: 0;
     transform: translateY(8px);
@@ -207,19 +67,19 @@
 }
 
 /*
-.liveline-article > * {
-  animation: ll-stagger-in 0.5s ease both;
+.editorial-article > * {
+  animation: stagger-in 0.5s ease both;
 }
 
-.liveline-article > :nth-child(1) { animation-delay: 0s; }
-.liveline-article > :nth-child(2) { animation-delay: 0.05s; }
-.liveline-article > :nth-child(3) { animation-delay: 0.1s; }
-.liveline-article > :nth-child(4) { animation-delay: 0.15s; }
-.liveline-article > :nth-child(5) { animation-delay: 0.2s; }
-.liveline-article > :nth-child(6) { animation-delay: 0.25s; }
-.liveline-article > :nth-child(7) { animation-delay: 0.3s; }
-.liveline-article > :nth-child(8) { animation-delay: 0.35s; }
-.liveline-article > :nth-child(n + 9) { animation-delay: 0.4s; }
+.editorial-article > :nth-child(1) { animation-delay: 0s; }
+.editorial-article > :nth-child(2) { animation-delay: 0.05s; }
+.editorial-article > :nth-child(3) { animation-delay: 0.1s; }
+.editorial-article > :nth-child(4) { animation-delay: 0.15s; }
+.editorial-article > :nth-child(5) { animation-delay: 0.2s; }
+.editorial-article > :nth-child(6) { animation-delay: 0.25s; }
+.editorial-article > :nth-child(7) { animation-delay: 0.3s; }
+.editorial-article > :nth-child(8) { animation-delay: 0.35s; }
+.editorial-article > :nth-child(n + 9) { animation-delay: 0.4s; }
 */
 
 /* ========================================================================
@@ -228,13 +88,13 @@
    36px = 8px div padding-left + 28px line-number span (border-box, includes padding).
    ======================================================================== */
 
-.ll-bleed {
-  margin-left: calc(-1 * var(--ll-bleed));
-  margin-right: calc(-1 * var(--ll-bleed));
+.bleed {
+  margin-left: calc(-1 * var(--bleed));
+  margin-right: calc(-1 * var(--bleed));
 }
 
 @media (max-width: 650px) {
-  .ll-bleed {
+  .bleed {
     margin-left: 0;
     margin-right: 0;
   }
@@ -242,14 +102,14 @@
 
 /* ========================================================================
    Inline code — subtle background pill via ::before pseudo-element.
-   Matches benji.org/liveline: position relative, ::before with absolute
-   inset creates a pill that extends slightly above/below the text.
+   Position relative, ::before with absolute inset creates a pill that
+   extends slightly above/below the text.
    ======================================================================== */
 
-.ll-inline-code {
+.inline-code {
   position: relative;
   display: inline-block;
-  font-family: var(--ll-font-code);
+  font-family: var(--font-code);
   font-size: 12.6px;
   font-weight: 500;
   line-height: 12.6px;
@@ -258,7 +118,7 @@
   color: rgba(0, 0, 0, 0.75);
 }
 
-.ll-inline-code::before {
+.inline-code::before {
   content: "";
   position: absolute;
   inset: -1.26px 0;
@@ -267,13 +127,13 @@
   z-index: -1;
 }
 
-.ll-inline-code {
+.inline-code {
   @variant dark {
     color: rgba(255, 255, 255, 0.75);
   }
 }
 
-.ll-inline-code::before {
+.inline-code::before {
   @variant dark {
     background: rgba(255, 255, 255, 0.08);
   }
@@ -283,7 +143,7 @@
    Header fade gradient
    ======================================================================== */
 
-.liveline-page::before {
+.editorial-page::before {
   content: "";
   pointer-events: none;
   z-index: 9;
@@ -293,18 +153,18 @@
   right: 0;
   height: 8rem;
   background: linear-gradient(
-    var(--ll-fade-0) 0px,
-    var(--ll-fade-1) 19%,
-    var(--ll-fade-2) 34%,
-    var(--ll-fade-3) 47%,
-    var(--ll-fade-4) 56.5%,
-    var(--ll-fade-5) 65%,
-    var(--ll-fade-6) 73%,
-    var(--ll-fade-7) 80.2%,
-    var(--ll-fade-8) 86.1%,
-    var(--ll-fade-9) 91%,
-    var(--ll-fade-10) 95.2%,
-    var(--ll-fade-11) 98.2%,
-    var(--ll-fade-12) 100%
+    var(--fade-0) 0px,
+    var(--fade-1) 19%,
+    var(--fade-2) 34%,
+    var(--fade-3) 47%,
+    var(--fade-4) 56.5%,
+    var(--fade-5) 65%,
+    var(--fade-6) 73%,
+    var(--fade-7) 80.2%,
+    var(--fade-8) 86.1%,
+    var(--fade-9) 91%,
+    var(--fade-10) 95.2%,
+    var(--fade-11) 98.2%,
+    var(--fade-12) 100%
   );
 }

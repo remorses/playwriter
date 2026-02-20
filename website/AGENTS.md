@@ -38,8 +38,8 @@ Dark mode uses `prefers-color-scheme` media query, configured in `globals.css`:
 ```css
 /* globals.css — this is the Tailwind entry point */
 @import "tailwindcss";
-@import "./liveline.css";       /* these get Tailwind processing */
-@import "./liveline-prism.css";
+@import "./liveline.css";       /* editorial page styles (class names, layout) */
+@import "./liveline-prism.css"; /* prism syntax highlighting */
 @custom-variant dark (@media (prefers-color-scheme: dark));
 ```
 

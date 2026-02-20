@@ -17,7 +17,7 @@ pre[class*="language-"] {
   color: #1e293b;
   background: none;
   text-shadow: none;
-  font-family: var(--ll-font-code, "SF Mono", "SFMono-Regular", "Consolas",
+  font-family: var(--font-code, "SF Mono", "SFMono-Regular", "Consolas",
     "Liberation Mono", Menlo, Courier, monospace);
   font-size: 12px;
   font-weight: 500;
