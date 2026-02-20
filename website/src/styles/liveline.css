@@ -197,6 +197,7 @@
   }
 }
 
+/*
 .liveline-article > * {
   animation: ll-stagger-in 0.5s ease both;
 }
@@ -210,6 +211,7 @@
 .liveline-article > :nth-child(7) { animation-delay: 0.3s; }
 .liveline-article > :nth-child(8) { animation-delay: 0.35s; }
 .liveline-article > :nth-child(n + 9) { animation-delay: 0.4s; }
+*/
 
 /* ========================================================================
    Bleed — code blocks and images extend beyond the prose column so that
