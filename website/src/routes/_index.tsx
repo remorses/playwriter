@@ -45,6 +45,7 @@ export const meta: MetaFunction = () => {
 const tocItems = [
   { label: "Getting started", href: "#getting-started" },
   { label: "How it works", href: "#how-it-works" },
+  { label: "Collaboration", href: "#collaboration" },
   { label: "Snapshots", href: "#snapshots" },
   { label: "Visual labels", href: "#visual-labels" },
   { label: "Sessions", href: "#sessions" },
@@ -61,9 +62,10 @@ export default function IndexPage() {
     <EditorialPage toc={tocItems} logo="playwriter">
 
       <P>
-        Playwriter lets you <strong>control your Chrome browser</strong> with the full
-        Playwright API. A Chrome extension, a local relay, and a CLI. No new
-        browser windows, no Chrome flags, no context bloat.{" "}
+        You want your agent to control the browser. <strong>Your actual
+        Chrome</strong> {" \u2014 "} with logins, extensions, and cookies already
+        there. Not a headless instance that gets blocked by every captcha
+        and bot detector.{" "}
         <A href="https://github.com/remorses/playwriter">Star on GitHub</A>.
       </P>
 
@@ -71,26 +73,36 @@ export default function IndexPage() {
         <img
           src="/screenshot@2x.png"
           alt="Playwriter controlling Chrome with accessibility labels overlay"
-          style={{ display: "block", maxWidth: "100%" }}
+          width={1280}
+          height={800}
+          style={{ display: "block", maxWidth: "100%", height: "auto" }}
         />
       </div>
       <Caption>
-        Your existing Chrome session. Extensions, logins, cookies &mdash; all there.
+        Your existing Chrome session. Extensions, logins, cookies {" \u2014 "} all there.
       </Caption>
 
       <P>
-        Every browser automation MCP I tried either spawns a new Chrome
-        instance or forces you into a limited set of predefined tools. Playwriter
-        does neither. It connects to the browser you already have open,
-        exposes the <strong>full Playwright API</strong> through a single{" "}
-        <Code>execute</Code> tool, and gets out of the way.
-        One tool. Any Playwright code. No wrappers.
+        Other browser MCPs either <strong>spawn a fresh Chrome</strong> or give agents
+        a fixed set of tools. New Chrome means no logins, no extensions,
+        instant bot detection, and double the memory. Fixed tools mean the
+        agent can{"'"}t profile performance, can{"'"}t set breakpoints,
+        can{"'"}t intercept network requests {" \u2014 "} it can only do what someone
+        decided to expose.
+      </P>
+
+      <P>
+        Playwriter gives agents the <strong>full Playwright API</strong> through
+        a single <Code>execute</Code> tool. One tool, any Playwright code,
+        no wrappers. Low context usage because there{"'"}s no schema bloat
+        from dozens of tool definitions. And it runs in your existing browser,
+        so <strong>nothing extra gets spawned</strong>.
       </P>
 
       <Section id="getting-started" title="Getting started">
 
         <P>
-          <strong>Three steps.</strong> Extension, icon click, then you&apos;re automating.
+          <strong>Three steps</strong> and your agent is browsing.
         </P>
 
         <OL>
@@ -130,12 +142,12 @@ export default function IndexPage() {
       <Section id="how-it-works" title="How it works">
 
         <P>
-          The extension uses <Code>chrome.debugger</Code> to
-          attach to tabs where you clicked the icon. It opens a WebSocket
-          connection to a local relay server. The CLI (or MCP, or your own
-          Playwright script) connects to the same relay. <strong>CDP commands flow
-          through</strong>; the extension forwards them to Chrome and sends responses
-          back.
+          Click the extension icon on a tab {" \u2014 "} it attaches via{" "}
+          <Code>chrome.debugger</Code> and opens a WebSocket to a
+          local relay. Your agent (CLI, MCP, or a Playwright script) connects
+          to the same relay. <strong>CDP commands flow through</strong>; the extension
+          forwards them to Chrome and sends responses back. No Chrome restart,
+          no flags, no special setup.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -156,10 +168,27 @@ export default function IndexPage() {
         `}</CodeBlock>
 
         <P>
-          <strong>No Chrome restart required.</strong> No <Code>--remote-debugging-port</Code>{" "}
-          flags. The extension handles the CDP attachment transparently, and
-          the relay <strong>multiplexes sessions</strong> so multiple agents or CLI instances
-          can work with the same browser simultaneously.
+          The relay <strong>multiplexes sessions</strong>, so multiple agents
+          or CLI instances can work with the same browser at the same time.
+        </P>
+
+      </Section>
+
+      <Section id="collaboration" title="Collaboration">
+
+        <P>
+          Because the agent works in <strong>your browser</strong>, you can
+          collaborate. You see everything it does in real time. When it hits
+          a captcha, <strong>you solve it</strong>. When a consent wall
+          appears, you click through it. When the agent gets stuck, you
+          disable the extension on that tab, fix things manually, re-enable
+          it, and the agent picks up where it left off.
+        </P>
+
+        <P>
+          You{"'"}re not watching a remote screen or reading logs after the
+          fact. You{"'"}re <strong>sharing a browser</strong> {" \u2014 "} the
+          agent does the repetitive work, you step in when it needs a human.
         </P>
 
       </Section>
@@ -167,10 +196,11 @@ export default function IndexPage() {
       <Section id="snapshots" title="Accessibility snapshots">
 
         <P>
-          The core feedback loop is <strong>observe &rarr; act &rarr; observe</strong>.
-          Accessibility snapshots are the primary way to read page state. They return
-          the full interactive element tree as text, with Playwright locators attached
-          to every element.
+          Your agent needs to <strong>see the page</strong> before it can act.
+          Accessibility snapshots return every interactive element as text,
+          with Playwright locators attached. <strong>5{"\u2013"}20KB instead of
+          100KB+</strong> for a screenshot {" \u2014 "} cheaper, faster, and the
+          agent can parse them without vision.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -200,24 +230,22 @@ export default function IndexPage() {
         `}</CodeBlock>
 
         <P>
-          Snapshots are <strong>text</strong>. They cost a fraction of what screenshots cost in
-          tokens. Use them as your <strong>primary debugging tool</strong>. Only reach for
-          screenshots when spatial layout matters &mdash; grids, dashboards, maps.
+          Use snapshots as the <strong>primary way to read pages</strong>. Only
+          reach for screenshots when spatial layout matters {" \u2014 "} grids,
+          dashboards, maps.
         </P>
-
-        <Caption>
-          Accessibility tree as text. 5&ndash;20KB vs 100KB+ for screenshots.
-        </Caption>
 
       </Section>
 
       <Section id="visual-labels" title="Visual labels">
 
         <P>
-          For pages where spatial layout matters,{" "}
+          When the agent needs to understand <strong>where things are on
+          screen</strong>,{" "}
           <Code>screenshotWithAccessibilityLabels</Code> overlays{" "}
-          <strong>Vimium-style labels</strong> on every interactive element. Take a screenshot,
-          read the labels, click by reference.
+          <strong>Vimium-style labels</strong> on every interactive element.
+          The agent sees the screenshot, reads the labels, and clicks by
+          reference.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -244,10 +272,10 @@ export default function IndexPage() {
       <Section id="sessions" title="Sessions">
 
         <P>
-          Each session runs in an <strong>isolated sandbox</strong> with its own{" "}
-          <Code>state</Code> object. Variables, pages, listeners
-          persist between calls within a session. Different sessions get
-          different state. Browser tabs are shared.
+          Run <strong>multiple agents at once</strong> without them stepping on
+          each other. Each session is an isolated sandbox with its own{" "}
+          <Code>state</Code> object. Variables, pages, and listeners
+          persist between calls. Browser tabs are shared, but state is not.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -280,9 +308,10 @@ export default function IndexPage() {
       <Section id="debugger-and-editor" title="Debugger & editor">
 
         <P>
-          <strong>Full Chrome DevTools Protocol access.</strong> Set breakpoints, step through
-          code, inspect variables at runtime. Live-edit page scripts and CSS
-          without reloading.
+          Things no other browser MCP can do. <strong>Set breakpoints</strong>,
+          step through code, inspect variables at runtime. <strong>Live-edit
+          page scripts and CSS</strong> without reloading. Full Chrome DevTools
+          Protocol access, not a watered-down subset.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -304,7 +333,7 @@ export default function IndexPage() {
         </P>
 
         <Caption>
-          Breakpoints, stepping, variable inspection &mdash; from the CLI.
+          Breakpoints, stepping, variable inspection {" \u2014 "} from the CLI.
         </Caption>
 
       </Section>
@@ -312,9 +341,10 @@ export default function IndexPage() {
       <Section id="network-interception" title="Network interception">
 
         <P>
-          <strong>Intercept requests and responses</strong> to reverse-engineer APIs, scrape
-          data, or debug network issues. Store captured data in{" "}
-          <Code>state</Code> and analyze across calls.
+          Let the agent <strong>watch network traffic</strong> to
+          reverse-engineer APIs, scrape data behind JavaScript rendering,
+          or debug failing requests. Captured data lives in{" "}
+          <Code>state</Code> and persists across calls.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -330,10 +360,10 @@ export default function IndexPage() {
         `}</CodeBlock>
 
         <P>
-          This is <strong>faster than scrolling through DOM</strong>. Capture the real API
-          calls, inspect their schemas, and replay them with different
-          parameters. Works for pagination, authenticated endpoints, and
-          anything behind JavaScript rendering.
+          <strong>Faster than scraping the DOM.</strong> The agent captures the
+          real API calls, inspects their schemas, and replays them with
+          different parameters. Works for pagination, authenticated endpoints,
+          and anything behind client-side rendering.
         </P>
 
       </Section>
@@ -341,10 +371,10 @@ export default function IndexPage() {
       <Section id="screen-recording" title="Screen recording">
 
         <P>
-          <strong>Record the active tab as video</strong> using{" "}
-          <Code>chrome.tabCapture</Code>. The recording runs in
-          the extension context, so it <strong>survives page navigation</strong>. Video is saved
-          as MP4.
+          Have the agent <strong>record what it{"'"}s doing</strong> as MP4
+          video. The recording uses <Code>chrome.tabCapture</Code> and
+          runs in the extension context, so it <strong>survives page
+          navigation</strong>.
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -368,7 +398,7 @@ export default function IndexPage() {
         </P>
 
         <Caption>
-          Native tab capture. 30&ndash;60fps. Survives navigation.
+          Native tab capture. 30{"\u2013"}60fps. Survives navigation.
         </Caption>
 
       </Section>
@@ -376,7 +406,7 @@ export default function IndexPage() {
       <Section id="comparison" title="Comparison">
 
         <P>
-          How Playwriter compares to other browser automation approaches.
+          Why use this over the alternatives.
         </P>
 
         <ComparisonTable
@@ -422,12 +452,11 @@ export default function IndexPage() {
       <Section id="remote-access" title="Remote access">
 
         <P>
-          Control Chrome on <strong>any machine from anywhere</strong> over the internet.
-          The relay runs on the host alongside Chrome.
-          A{" "}
+          Control Chrome on a <strong>remote machine</strong> {" \u2014 "} a headless
+          Mac mini, a cloud VM, a devcontainer. A{" "}
           <A href="https://traforo.dev">traforo</A>{" "}
-          tunnel exposes it through Cloudflare, giving you a <strong>secure public URL</strong>.
-          No VPN, no firewall rules, no port forwarding.
+          tunnel exposes the relay through Cloudflare. <strong>No VPN, no
+          firewall rules, no port forwarding.</strong>
         </P>
 
         <CodeBlock lang="bash">{dedent`
@@ -441,9 +470,9 @@ export default function IndexPage() {
         `}</CodeBlock>
 
         <P>
-          Also works on a <strong>LAN without tunnels</strong> &mdash; just set{" "}
+          Also works on a <strong>LAN without tunnels</strong> {" \u2014 "} just set{" "}
           <Code>PLAYWRITER_HOST=192.168.1.10</Code>. Works for MCP
-          too &mdash; set <Code>PLAYWRITER_HOST</Code> and{" "}
+          too {" \u2014 "} set <Code>PLAYWRITER_HOST</Code> and{" "}
           <Code>PLAYWRITER_TOKEN</Code> in your MCP client env config.
           Use cases: headless Mac mini, remote user support,
           multi-machine automation, dev from a VM or devcontainer.
@@ -454,28 +483,27 @@ export default function IndexPage() {
       <Section id="security" title="Security">
 
         <P>
-          Playwriter is <strong>local by default</strong>. The relay runs on{" "}
-          <Code>localhost:19988</Code> and only accepts connections
-          from the extension. There&apos;s no remote server, no account, no
-          telemetry.
+          Everything runs <strong>on your machine</strong>. The relay binds
+          to <Code>localhost:19988</Code> and only accepts connections
+          from the extension. No remote server, no account, no telemetry.
         </P>
 
         <List>
           <Li>
-            <strong>Local only</strong> &mdash; WebSocket server binds to
+            <strong>Local only</strong> {" \u2014 "} WebSocket server binds to
             localhost. Nothing leaves your machine.
           </Li>
           <Li>
-            <strong>Origin validation</strong> &mdash; only the Playwriter
+            <strong>Origin validation</strong> {" \u2014 "} only the Playwriter
             extension origin is accepted. Browsers cannot spoof the Origin
             header, so malicious websites cannot connect.
           </Li>
           <Li>
-            <strong>Explicit consent</strong> &mdash; only tabs where you
+            <strong>Explicit consent</strong> {" \u2014 "} only tabs where you
             clicked the extension icon are controlled. No background access.
           </Li>
           <Li>
-            <strong>Visible automation</strong> &mdash; Chrome shows an
+            <strong>Visible automation</strong> {" \u2014 "} Chrome shows an
             automation banner on controlled tabs.
           </Li>
         </List>

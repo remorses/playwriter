@@ -49,6 +49,16 @@ If you create a new CSS file that needs `@variant dark`, add it as a CSS `@impor
 
 For files with many dark mode selectors (like prism syntax colors), define CSS variables in `:root { @variant dark { ... } }` and reference them in selectors. This avoids repeating `@variant dark` in every rule.
 
+## Images must not cause layout shift
+
+Every `<img>` must have explicit `width` and `height` attributes matching the intrinsic pixel dimensions of the source file. Add `style={{ height: "auto" }}` to keep it responsive. This lets the browser reserve the correct aspect ratio space before the image loads, preventing layout shift.
+
+```tsx
+<img src="/photo.png" width={1280} height={800} style={{ maxWidth: "100%", height: "auto" }} />
+```
+
+Use `sips -g pixelWidth -g pixelHeight <file>` to get dimensions on macOS.
+
 ## No localStorage dark mode toggle
 
 There is no JS-based `.dark` class toggle. Do not add inline scripts to toggle `.dark` on `<html>`. The site follows the OS preference only via `prefers-color-scheme`.
