@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.68
+
+### Tests
+
+- **Use a more realistic complex page in aria label screenshot test**: Replaced `example.com` with `old.reddit.com` in the optimized label rendering integration test to keep stronger real-world DOM coverage while preserving faster runtime.
+
+## 0.0.67
+
+### Tests
+
+- **Speed up aria label screenshot integration test**: Reduced the `should show aria ref labels on real pages and save screenshots` runtime by loading fewer external pages, removing `networkidle` waits, and parallelizing initial page loading.
+
 ## 0.0.66
 
 ### Internal

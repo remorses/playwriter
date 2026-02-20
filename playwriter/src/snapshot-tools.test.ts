@@ -747,9 +747,8 @@ describe('Snapshot & Screenshot Tests', () => {
         }
 
         const testPages = [
+            { name: 'old-reddit', url: 'https://old.reddit.com/' },
             { name: 'hacker-news', url: 'https://news.ycombinator.com/' },
-            { name: 'google', url: 'https://www.google.com/' },
-            { name: 'github', url: 'https://github.com/' },
         ]
 
         const loadPageWithRetries = async ({ name, url }: { name: string; url: string }) => {
@@ -761,8 +760,7 @@ describe('Snapshot & Screenshot Tests', () => {
             for (let attempt = 1; attempt <= attempts; attempt += 1) {
                 try {
                     console.log(`[labels] opening ${name}: ${url} (attempt ${attempt}/${attempts})`)
-                    await page.goto(url, { waitUntil: 'domcontentloaded' })
-                    await page.waitForLoadState('networkidle', { timeout: 15000 })
+                    await page.goto(url, { waitUntil: 'load' })
                     console.log(`[labels] loaded ${name}: ${page.url()}`)
                     return { name, url, page }
                 } catch (error) {
@@ -774,10 +772,9 @@ describe('Snapshot & Screenshot Tests', () => {
             throw new Error(`Failed to load ${name} after ${attempts} attempts`, { cause: lastError instanceof Error ? lastError : undefined })
         }
 
-        const pages: Array<{ name: string; url: string; page: Page }> = []
-        for (const testPage of testPages) {
-            pages.push(await loadPageWithRetries(testPage))
-        }
+        const pages = await Promise.all(testPages.map((testPage) => {
+            return loadPageWithRetries(testPage)
+        }))
 
         for (const { page } of pages) {
             await page.bringToFront()
@@ -824,9 +821,7 @@ describe('Snapshot & Screenshot Tests', () => {
                 60000
             )
             console.log(`${name}: ${labelCount} labels shown`)
-            if (name !== 'google') {
-              expect(labelCount).toBeGreaterThan(0)
-            }
+            expect(labelCount).toBeGreaterThan(0)
 
             console.log(`[labels] screenshot ${name}`)
             const screenshot = await withTimeout(
