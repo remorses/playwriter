@@ -104,12 +104,14 @@ export async function startPlayWriterCDPRelayServer({
   port = 19988,
   host = '127.0.0.1',
   token,
+  allowRemoteExtension = false,
   logger,
   cdpLogger,
 }: {
   port?: number
   host?: string
   token?: string
+  allowRemoteExtension?: boolean
   logger?: { log(...args: any[]): void; error(...args: any[]): void }
   cdpLogger?: CdpLogger
 } = {}): Promise<RelayServer> {
@@ -1031,8 +1033,22 @@ export async function startPlayWriterCDPRelayServer({
     const isLocalhost = remoteAddress === '127.0.0.1' || remoteAddress === '::1'
 
     if (!isLocalhost) {
-      logger?.log(pc.red(`Rejecting /extension WebSocket from remote IP: ${remoteAddress}`))
-      return c.text('Forbidden - Extension must be local', 403)
+      if (!allowRemoteExtension) {
+        logger?.log(pc.red(`Rejecting /extension WebSocket from remote IP: ${remoteAddress}`))
+        return c.text('Forbidden - Extension must be local', 403)
+      }
+
+      if (!token) {
+        logger?.log(pc.red('Rejecting /extension WebSocket: remote extension requires token mode'))
+        return c.text('Forbidden - Remote extension requires token', 403)
+      }
+
+      const url = new URL(c.req.url, 'http://localhost')
+      const providedToken = url.searchParams.get('token')
+      if (providedToken !== token) {
+        logger?.log(pc.red(`Rejecting /extension WebSocket from remote IP ${remoteAddress}: invalid or missing token`))
+        return c.text('Unauthorized', 401)
+      }
     }
 
     // 2. Origin Validation: Prevent browser-based attacks (CSRF).

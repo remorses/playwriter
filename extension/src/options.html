@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playwriter Options</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #111832;
+        --text: #e7ecff;
+        --muted: #9fb0e8;
+        --border: #2a396f;
+        --accent: #79a8ff;
+        --success: #5ad8a6;
+        --error: #ff8f8f;
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f4f7ff;
+          --panel: #ffffff;
+          --text: #0f1a3b;
+          --muted: #50608f;
+          --border: #c9d7ff;
+          --accent: #245fff;
+          --success: #147d56;
+          --error: #b42318;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        padding: 32px 20px;
+      }
+
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.35rem;
+      }
+
+      p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      label {
+        font-weight: 600;
+      }
+
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text);
+      }
+
+      .actions {
+        margin-top: 20px;
+        display: flex;
+        gap: 10px;
+      }
+
+      button {
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        padding: 10px 14px;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      button[type='submit'] {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      #status[data-kind='success'] {
+        color: var(--success);
+      }
+
+      #status[data-kind='error'] {
+        color: var(--error);
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Playwriter Relay Settings</h1>
+      <p>
+        Configure where the extension should connect. This is useful when your relay is not on
+        <code>127.0.0.1:19988</code> (for example, Tailscale or custom port setups).
+      </p>
+      <p>
+        If using a remote relay, start it with <code>playwriter serve --allow-remote-extension --token ...</code>
+        and set the same token here.
+      </p>
+
+      <form id="relay-form">
+        <div class="row">
+          <label for="relay-host">Relay host</label>
+          <input id="relay-host" name="relay-host" placeholder="127.0.0.1" required />
+        </div>
+
+        <div class="row">
+          <label for="relay-port">Relay port</label>
+          <input id="relay-port" name="relay-port" type="number" min="1" max="65535" required />
+        </div>
+
+        <div class="row">
+          <label for="relay-token">Relay token</label>
+          <input id="relay-token" name="relay-token" type="password" placeholder="optional" />
+        </div>
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button type="button" id="reset-defaults">Reset defaults</button>
+        </div>
+      </form>
+
+      <p id="status" data-kind="success"></p>
+    </main>
+
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

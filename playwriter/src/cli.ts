@@ -422,8 +422,9 @@ cli
   .command('serve', 'Start the CDP relay server for remote MCP connections')
   .option('--host <host>', 'Host to bind to', { default: '0.0.0.0' })
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
+  .option('--allow-remote-extension', 'Allow extension connections from non-localhost IPs (requires token)')
   .option('--replace', 'Kill existing server if running')
-  .action(async (options: { host: string; token?: string; replace?: boolean }) => {
+  .action(async (options: { host: string; token?: string; allowRemoteExtension?: boolean; replace?: boolean }) => {
     const token = options.token || process.env.PLAYWRITER_TOKEN
     const isPublicHost = options.host === '0.0.0.0' || options.host === '::'
     if (isPublicHost && !token) {
@@ -485,6 +486,7 @@ cli
       port: RELAY_PORT,
       host: options.host,
       token,
+      allowRemoteExtension: Boolean(options.allowRemoteExtension),
       logger,
     })
 
@@ -492,6 +494,7 @@ cli
     console.log(`  Host: ${options.host}`)
     console.log(`  Port: ${RELAY_PORT}`)
     console.log(`  Token: ${token ? '(configured)' : '(none)'}`)
+    console.log(`  Remote extension: ${options.allowRemoteExtension ? 'enabled' : 'disabled'}`)
     console.log(`  Logs: ${logger.logFilePath}`)
     console.log(`  CDP Logs: ${LOG_CDP_FILE_PATH}`)
     console.log('')
