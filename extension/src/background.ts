@@ -1,4 +1,3 @@
-declare const process: { env: { PLAYWRITER_PORT: string } }
 // Injected by vite at build time from playwriter/package.json version.
 // CLI/MCP compare this against their own version to warn when the extension is outdated.
 declare const __PLAYWRITER_VERSION__: string
@@ -16,9 +15,7 @@ import {
   handleCancelRecording,
   cleanupRecordingForTab,
 } from './recording'
-
-const RELAY_HOST = '127.0.0.1'
-const RELAY_PORT = Number(process.env.PLAYWRITER_PORT) || 19988
+import { getRelayConfig, RELAY_CONFIG_STORAGE_KEY } from './relay-config'
 
 type NavigatorWithUaData = Navigator & {
   userAgentData?: {
@@ -179,14 +176,15 @@ class ConnectionManager {
   }
 
   private async connect(): Promise<void> {
-    logger.debug(`Waiting for server at http://${RELAY_HOST}:${RELAY_PORT}...`)
+    const relayConfig = await getRelayConfig()
+    logger.debug(`Waiting for server at http://${relayConfig.host}:${relayConfig.port}...`)
 
     // Retry for up to 5 seconds with 1s intervals, then give up (maintain loop will retry later)
     // Using fewer attempts since maintainLoop retries every 3 seconds anyway
     const maxAttempts = 5
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        await fetch(`http://${RELAY_HOST}:${RELAY_PORT}`, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+        await fetch(`http://${relayConfig.host}:${relayConfig.port}`, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
         logger.debug('Server is available')
         break
       } catch {
@@ -199,7 +197,10 @@ class ConnectionManager {
     }
 
     const identity = await getExtensionIdentity()
-    const relayUrl = new URL(`ws://${RELAY_HOST}:${RELAY_PORT}/extension`)
+    const relayUrl = new URL(`ws://${relayConfig.host}:${relayConfig.port}/extension`)
+    if (relayConfig.token) {
+      relayUrl.searchParams.set('token', relayConfig.token)
+    }
     if (identity.browser) {
       relayUrl.searchParams.set('browser', identity.browser)
     }
@@ -484,7 +485,12 @@ class ConnectionManager {
       // Slot is free when: no extension connected, OR connected but no active tabs.
       if (store.getState().connectionState === 'extension-replaced') {
         try {
-          const response = await fetch(`http://${RELAY_HOST}:${RELAY_PORT}/extension/status`, { method: 'GET', signal: AbortSignal.timeout(2000) })
+          const relayConfig = await getRelayConfig()
+          const statusUrl = new URL(`http://${relayConfig.host}:${relayConfig.port}/extension/status`)
+          if (relayConfig.token) {
+            statusUrl.searchParams.set('token', relayConfig.token)
+          }
+          const response = await fetch(statusUrl.toString(), { method: 'GET', signal: AbortSignal.timeout(2000) })
           const data = await response.json() as { connected: boolean; activeTargets: number }
           const slotAvailable = !data.connected || data.activeTargets === 0
           if (slotAvailable) {
@@ -1472,7 +1478,20 @@ store.subscribe((state, prevState) => {
   }
 })
 
-logger.debug(`Using relay host: ${RELAY_HOST}, port: ${RELAY_PORT}`)
+void (async () => {
+  const relayConfig = await getRelayConfig()
+  logger.debug(`Using relay host: ${relayConfig.host}, port: ${relayConfig.port}`)
+})()
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes[RELAY_CONFIG_STORAGE_KEY]) {
+    return
+  }
+
+  logger.debug('Relay config changed, reconnecting extension WebSocket')
+  connectionManager.ws?.close(1000, 'Relay config changed')
+  store.setState({ connectionState: 'idle', errorText: undefined })
+})
 
 // Memory monitoring - helps debug service worker termination issues
 let lastMemoryUsage = 0
