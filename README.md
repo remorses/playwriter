@@ -7,9 +7,19 @@
     </picture>
     <br/>
     <br/>
-    <p>Control your browser via Playwright API. Uses extension + CLI. No context bloat.</p>
+    <p>Let your agents control your own Chrome, via CLI or MCP. Your logins, extensions, cookies — already there.</p>
     <br/>
 </div>
+
+Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly flagged by bot detectors, double the memory. Playwriter connects to **your running browser** instead. One Chrome extension, full Playwright API, everything you're already logged into.
+
+| | Playwright MCP | Playwriter |
+|---|---|---|
+| Browser | Spawns new Chrome | **Uses your Chrome** |
+| Extensions | None | Your existing ones |
+| Login state | Fresh | Already logged in |
+| Bot detection | Always detected | Can bypass (disconnect extension) |
+| Collaboration | Separate window | Same browser as user |
 
 ## Installation
 
@@ -23,7 +33,7 @@
    playwriter -s 1 -e "await page.goto('https://example.com')"
    ```
 
-4. Add skill to your agent:
+4. Install the skill so your agent knows how to use Playwriter:
    ```bash
    npx -y skills add remorses/playwriter
    ```
@@ -120,16 +130,6 @@ await page.locator('aria-ref=e5').click()
 Color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs.
 
 ## Comparison
-
-### vs Playwright MCP
-
-| | Playwright MCP | Playwriter |
-|---|---|---|
-| Browser | Spawns new Chrome | Uses your Chrome |
-| Extensions | None | Your existing ones |
-| Login state | Fresh | Already logged in |
-| Bot detection | Always detected | Can bypass (disconnect extension) |
-| Collaboration | Separate window | Same browser as user |
 
 ### vs BrowserMCP
 
