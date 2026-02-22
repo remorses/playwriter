@@ -32,7 +32,6 @@ type ExtensionIdentity = {
   id: string
 }
 
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -118,19 +117,21 @@ function flushRecordingChunkBuffer(ws: WebSocket): void {
   if (recordingChunkBuffer.length === 0) {
     return
   }
-  
+
   logger.debug(`Flushing ${recordingChunkBuffer.length} buffered recording chunks`)
-  
+
   while (recordingChunkBuffer.length > 0) {
     const chunk = recordingChunkBuffer.shift()!
     const { tabId, data, final } = chunk
-    
+
     // Send metadata message first
-    ws.send(JSON.stringify({
-      method: 'recordingData',
-      params: { tabId, final },
-    }))
-    
+    ws.send(
+      JSON.stringify({
+        method: 'recordingData',
+        params: { tabId, final },
+      }),
+    )
+
     // Then send binary data if not final
     if (data && !final) {
       const buffer = new Uint8Array(data)
@@ -168,7 +169,7 @@ class ConnectionManager {
         setTimeout(() => {
           reject(new Error('Connection timeout (global)'))
         }, GLOBAL_TIMEOUT_MS)
-      })
+      }),
     ])
 
     try {
@@ -232,10 +233,10 @@ class ConnectionManager {
         settled = true
         logger.debug('WebSocket connected')
         clearTimeout(timeout)
-        
+
         // Flush any buffered recording chunks now that WebSocket is ready
         flushRecordingChunkBuffer(socket)
-        
+
         resolve()
       }
 
@@ -417,7 +418,9 @@ class ConnectionManager {
       const mem = performance.memory
       if (mem) {
         const formatMB = (b: number) => (b / 1024 / 1024).toFixed(2) + 'MB'
-        logger.warn(`DISCONNECT MEMORY: used=${formatMB(mem.usedJSHeapSize)} total=${formatMB(mem.totalJSHeapSize)} limit=${formatMB(mem.jsHeapSizeLimit)}`)
+        logger.warn(
+          `DISCONNECT MEMORY: used=${formatMB(mem.usedJSHeapSize)} total=${formatMB(mem.totalJSHeapSize)} limit=${formatMB(mem.jsHeapSizeLimit)}`,
+        )
       }
     } catch {}
     logger.warn(`DISCONNECT: WS closed code=${code} reason=${reason || 'none'} stack=${getCallStack()}`)
@@ -484,12 +487,21 @@ class ConnectionManager {
       // Slot is free when: no extension connected, OR connected but no active tabs.
       if (store.getState().connectionState === 'extension-replaced') {
         try {
-          const response = await fetch(`http://${RELAY_HOST}:${RELAY_PORT}/extension/status`, { method: 'GET', signal: AbortSignal.timeout(2000) })
-          const data = await response.json() as { connected: boolean; activeTargets: number }
+          const response = await fetch(`http://${RELAY_HOST}:${RELAY_PORT}/extension/status`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(2000),
+          })
+          const data = (await response.json()) as { connected: boolean; activeTargets: number }
           const slotAvailable = !data.connected || data.activeTargets === 0
           if (slotAvailable) {
             store.setState({ connectionState: 'idle', errorText: undefined })
-            logger.debug('Extension slot is free (connected:', data.connected, 'activeTargets:', data.activeTargets, '), cleared error state')
+            logger.debug(
+              'Extension slot is free (connected:',
+              data.connected,
+              'activeTargets:',
+              data.activeTargets,
+              '), cleared error state',
+            )
           } else {
             logger.debug('Extension slot still taken (activeTargets:', data.activeTargets, '), will retry...')
           }
@@ -500,26 +512,26 @@ class ConnectionManager {
         continue
       }
 
-    // Ensure tabs are in 'connecting' state when WS is not connected
-    // This handles edge cases where handleClose wasn't called or state got out of sync
-    const currentTabs = store.getState().tabs
-    const hasConnectedTabs = Array.from(currentTabs.values()).some((t) => t.state === 'connected')
-    if (hasConnectedTabs) {
-      store.setState((state) => {
-        const newTabs = new Map(state.tabs)
-        for (const [tabId, tab] of newTabs) {
-          if (tab.state === 'connected') {
-            newTabs.set(tabId, { ...tab, state: 'connecting' })
+      // Ensure tabs are in 'connecting' state when WS is not connected
+      // This handles edge cases where handleClose wasn't called or state got out of sync
+      const currentTabs = store.getState().tabs
+      const hasConnectedTabs = Array.from(currentTabs.values()).some((t) => t.state === 'connected')
+      if (hasConnectedTabs) {
+        store.setState((state) => {
+          const newTabs = new Map(state.tabs)
+          for (const [tabId, tab] of newTabs) {
+            if (tab.state === 'connected') {
+              newTabs.set(tabId, { ...tab, state: 'connecting' })
+            }
           }
-        }
-        return { tabs: newTabs }
-      })
-    }
+          return { tabs: newTabs }
+        })
+      }
 
-    // Try to connect silently in background - don't show 'connecting' badge
-    // Individual tab states will show 'connecting' when user explicitly clicks
-    try {
-      await this.ensureConnection()
+      // Try to connect silently in background - don't show 'connecting' badge
+      // Individual tab states will show 'connecting' when user explicitly clicks
+      try {
+        await this.ensureConnection()
         store.setState({ connectionState: 'connected' })
 
         // Re-attach any tabs that were in 'connecting' state (from a previous disconnect)
@@ -777,8 +789,7 @@ function getTabByTargetId(targetId: string): { tabId: number; tab: TabInfo } | u
 }
 
 function emitChildDetachesForTab(tabId: number): void {
-  const childEntries = Array.from(childSessions.entries())
-    .filter(([_, parentTab]) => parentTab.tabId === tabId)
+  const childEntries = Array.from(childSessions.entries()).filter(([_, parentTab]) => parentTab.tabId === tabId)
 
   childEntries.forEach(([childSessionId, parentTab]) => {
     const childDetachParams: Protocol.Target.DetachedFromTargetEvent = parentTab.targetId
@@ -843,13 +854,15 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
       .filter(([_, info]) => info.state === 'connected')
       .map(([tabId]) => tabId)
 
-    await Promise.all(connectedTabIds.map(async (tabId) => {
-      try {
-        await chrome.debugger.sendCommand({ tabId }, 'Target.setAutoAttach', params)
-      } catch (error) {
-        logger.debug('Failed to set auto-attach for tab:', tabId, error)
-      }
-    }))
+    await Promise.all(
+      connectedTabIds.map(async (tabId) => {
+        try {
+          await chrome.debugger.sendCommand({ tabId }, 'Target.setAutoAttach', params)
+        } catch (error) {
+          logger.debug('Failed to set auto-attach for tab:', tabId, error)
+        }
+      }),
+    )
 
     return {}
   }
@@ -1007,7 +1020,10 @@ type AttachTabResult = {
   sessionId: string
 }
 
-async function attachTab(tabId: number, { skipAttachedEvent = false }: { skipAttachedEvent?: boolean } = {}): Promise<AttachTabResult> {
+async function attachTab(
+  tabId: number,
+  { skipAttachedEvent = false }: { skipAttachedEvent?: boolean } = {},
+): Promise<AttachTabResult> {
   const debuggee = { tabId }
   let debuggerAttached = false
 
@@ -1045,7 +1061,12 @@ async function attachTab(tabId: number, { skipAttachedEvent = false }: { skipAtt
 
     // Log error if URL is empty - this causes Playwright to create broken pages
     if (!targetInfo.url || targetInfo.url === '' || targetInfo.url === ':') {
-      logger.error('WARNING: Target.attachedToTarget will be sent with empty URL! tabId:', tabId, 'targetInfo:', JSON.stringify(targetInfo))
+      logger.error(
+        'WARNING: Target.attachedToTarget will be sent with empty URL! tabId:',
+        tabId,
+        'targetInfo:',
+        JSON.stringify(targetInfo),
+      )
     }
 
     const attachOrder = nextSessionId
@@ -1076,7 +1097,18 @@ async function attachTab(tabId: number, { skipAttachedEvent = false }: { skipAtt
       })
     }
 
-    logger.debug('Tab attached successfully:', tabId, 'sessionId:', sessionId, 'targetId:', targetInfo.targetId, 'url:', targetInfo.url, 'skipAttachedEvent:', skipAttachedEvent)
+    logger.debug(
+      'Tab attached successfully:',
+      tabId,
+      'sessionId:',
+      sessionId,
+      'targetId:',
+      targetInfo.targetId,
+      'url:',
+      targetInfo.url,
+      'skipAttachedEvent:',
+      skipAttachedEvent,
+    )
     return { targetInfo, sessionId }
   } catch (error) {
     // Clean up debugger if we attached but failed later
@@ -1126,8 +1158,6 @@ function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
     })
   }
 }
-
-
 
 async function connectTab(tabId: number): Promise<void> {
   try {
@@ -1264,7 +1294,13 @@ function isRestrictedUrl(url: string | undefined): boolean {
     return !OUR_EXTENSION_IDS.includes(extensionId)
   }
 
-  const restrictedPrefixes = ['chrome://', 'devtools://', 'edge://', 'https://chrome.google.com/', 'https://chromewebstore.google.com/']
+  const restrictedPrefixes = [
+    'chrome://',
+    'devtools://',
+    'edge://',
+    'https://chrome.google.com/',
+    'https://chromewebstore.google.com/',
+  ]
   return restrictedPrefixes.some((prefix) => url.startsWith(prefix))
 }
 
@@ -1434,14 +1470,17 @@ async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
 resetDebugger()
 connectionManager.maintainLoop()
 
-chrome.contextMenus.remove('playwriter-pin-element').catch(() => {}).finally(() => {
-  chrome.contextMenus.create({
-    id: 'playwriter-pin-element',
-    title: 'Copy Playwriter Element Reference',
-    contexts: ['all'],
-    visible: false,
+chrome.contextMenus
+  .remove('playwriter-pin-element')
+  .catch(() => {})
+  .finally(() => {
+    chrome.contextMenus.create({
+      id: 'playwriter-pin-element',
+      title: 'Copy Playwriter Element Reference',
+      contexts: ['all'],
+      visible: false,
+    })
   })
-})
 
 function updateContextMenuVisibility(): void {
   const { currentTabId, tabs } = store.getState()
@@ -1501,11 +1540,17 @@ function checkMemory(): void {
 
     // Log if memory is high or growing rapidly
     if (used > MEMORY_CRITICAL_THRESHOLD) {
-      logger.error(`MEMORY CRITICAL: used=${formatMB(used)} total=${formatMB(total)} limit=${formatMB(limit)} growth=${formatMB(memoryDelta)} rate=${formatMB(growthRate)}/s`)
+      logger.error(
+        `MEMORY CRITICAL: used=${formatMB(used)} total=${formatMB(total)} limit=${formatMB(limit)} growth=${formatMB(memoryDelta)} rate=${formatMB(growthRate)}/s`,
+      )
     } else if (used > MEMORY_WARNING_THRESHOLD) {
-      logger.warn(`MEMORY WARNING: used=${formatMB(used)} total=${formatMB(total)} limit=${formatMB(limit)} growth=${formatMB(memoryDelta)} rate=${formatMB(growthRate)}/s`)
+      logger.warn(
+        `MEMORY WARNING: used=${formatMB(used)} total=${formatMB(total)} limit=${formatMB(limit)} growth=${formatMB(memoryDelta)} rate=${formatMB(growthRate)}/s`,
+      )
     } else if (memoryDelta > MEMORY_GROWTH_THRESHOLD && timeDelta < 60000) {
-      logger.warn(`MEMORY SPIKE: grew ${formatMB(memoryDelta)} in ${(timeDelta / 1000).toFixed(1)}s (used=${formatMB(used)})`)
+      logger.warn(
+        `MEMORY SPIKE: grew ${formatMB(memoryDelta)} in ${(timeDelta / 1000).toFixed(1)}s (used=${formatMB(used)})`,
+      )
     }
 
     lastMemoryUsage = used
@@ -1528,31 +1573,33 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   void updateIcons()
   if (changeInfo.groupId !== undefined) {
     // Queue tab group operations to serialize with syncTabGroup and disconnectEverything
-    tabGroupQueue = tabGroupQueue.then(async () => {
-      // Query for playwriter group by title - no stale cached ID
-      const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
-      const groupId = existingGroups[0]?.id
-      if (groupId === undefined) {
-        return
-      }
-      const { tabs } = store.getState()
-      if (changeInfo.groupId === groupId) {
-        if (!tabs.has(tabId) && !isRestrictedUrl(tab.url)) {
-          logger.debug('Tab manually added to playwriter group:', tabId)
-          await connectTab(tabId)
-        }
-      } else if (tabs.has(tabId)) {
-        const tabInfo = tabs.get(tabId)
-        if (tabInfo?.state === 'connecting') {
-          logger.debug('Tab removed from group while connecting, ignoring:', tabId)
+    tabGroupQueue = tabGroupQueue
+      .then(async () => {
+        // Query for playwriter group by title - no stale cached ID
+        const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
+        const groupId = existingGroups[0]?.id
+        if (groupId === undefined) {
           return
         }
-        logger.debug('Tab manually removed from playwriter group:', tabId)
-        await disconnectTab(tabId)
-      }
-    }).catch((e) => {
-      logger.debug('onTabUpdated handler error:', e)
-    })
+        const { tabs } = store.getState()
+        if (changeInfo.groupId === groupId) {
+          if (!tabs.has(tabId) && !isRestrictedUrl(tab.url)) {
+            logger.debug('Tab manually added to playwriter group:', tabId)
+            await connectTab(tabId)
+          }
+        } else if (tabs.has(tabId)) {
+          const tabInfo = tabs.get(tabId)
+          if (tabInfo?.state === 'connecting') {
+            logger.debug('Tab removed from group while connecting, ignoring:', tabId)
+            return
+          }
+          logger.debug('Tab manually removed from playwriter group:', tabId)
+          await disconnectTab(tabId)
+        }
+      })
+      .catch((e) => {
+        logger.debug('onTabUpdated handler error:', e)
+      })
   }
 })
 
@@ -1634,14 +1681,14 @@ void updateIcons()
 chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
   if (message.action === 'recordingChunk') {
     const { tabId, data, final } = message
-    
+
     if (connectionManager.ws?.readyState === WebSocket.OPEN) {
       // Send metadata message first
       sendMessage({
         method: 'recordingData',
         params: { tabId, final },
       })
-      
+
       // Then send binary data if not final
       if (data && !final) {
         const buffer = new Uint8Array(data)
@@ -1653,13 +1700,13 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
       logger.debug(`Buffering recording chunk for tab ${tabId} (WebSocket not ready)`)
       recordingChunkBuffer.push({ tabId, data, final })
     }
-    
+
     return false // Sync response, no need to keep channel open
   }
-  
+
   if (message.action === 'recordingCancelled') {
     const { tabId } = message
-    
+
     getActiveRecordings().delete(tabId)
     store.setState((state) => {
       const newTabs = new Map(state.tabs)
@@ -1669,16 +1716,16 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
       }
       return { tabs: newTabs }
     })
-    
+
     if (connectionManager.ws?.readyState === WebSocket.OPEN) {
       sendMessage({
         method: 'recordingCancelled',
         params: { tabId },
       })
     }
-    
+
     return false
   }
-  
+
   return false
 })

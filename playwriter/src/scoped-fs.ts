@@ -150,7 +150,9 @@ export class ScopedFS {
     // Verify the real path is also within allowed directories (handles symlinks)
     const realStr = real.toString()
     if (!this.isPathAllowed(realStr)) {
-      const error = new Error(`EPERM: operation not permitted, realpath escapes allowed directories`) as NodeJS.ErrnoException
+      const error = new Error(
+        `EPERM: operation not permitted, realpath escapes allowed directories`,
+      ) as NodeJS.ErrnoException
       error.code = 'EPERM'
       throw error
     }
@@ -168,7 +170,9 @@ export class ScopedFS {
     const linkDir = path.dirname(resolvedLink)
     const resolvedTarget = path.resolve(linkDir, target.toString())
     if (!this.isPathAllowed(resolvedTarget)) {
-      const error = new Error(`EPERM: operation not permitted, symlink target outside allowed directories`) as NodeJS.ErrnoException
+      const error = new Error(
+        `EPERM: operation not permitted, symlink target outside allowed directories`,
+      ) as NodeJS.ErrnoException
       error.code = 'EPERM'
       throw error
     }
@@ -368,7 +372,9 @@ export class ScopedFS {
         const real = await fs.promises.realpath(resolved, options)
         const realStr = real.toString()
         if (!self.isPathAllowed(realStr)) {
-          const error = new Error(`EPERM: operation not permitted, realpath escapes allowed directories`) as NodeJS.ErrnoException
+          const error = new Error(
+            `EPERM: operation not permitted, realpath escapes allowed directories`,
+          ) as NodeJS.ErrnoException
           error.code = 'EPERM'
           throw error
         }

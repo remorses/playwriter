@@ -12,13 +12,12 @@
  */
 
 /* Base code style - override Prism defaults */
-code[class*="language-"],
-pre[class*="language-"] {
+code[class*='language-'],
+pre[class*='language-'] {
   color: #1e293b;
   background: none;
   text-shadow: none;
-  font-family: var(--font-code, "SF Mono", "SFMono-Regular", "Consolas",
-    "Liberation Mono", Menlo, Courier, monospace);
+  font-family: var(--font-code, 'SF Mono', 'SFMono-Regular', 'Consolas', 'Liberation Mono', Menlo, Courier, monospace);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.02em;
@@ -163,8 +162,8 @@ pre[class*="language-"] {
   }
 }
 
-code[class*="language-"],
-pre[class*="language-"] {
+code[class*='language-'],
+pre[class*='language-'] {
   @variant dark {
     color: var(--prism-fg);
   }

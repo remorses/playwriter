@@ -41,7 +41,10 @@ function createTruncatingReplacer({ maxStringLength }: { maxStringLength: number
   }
 }
 
-export function createCdpLogger({ logFilePath, maxStringLength }: { logFilePath?: string; maxStringLength?: number } = {}): CdpLogger {
+export function createCdpLogger({
+  logFilePath,
+  maxStringLength,
+}: { logFilePath?: string; maxStringLength?: number } = {}): CdpLogger {
   const resolvedLogFilePath = logFilePath || LOG_CDP_FILE_PATH
   const logDir = path.dirname(resolvedLogFilePath)
   if (!fs.existsSync(logDir)) {

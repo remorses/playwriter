@@ -148,9 +148,7 @@ export async function getListeningPidsForPort({ port }: { port: number }): Promi
     throw new Error(`Invalid port: ${port}`)
   }
 
-  return os.platform() === 'win32'
-    ? await getPidsForPortWindows(port)
-    : await getPidsForPortUnix(port)
+  return os.platform() === 'win32' ? await getPidsForPortWindows(port) : await getPidsForPortUnix(port)
 }
 
 function toError(value: unknown): Error {

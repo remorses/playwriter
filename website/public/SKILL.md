@@ -14,6 +14,7 @@ If using npx or bunx always use @latest for the first session command. so we are
 ### Session management
 
 Each session runs in an **isolated sandbox** with its own `state` object. Use sessions to:
+
 - Keep state separate between different tasks or agents
 - Persist data (pages, variables) across multiple execute calls
 - Avoid interference when multiple agents use playwriter simultaneously
@@ -213,30 +214,33 @@ Each step is a separate execute call. Notice how every action is followed by a s
 
 ```js
 // 1. Open page and observe — always print URL first
-state.myPage = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
-await state.myPage.goto('https://framer.com/projects/my-project', { waitUntil: 'domcontentloaded' });
-console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage }).then(console.log)
+state.myPage = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+await state.myPage.goto('https://framer.com/projects/my-project', { waitUntil: 'domcontentloaded' })
+console.log('URL:', state.myPage.url())
+await snapshot({ page: state.myPage }).then(console.log)
 ```
 
 ```js
 // 2. Act: open command palette → observe result
-await state.myPage.keyboard.press('Meta+k');
-console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage, search: /dialog|Search/ }).then(console.log)
+await state.myPage.keyboard.press('Meta+k')
+console.log('URL:', state.myPage.url())
+await snapshot({ page: state.myPage, search: /dialog|Search/ }).then(console.log)
 // If dialog didn't appear, observe again before retrying
 ```
 
 ```js
 // 3. Act: type search query → observe result
-await state.myPage.keyboard.type('MCP');
-console.log('URL:', state.myPage.url()); await snapshot({ page: state.myPage, search: /MCP/ }).then(console.log)
+await state.myPage.keyboard.type('MCP')
+console.log('URL:', state.myPage.url())
+await snapshot({ page: state.myPage, search: /MCP/ }).then(console.log)
 ```
 
 ```js
 // 4. Act: press Enter → observe plugin loaded
-await state.myPage.keyboard.press('Enter');
-await state.myPage.waitForTimeout(1000);
-console.log('URL:', state.myPage.url());
-const frame = state.myPage.frames().find(f => f.url().includes('plugins.framercdn.com'));
+await state.myPage.keyboard.press('Enter')
+await state.myPage.waitForTimeout(1000)
+console.log('URL:', state.myPage.url())
+const frame = state.myPage.frames().find((f) => f.url().includes('plugins.framercdn.com'))
 await snapshot({ page: state.myPage, frame: frame || undefined }).then(console.log)
 // If frame not found, wait and observe again — plugin may still be loading
 ```
@@ -251,7 +255,11 @@ Snapshots are the primary feedback mechanism, but some actions have side effects
   ```
 - **Network requests** — verify API calls were made after a form submit or button click:
   ```js
-  page.on('response', async res => { if (res.url().includes('/api/')) { console.log(res.status(), res.url()); } });
+  page.on('response', async (res) => {
+    if (res.url().includes('/api/')) {
+      console.log(res.status(), res.url())
+    }
+  })
   ```
 - **URL changes** — confirm navigation happened:
   ```js
@@ -263,28 +271,31 @@ Snapshots are the primary feedback mechanism, but some actions have side effects
 
 **1. Not verifying actions succeeded**
 Always check page state after important actions (form submissions, uploads, typing). Your mental model can diverge from actual browser state:
+
 ```js
-await page.keyboard.type('my text');
+await page.keyboard.type('my text')
 await snapshot({ page, search: /my text/ })
 // If verifying visual layout specifically, use screenshotWithAccessibilityLabels instead
 ```
 
 **2. Assuming paste/upload worked**
 Clipboard paste (`Meta+v`) can silently fail. For file uploads, prefer file input:
+
 ```js
 // Reliable: use file input
-const fileInput = page.locator('input[type="file"]').first();
-await fileInput.setInputFiles('/path/to/image.png');
+const fileInput = page.locator('input[type="file"]').first()
+await fileInput.setInputFiles('/path/to/image.png')
 
 // Unreliable: clipboard paste may silently fail, need to focus textarea first for example
-await page.keyboard.press('Meta+v');  // always verify with screenshot!
+await page.keyboard.press('Meta+v') // always verify with screenshot!
 ```
 
 **3. Using stale locators from old snapshots**
 Locators (especially ones with `>> nth=`) can change when the page updates. Always get a fresh snapshot before clicking:
+
 ```js
 // BAD: using ref from minutes ago
-await page.locator('[id="old-id"]').click();  // element may have changed
+await page.locator('[id="old-id"]').click() // element may have changed
 
 // GOOD: get fresh snapshot, then immediately use locators from it
 await snapshot({ page, showDiffSinceLastCall: true })
@@ -293,28 +304,31 @@ await snapshot({ page, showDiffSinceLastCall: true })
 
 **4. Wrong assumptions about current page/element**
 Before destructive actions (delete, submit), verify you're targeting the right thing:
+
 ```js
 // Before deleting, verify it's the right item
-await screenshotWithAccessibilityLabels({ page });
+await screenshotWithAccessibilityLabels({ page })
 // READ the screenshot to confirm, THEN proceed with delete
 ```
 
 **5. Text concatenation without line breaks**
 `keyboard.type()` doesn't insert newlines from `\n` in strings. Use `keyboard.press('Enter')`:
+
 ```js
 // BAD: newlines in string don't create line breaks
-await page.keyboard.type('Line 1\nLine 2');  // becomes "Line 1Line 2"
+await page.keyboard.type('Line 1\nLine 2') // becomes "Line 1Line 2"
 
 // GOOD: use Enter key for line breaks
-await page.keyboard.type('Line 1');
-await page.keyboard.press('Enter');
-await page.keyboard.type('Line 2');
+await page.keyboard.type('Line 1')
+await page.keyboard.press('Enter')
+await page.keyboard.type('Line 2')
 ```
 
 **6. Quote escaping in $'...' syntax**
 When using `$'...'` for multiline code, nested quotes break parsing. Use different quote styles or escape them:
+
 ```bash
-# BAD: nested double quotes break $'...' 
+# BAD: nested double quotes break $'...'
 playwriter -s 1 -e $'await page.locator("[id=\"_r_a_\"]").click()'
 
 # GOOD: use single quotes inside, or template strings
@@ -329,47 +343,50 @@ EOF
 
 **7. Using screenshots when snapshots suffice**
 Screenshots + image analysis is expensive and slow. Only use screenshots for visual/CSS issues:
+
 ```js
 // BAD: screenshot to check if text appeared (wastes tokens on image analysis)
-await page.screenshot({ path: 'check.png', scale: 'css' });
+await page.screenshot({ path: 'check.png', scale: 'css' })
 
 // GOOD: snapshot is text — fast, cheap, searchable
 await snapshot({ page, search: /expected text/i })
 
 // GOOD: evaluate DOM directly for content checks
-const text = await page.evaluate(() => document.querySelector('.message')?.textContent);
+const text = await page.evaluate(() => document.querySelector('.message')?.textContent)
 ```
 
 **8. Assuming page content loaded**
 Even after `goto()`, dynamic content may not be ready:
+
 ```js
-await page.goto('https://example.com');
+await page.goto('https://example.com')
 // Content may still be loading via JavaScript!
-await page.waitForSelector('article', { timeout: 10000 });
+await page.waitForSelector('article', { timeout: 10000 })
 // Or use waitForPageLoad utility
-await waitForPageLoad({ page, timeout: 5000 });
+await waitForPageLoad({ page, timeout: 5000 })
 ```
 
 **9. Login buttons that open popups**
 Playwriter extension cannot control popup windows. If a login button opens a popup (common with OAuth/SSO), use cmd+click to open in a new tab instead:
+
 ```js
 // BAD: popup window is not controllable by playwriter
-await page.click('button:has-text("Login with Google")');
+await page.click('button:has-text("Login with Google")')
 
 // GOOD: cmd+click opens in new tab that playwriter can control
-await page.locator('button:has-text("Login with Google")').click({ modifiers: ['Meta'] });
-await page.waitForTimeout(2000);
+await page.locator('button:has-text("Login with Google")').click({ modifiers: ['Meta'] })
+await page.waitForTimeout(2000)
 
 // Verify new tab opened - last page should be the login page
-const pages = context.pages();
-const loginPage = pages[pages.length - 1];
+const pages = context.pages()
+const loginPage = pages[pages.length - 1]
 if (loginPage.url() === page.url()) {
-  throw new Error('Cmd+click did not open new tab - login may have opened as popup');
+  throw new Error('Cmd+click did not open new tab - login may have opened as popup')
 }
 
 // Complete login flow in loginPage, cookies are shared with original page
-await loginPage.locator('[data-email]').first().click();
-await loginPage.waitForURL('**/callback**');
+await loginPage.locator('[data-email]').first().click()
+await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
 
@@ -379,10 +396,12 @@ After any action (click, submit, navigate), verify what happened. Always print U
 
 ```js
 // Always print URL first, then snapshot
-console.log('URL:', page.url()); await snapshot({ page }).then(console.log)
+console.log('URL:', page.url())
+await snapshot({ page }).then(console.log)
 
 // Filter for specific content when snapshot is large
-console.log('URL:', page.url()); await snapshot({ page, search: /dialog|button|error/i }).then(console.log)
+console.log('URL:', page.url())
+await snapshot({ page, search: /dialog|button|error/i }).then(console.log)
 ```
 
 If nothing changed, try `await waitForPageLoad({ page, timeout: 3000 })` or you may have clicked the wrong element.
@@ -404,10 +423,10 @@ Example output:
 
 ```md
 - banner:
-    - link "Home" [id="nav-home"]
-    - navigation:
-        - link "Docs" [data-testid="docs-link"]
-        - link "Blog" role=link[name="Blog"]
+  - link "Home" [id="nav-home"]
+  - navigation:
+    - link "Docs" [data-testid="docs-link"]
+    - link "Blog" role=link[name="Blog"]
 ```
 
 Each interactive line ends with a Playwright locator you can pass to `page.locator()`.
@@ -437,11 +456,12 @@ const snap = await snapshot({ page, search: /button|submit/i })
 **Filtering large snapshots in JS** — when the built-in `search` isn't enough (e.g., you need multiple patterns or custom logic), filter the snapshot string directly:
 
 ```js
-const snap = await snapshot({ page, showDiffSinceLastCall: false });
-const relevant = snap.split('\n').filter(l =>
-  l.includes('dialog') || l.includes('error') || l.includes('button')
-).join('\n');
-console.log(relevant);
+const snap = await snapshot({ page, showDiffSinceLastCall: false })
+const relevant = snap
+  .split('\n')
+  .filter((l) => l.includes('dialog') || l.includes('error') || l.includes('button'))
+  .join('\n')
+console.log(relevant)
 ```
 
 This is much cheaper than taking a screenshot — use it as your primary debugging tool for verifying text content, checking if elements exist, or confirming state changes.
@@ -451,12 +471,14 @@ This is much cheaper than taking a screenshot — use it as your primary debuggi
 Both `snapshot` and `screenshotWithAccessibilityLabels` use the same ref system, so you can combine them effectively.
 
 **Use `snapshot` when:**
+
 - Page has simple, semantic structure (articles, forms, lists)
 - You need to search for specific text or patterns
 - Token usage matters (text is smaller than images)
 - You need to process the output programmatically
 
 **Use `screenshotWithAccessibilityLabels` when:**
+
 - Page has complex visual layout (grids, galleries, dashboards, maps)
 - Spatial position matters (e.g., "first image", "top-left button")
 - DOM order doesn't match visual order
@@ -487,9 +509,9 @@ page.locator('button').nth(2).click()
 If a locator matches multiple elements, Playwright throws "strict mode violation". Use `.first()`, `.last()`, or `.nth(n)`:
 
 ```js
-await page.locator('button').first().click()  // first match
-await page.locator('.item').last().click()    // last match
-await page.locator('li').nth(3).click()       // 4th item (0-indexed)
+await page.locator('button').first().click() // first match
+await page.locator('.item').last().click() // last match
+await page.locator('li').nth(3).click() // 4th item (0-indexed)
 ```
 
 ## working with pages
@@ -504,8 +526,8 @@ On your very first execute call, reuse an existing empty tab or create a new one
 // Reuse an empty about:blank tab if available, otherwise create a new one.
 // IMPORTANT: always navigate immediately in the same call to avoid another
 // agent grabbing the same about:blank tab between execute calls.
-state.myPage = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
-await state.myPage.goto('https://example.com');
+state.myPage = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
+await state.myPage.goto('https://example.com')
 // Use state.myPage for ALL subsequent operations
 ```
 
@@ -515,9 +537,9 @@ The user may close your page by accident (e.g., closing a tab in Chrome). Always
 
 ```js
 if (!state.myPage || state.myPage.isClosed()) {
-  state.myPage = context.pages().find(p => p.url() === 'about:blank') ?? await context.newPage();
+  state.myPage = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
 }
-await state.myPage.goto('https://example.com');
+await state.myPage.goto('https://example.com')
 ```
 
 **Use an existing page only when the user asks:**
@@ -525,16 +547,16 @@ await state.myPage.goto('https://example.com');
 Only use a page from `context.pages()` if the user explicitly asks you to control a specific tab they already opened (e.g., they're logged into an app). Find it by URL pattern and store it in state:
 
 ```js
-const pages = context.pages().filter(x => x.url().includes('myapp.com'));
-if (pages.length === 0) throw new Error('No myapp.com page found. Ask user to enable playwriter on it.');
-if (pages.length > 1) throw new Error(`Found ${pages.length} matching pages, expected 1`);
-state.targetPage = pages[0];
+const pages = context.pages().filter((x) => x.url().includes('myapp.com'))
+if (pages.length === 0) throw new Error('No myapp.com page found. Ask user to enable playwriter on it.')
+if (pages.length > 1) throw new Error(`Found ${pages.length} matching pages, expected 1`)
+state.targetPage = pages[0]
 ```
 
 **List all available pages:**
 
 ```js
-context.pages().map(p => p.url())
+context.pages().map((p) => p.url())
 ```
 
 ## navigation
@@ -542,8 +564,8 @@ context.pages().map(p => p.url())
 **Use `domcontentloaded`** for `page.goto()`:
 
 ```js
-await page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
-await waitForPageLoad({ page, timeout: 5000 });
+await page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+await waitForPageLoad({ page, timeout: 5000 })
 ```
 
 ## common patterns
@@ -556,9 +578,9 @@ await waitForPageLoad({ page, timeout: 5000 });
 
 // GOOD: fetch inside page.evaluate uses browser's full session
 const data = await page.evaluate(async (url) => {
-  const resp = await fetch(url);
-  return await resp.text();
-}, 'https://example.com/protected/resource');
+  const resp = await fetch(url)
+  return await resp.text()
+}, 'https://example.com/protected/resource')
 ```
 
 **Downloading large data** - console output truncates large strings. Trigger a browser download instead:
@@ -566,18 +588,19 @@ const data = await page.evaluate(async (url) => {
 ```js
 // Fetch protected data and trigger download to user's Downloads folder
 await page.evaluate(async (url) => {
-  const resp = await fetch(url);
-  const data = await resp.text();
-  const blob = new Blob([data], { type: 'application/octet-stream' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'data.json';
-  a.click();
-}, 'https://example.com/protected/large-file');
+  const resp = await fetch(url)
+  const data = await resp.text()
+  const blob = new Blob([data], { type: 'application/octet-stream' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'data.json'
+  a.click()
+}, 'https://example.com/protected/large-file')
 // File saves to ~/Downloads - read it from there
 ```
 
 **Avoid permission-gated browser APIs** - some APIs require user permission prompts or special browser flags. These often fail silently or hang. Examples to avoid:
+
 - `navigator.clipboard.writeText()` - requires permission
 - Multiple concurrent downloads - browser may block
 - `window.showSaveFilePicker()` - requires user gesture
@@ -588,37 +611,40 @@ Instead, use simpler alternatives (single download via `a.click()`, store data i
 **Links that open new tabs** - playwriter cannot control popup windows opened via `window.open`. Use cmd+click to open in a controllable new tab instead (see mistake #9 above for a full example):
 
 ```js
-await page.locator('a[target=_blank]').click({ modifiers: ['Meta'] });
-await page.waitForTimeout(1000);
-const pages = context.pages();
-const newTab = pages[pages.length - 1];
-console.log('New tab URL:', newTab.url());
+await page.locator('a[target=_blank]').click({ modifiers: ['Meta'] })
+await page.waitForTimeout(1000)
+const pages = context.pages()
+const newTab = pages[pages.length - 1]
+console.log('New tab URL:', newTab.url())
 ```
 
 **Downloads** - capture and save:
 
 ```js
-const [download] = await Promise.all([page.waitForEvent('download'), page.click('button.download')]);
-await download.saveAs(`./${download.suggestedFilename()}`);
+const [download] = await Promise.all([page.waitForEvent('download'), page.click('button.download')])
+await download.saveAs(`./${download.suggestedFilename()}`)
 ```
 
 **iFrames** - two approaches depending on what you need:
 
 ```js
 // frameLocator: for chaining locator operations (click, fill, etc.)
-const frame = page.frameLocator('#my-iframe');
-await frame.locator('button').click();
+const frame = page.frameLocator('#my-iframe')
+await frame.locator('button').click()
 
 // contentFrame: returns a Frame object, needed for snapshot({ frame })
-const frame2 = await page.locator('iframe').contentFrame();
+const frame2 = await page.locator('iframe').contentFrame()
 await snapshot({ frame: frame2 })
 ```
 
 **Dialogs** - handle alerts/confirms/prompts:
 
 ```js
-page.on('dialog', async dialog => { console.log(dialog.message()); await dialog.accept(); });
-await page.click('button.trigger-alert');
+page.on('dialog', async (dialog) => {
+  console.log(dialog.message())
+  await dialog.accept()
+})
+await page.click('button.trigger-alert')
 ```
 
 ## utility functions
@@ -645,6 +671,7 @@ const fullHtml = await getCleanHTML({ locator: page, showDiffSinceLastCall: fals
 ```
 
 **Parameters:**
+
 - `locator` - Playwright Locator or Page to get HTML from
 - `search` - string/regex to filter results (returns first 10 matching lines with 5 lines context)
 - `showDiffSinceLastCall` - returns diff since last call (default: `true`). Pass `false` to get full HTML.
@@ -652,12 +679,14 @@ const fullHtml = await getCleanHTML({ locator: page, showDiffSinceLastCall: fals
 
 **HTML processing:**
 The function cleans HTML for compact, readable output:
+
 - **Removes tags**: script, style, link, meta, noscript, svg, head
 - **Unwraps nested wrappers**: Empty divs/spans with no attributes that only wrap a single child are collapsed (e.g., `<div><div><div><p>text</p></div></div></div>` → `<div><p>text</p></div>`)
 - **Removes empty elements**: Elements with no attributes and no content are removed
 - **Truncates long values**: Attribute values >200 chars and text content >500 chars are truncated
 
 **Attributes kept (summary):**
+
 - Common semantic and ARIA attributes (e.g., `href`, `name`, `type`, `aria-*`)
 - All `data-*` test attributes
 - Frequently used test IDs and special attributes (e.g., `testid`, `qa`, `e2e`, `vimium-label`)
@@ -672,6 +701,7 @@ const matches = await getPageMarkdown({ page, search: /API/i })  // search withi
 ```
 
 **Output format:**
+
 ```
 # Article Title
 
@@ -683,11 +713,13 @@ The main article content as plain text, with paragraphs preserved...
 ```
 
 **Parameters:**
+
 - `page` - Playwright Page to extract content from
 - `search` - string/regex to filter content (returns first 10 matching lines with 5 lines context)
 - `showDiffSinceLastCall` - returns diff since last call (default: `true`). Pass `false` to get full content.
 
 **Use cases:**
+
 - Extract article text for LLM processing without HTML noise
 - Get readable content from news sites, blogs, documentation
 - Compare content changes after interactions
@@ -702,46 +734,50 @@ await waitForPageLoad({ page, timeout?, pollInterval?, minWait? })
 **getCDPSession** - send raw CDP commands:
 
 ```js
-const cdp = await getCDPSession({ page });
-const metrics = await cdp.send('Page.getLayoutMetrics');
+const cdp = await getCDPSession({ page })
+const metrics = await cdp.send('Page.getLayoutMetrics')
 ```
 
 **getLocatorStringForElement** - get stable Playwright selector from an element:
 
 ```js
-const selector = await getLocatorStringForElement(page.locator('[id="submit-btn"]'));
+const selector = await getLocatorStringForElement(page.locator('[id="submit-btn"]'))
 // => "getByRole('button', { name: 'Save' })"
 ```
 
 **getReactSource** - get React component source location (dev mode only):
 
 ```js
-const source = await getReactSource({ locator: page.locator('[data-testid="submit-btn"]') });
+const source = await getReactSource({ locator: page.locator('[data-testid="submit-btn"]') })
 // => { fileName, lineNumber, columnNumber, componentName }
 ```
 
 **getStylesForLocator** - inspect CSS styles applied to an element, like browser DevTools "Styles" panel. Useful for debugging styling issues, finding where a CSS property is defined (file:line), and checking inherited styles. Returns selector, source location, and declarations for each matching rule. ALWAYS fetch `https://playwriter.dev/resources/styles-api.md` first with curl or webfetch tool.
 
 ```js
-const styles = await getStylesForLocator({ locator: page.locator('.btn'), cdp: await getCDPSession({ page }) });
-console.log(formatStylesAsText(styles));
+const styles = await getStylesForLocator({ locator: page.locator('.btn'), cdp: await getCDPSession({ page }) })
+console.log(formatStylesAsText(styles))
 ```
 
 **createDebugger** - set breakpoints, step through code, inspect variables at runtime. Useful for debugging issues that only reproduce in browser, understanding code flow, and inspecting state at specific points. Can pause on exceptions, evaluate expressions in scope, and blackbox framework code. ALWAYS fetch `https://playwriter.dev/resources/debugger-api.md` first.
 
 ```js
-const cdp = await getCDPSession({ page }); const dbg = createDebugger({ cdp }); await dbg.enable();
-const scripts = await dbg.listScripts({ search: 'app' });
-await dbg.setBreakpoint({ file: scripts[0].url, line: 42 });
+const cdp = await getCDPSession({ page })
+const dbg = createDebugger({ cdp })
+await dbg.enable()
+const scripts = await dbg.listScripts({ search: 'app' })
+await dbg.setBreakpoint({ file: scripts[0].url, line: 42 })
 // when paused: dbg.inspectLocalVariables(), dbg.stepOver(), dbg.resume()
 ```
 
 **createEditor** - view and live-edit page scripts and CSS at runtime. Edits are in-memory (persist until reload). Useful for testing quick fixes, searching page scripts with grep, and toggling debug flags. ALWAYS read `https://playwriter.dev/resources/editor-api.md` first.
 
 ```js
-const cdp = await getCDPSession({ page }); const editor = createEditor({ cdp }); await editor.enable();
-const matches = await editor.grep({ regex: /console\.log/ });
-await editor.edit({ url: matches[0].url, oldString: 'DEBUG = false', newString: 'DEBUG = true' });
+const cdp = await getCDPSession({ page })
+const editor = createEditor({ cdp })
+await editor.enable()
+const matches = await editor.grep({ regex: /console\.log/ })
+await editor.edit({ url: matches[0].url, oldString: 'DEBUG = false', newString: 'DEBUG = true' })
 ```
 
 **screenshotWithAccessibilityLabels** - take a screenshot with Vimium-style visual labels overlaid on interactive elements. Shows labels, captures screenshot, then removes labels. The image and accessibility snapshot are automatically included in the response. Can be called multiple times to capture multiple screenshots. Use a timeout of **20 seconds** for complex pages.
@@ -749,15 +785,15 @@ await editor.edit({ url: matches[0].url, oldString: 'DEBUG = false', newString: 
 Prefer this for pages with grids, image galleries, maps, or complex visual layouts where spatial position matters. For simple text-heavy pages, `snapshot` with search is faster and uses fewer tokens.
 
 ```js
-await screenshotWithAccessibilityLabels({ page });
+await screenshotWithAccessibilityLabels({ page })
 // Image and accessibility snapshot are automatically included in response
 // Use refs from snapshot to interact with elements
-await page.locator('[id="submit-btn"]').click();
+await page.locator('[id="submit-btn"]').click()
 
 // Can take multiple screenshots in one execution
-await screenshotWithAccessibilityLabels({ page });
-await page.click('button');
-await screenshotWithAccessibilityLabels({ page });
+await screenshotWithAccessibilityLabels({ page })
+await page.click('button')
+await screenshotWithAccessibilityLabels({ page })
 // Both images are included in the response
 ```
 
@@ -769,31 +805,32 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 ```js
 // Start recording - outputPath must be specified upfront
-await startRecording({ 
-  page, 
+await startRecording({
+  page,
   outputPath: './recording.mp4',
-  frameRate: 30,        // default: 30
-  audio: false,         // default: false (tab audio)
-  videoBitsPerSecond: 2500000  // 2.5 Mbps
-});
+  frameRate: 30, // default: 30
+  audio: false, // default: false (tab audio)
+  videoBitsPerSecond: 2500000, // 2.5 Mbps
+})
 
 // Navigate around - recording continues!
-await page.click('a');
-await page.waitForLoadState('domcontentloaded');
-await page.goBack();
+await page.click('a')
+await page.waitForLoadState('domcontentloaded')
+await page.goBack()
 
 // Stop and get result
-const { path, duration, size } = await stopRecording({ page });
-console.log(`Saved ${size} bytes, duration: ${duration}ms`);
+const { path, duration, size } = await stopRecording({ page })
+console.log(`Saved ${size} bytes, duration: ${duration}ms`)
 ```
 
 Additional recording utilities:
+
 ```js
 // Check if recording is active
-const { isRecording, startedAt } = await isRecording({ page });
+const { isRecording, startedAt } = await isRecording({ page })
 
 // Cancel recording without saving
-await cancelRecording({ page });
+await cancelRecording({ page })
 ```
 
 **Key difference from getDisplayMedia**: This approach uses `chrome.tabCapture` which runs in the extension context, not the page. The recording persists across navigations because the extension holds the `MediaRecorder`, not the page's JavaScript context.
@@ -803,8 +840,8 @@ await cancelRecording({ page });
 Users can right-click → "Copy Playwriter Element Reference" to store elements in `globalThis.playwriterPinnedElem1` (increments for each pin). The reference is copied to clipboard:
 
 ```js
-const el = await page.evaluateHandle(() => globalThis.playwriterPinnedElem1);
-await el.click();
+const el = await page.evaluateHandle(() => globalThis.playwriterPinnedElem1)
+await el.click()
 ```
 
 ## taking screenshots
@@ -812,7 +849,7 @@ await el.click();
 Always use `scale: 'css'` to avoid 2-4x larger images on high-DPI displays:
 
 ```js
-await page.screenshot({ path: 'shot.png', scale: 'css' });
+await page.screenshot({ path: 'shot.png', scale: 'css' })
 ```
 
 If you want to read back the image file into context make sure to resize it first, scaling down the image to make sure max size is 1500px. for example with `sips --resampleHeightWidthMax 1500 input.png --out output.png` on macOS.
@@ -822,14 +859,14 @@ If you want to read back the image file into context make sure to resize it firs
 Code inside `page.evaluate()` runs in the browser - use plain JavaScript only, no TypeScript syntax. Return values and log outside (console.log inside evaluate runs in browser, not visible):
 
 ```js
-const title = await page.evaluate(() => document.title);
-console.log('Title:', title);
+const title = await page.evaluate(() => document.title)
+console.log('Title:', title)
 
 const info = await page.evaluate(() => ({
-    url: location.href,
-    buttons: document.querySelectorAll('button').length,
-}));
-console.log(info);
+  url: location.href,
+  buttons: document.querySelectorAll('button').length,
+}))
+console.log(info)
 ```
 
 ## loading files
@@ -837,7 +874,9 @@ console.log(info);
 Fill inputs with file content:
 
 ```js
-const fs = require('node:fs'); const content = fs.readFileSync('./data.txt', 'utf-8'); await page.locator('textarea').fill(content);
+const fs = require('node:fs')
+const content = fs.readFileSync('./data.txt', 'utf-8')
+await page.locator('textarea').fill(content)
 ```
 
 ## network interception
@@ -845,31 +884,46 @@ const fs = require('node:fs'); const content = fs.readFileSync('./data.txt', 'ut
 For scraping or reverse-engineering APIs, intercept network requests instead of scrolling DOM. Store in `state` to analyze across calls:
 
 ```js
-state.requests = []; state.responses = [];
-page.on('request', req => { if (req.url().includes('/api/')) state.requests.push({ url: req.url(), method: req.method(), headers: req.headers() }); });
-page.on('response', async res => { if (res.url().includes('/api/')) { try { state.responses.push({ url: res.url(), status: res.status(), body: await res.json() }); } catch {} } });
+state.requests = []
+state.responses = []
+page.on('request', (req) => {
+  if (req.url().includes('/api/')) state.requests.push({ url: req.url(), method: req.method(), headers: req.headers() })
+})
+page.on('response', async (res) => {
+  if (res.url().includes('/api/')) {
+    try {
+      state.responses.push({ url: res.url(), status: res.status(), body: await res.json() })
+    } catch {}
+  }
+})
 ```
 
 Then trigger actions (scroll, click, navigate) and analyze captured data:
 
 ```js
-console.log('Captured', state.responses.length, 'API calls');
-state.responses.forEach(r => console.log(r.status, r.url.slice(0, 80)));
+console.log('Captured', state.responses.length, 'API calls')
+state.responses.forEach((r) => console.log(r.status, r.url.slice(0, 80)))
 ```
 
 Inspect a specific response to understand schema:
 
 ```js
-const resp = state.responses.find(r => r.url.includes('users'));
-console.log(JSON.stringify(resp.body, null, 2).slice(0, 2000));
+const resp = state.responses.find((r) => r.url.includes('users'))
+console.log(JSON.stringify(resp.body, null, 2).slice(0, 2000))
 ```
 
 Replay API directly (useful for pagination):
 
 ```js
-const { url, headers } = state.requests.find(r => r.url.includes('feed'));
-const data = await page.evaluate(async ({ url, headers }) => { const res = await fetch(url, { headers }); return res.json(); }, { url, headers });
-console.log(data);
+const { url, headers } = state.requests.find((r) => r.url.includes('feed'))
+const data = await page.evaluate(
+  async ({ url, headers }) => {
+    const res = await fetch(url, { headers })
+    return res.json()
+  },
+  { url, headers },
+)
+console.log(data)
 ```
 
 Clean up listeners when done: `page.removeAllListeners('request'); page.removeAllListeners('response');`
@@ -881,38 +935,39 @@ When debugging why a web app isn't working (e.g., content not rendering, API err
 **1. Console logs** — use `getLatestLogs` to check for errors:
 
 ```js
-const errors = await getLatestLogs({ page, search: /error|fail/i, count: 20 });
-const appLogs = await getLatestLogs({ page, search: /myComponent|state/i });
+const errors = await getLatestLogs({ page, search: /error|fail/i, count: 20 })
+const appLogs = await getLatestLogs({ page, search: /myComponent|state/i })
 ```
 
 **2. DOM inspection via evaluate** — check content directly without screenshots:
 
 ```js
 const info = await page.evaluate(() => {
-  const msgs = document.querySelectorAll('.message');
-  return Array.from(msgs).map(m => ({
+  const msgs = document.querySelectorAll('.message')
+  return Array.from(msgs).map((m) => ({
     text: m.textContent?.slice(0, 200),
     visible: m.offsetHeight > 0,
-  }));
-});
-console.log(JSON.stringify(info, null, 2));
+  }))
+})
+console.log(JSON.stringify(info, null, 2))
 ```
 
 **3. Combine snapshot + logs for full picture:**
 
 ```js
-await page.keyboard.press('Enter');
-await page.waitForTimeout(2000);
+await page.keyboard.press('Enter')
+await page.waitForTimeout(2000)
 
-const snap = await snapshot({ page, search: /dialog|error|message/ });
-const logs = await getLatestLogs({ page, search: /error/i, count: 10 });
-console.log('UI:', snap);
-console.log('Logs:', logs);
+const snap = await snapshot({ page, search: /dialog|error|message/ })
+const logs = await getLatestLogs({ page, search: /error/i, count: 10 })
+console.log('UI:', snap)
+console.log('Logs:', logs)
 ```
 
 ## capabilities
 
 Examples of what playwriter can do:
+
 - Monitor console logs while user reproduces a bug
 - Intercept network requests to reverse-engineer APIs and build SDKs
 - Scrape data by replaying paginated API calls instead of scrolling DOM
@@ -921,7 +976,6 @@ Examples of what playwriter can do:
 - Debug issues by collecting logs and controlling the page simultaneously
 - Handle popups, downloads, iframes, and dialog boxes
 - Record videos of browser sessions that survive page navigation
-
 
 ## computer use
 
@@ -936,21 +990,24 @@ This section covers low-level mouse/keyboard APIs not documented elsewhere. For 
 await page.locator('button[name="Submit"]').click()
 await page.locator('text=Login').click({ button: 'right' })
 await page.locator('text=Login').dblclick()
-await page.locator('a').first().click({ modifiers: ['Meta'] })  // cmd+click opens new tab
+await page
+  .locator('a')
+  .first()
+  .click({ modifiers: ['Meta'] }) // cmd+click opens new tab
 
 // By coordinates (when locators aren't available, e.g. canvas, maps, custom widgets)
-await page.mouse.click(450, 320)                              // left click
-await page.mouse.click(450, 320, { button: 'right' })         // right click
-await page.mouse.dblclick(450, 320)                            // double click
-await page.mouse.click(450, 320, { clickCount: 3 })           // triple click
-await page.mouse.click(450, 320, { modifiers: ['Shift'] })    // shift+click
+await page.mouse.click(450, 320) // left click
+await page.mouse.click(450, 320, { button: 'right' }) // right click
+await page.mouse.dblclick(450, 320) // double click
+await page.mouse.click(450, 320, { clickCount: 3 }) // triple click
+await page.mouse.click(450, 320, { modifiers: ['Shift'] }) // shift+click
 ```
 
 ### hover
 
 ```js
-await page.locator('.tooltip-trigger').hover()  // by locator (preferred)
-await page.mouse.move(450, 320)                 // by coordinates
+await page.locator('.tooltip-trigger').hover() // by locator (preferred)
+await page.mouse.move(450, 320) // by coordinates
 ```
 
 ### scroll
@@ -960,17 +1017,19 @@ await page.mouse.move(450, 320)                 // by coordinates
 await page.locator('#footer').scrollIntoViewIfNeeded()
 
 // By pixel (for canvas, maps, infinite scroll)
-await page.mouse.wheel(0, 300)   // scroll down 300px
-await page.mouse.wheel(0, -300)  // scroll up
-await page.mouse.wheel(300, 0)   // scroll right
-await page.mouse.wheel(-300, 0)  // scroll left
+await page.mouse.wheel(0, 300) // scroll down 300px
+await page.mouse.wheel(0, -300) // scroll up
+await page.mouse.wheel(300, 0) // scroll right
+await page.mouse.wheel(-300, 0) // scroll left
 
 // Scroll at a specific position
 await page.mouse.move(450, 320)
 await page.mouse.wheel(0, 500)
 
 // Scroll inside a container
-await page.locator('.scrollable-list').evaluate(el => { el.scrollTop += 500 })
+await page.locator('.scrollable-list').evaluate((el) => {
+  el.scrollTop += 500
+})
 ```
 
 ### drag
@@ -982,7 +1041,7 @@ await page.locator('#item').dragTo(page.locator('#target'))
 // By coordinates (for canvas, sliders, custom drag targets)
 await page.mouse.move(100, 200)
 await page.mouse.down()
-await page.mouse.move(400, 500, { steps: 10 })  // steps for smooth drag
+await page.mouse.move(400, 500, { steps: 10 }) // steps for smooth drag
 await page.mouse.up()
 ```
 
@@ -1018,12 +1077,12 @@ Playwriter supports [Ghost Browser](https://ghostbrowser.com/) for multi-identit
 
 ```js
 // List identities and open tabs in different ones
-const identities = await chrome.projects.getIdentitiesList();
-await chrome.ghostPublicAPI.openTab({ url: 'https://reddit.com', identity: identities[0].id });
+const identities = await chrome.projects.getIdentitiesList()
+await chrome.ghostPublicAPI.openTab({ url: 'https://reddit.com', identity: identities[0].id })
 
 // Assign proxies per tab or identity
-const proxies = await chrome.ghostProxies.getList();
-await chrome.ghostProxies.setTabProxy(tabId, proxies[0].id);
+const proxies = await chrome.ghostProxies.getList()
+await chrome.ghostProxies.setTabProxy(tabId, proxies[0].id)
 ```
 
 For complete API reference with all methods, types, and examples, read:

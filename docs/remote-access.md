@@ -134,9 +134,7 @@ The env vars tell the MCP to skip starting a local relay and connect to the remo
 ```typescript
 import { chromium } from 'playwright-core'
 
-const browser = await chromium.connectOverCDP(
-  'wss://my-machine-tunnel.traforo.dev/cdp/session1?token=MY_SECRET_TOKEN'
-)
+const browser = await chromium.connectOverCDP('wss://my-machine-tunnel.traforo.dev/cdp/session1?token=MY_SECRET_TOKEN')
 const page = browser.contexts()[0].pages()[0]
 await page.goto('https://example.com')
 // Don't call browser.close() - it would close the user's Chrome
@@ -176,11 +174,11 @@ done
 
 ### Environment variables
 
-| Variable | Description |
-|---|---|
-| `PLAYWRITER_HOST` | Remote relay URL (e.g. `https://x-tunnel.traforo.dev`) or IP (e.g. `192.168.1.10`) |
-| `PLAYWRITER_TOKEN` | Authentication token for the relay server |
-| `PLAYWRITER_PORT` | Override relay port (default: `19988`, not needed with traforo) |
+| Variable           | Description                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `PLAYWRITER_HOST`  | Remote relay URL (e.g. `https://x-tunnel.traforo.dev`) or IP (e.g. `192.168.1.10`) |
+| `PLAYWRITER_TOKEN` | Authentication token for the relay server                                          |
+| `PLAYWRITER_PORT`  | Override relay port (default: `19988`, not needed with traforo)                    |
 
 ### Recommendations
 

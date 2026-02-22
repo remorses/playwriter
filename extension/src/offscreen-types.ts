@@ -55,24 +55,28 @@ export type OffscreenMessage =
   | OffscreenCancelRecordingMessage
 
 // Offscreen document response types
-export type OffscreenStartRecordingResult = {
-  success: true
-  tabId: number
-  startedAt: number
-  mimeType: string
-} | {
-  success: false
-  error: string
-}
+export type OffscreenStartRecordingResult =
+  | {
+      success: true
+      tabId: number
+      startedAt: number
+      mimeType: string
+    }
+  | {
+      success: false
+      error: string
+    }
 
-export type OffscreenStopRecordingResult = {
-  success: true
-  tabId: number
-  duration: number
-} | {
-  success: false
-  error: string
-}
+export type OffscreenStopRecordingResult =
+  | {
+      success: true
+      tabId: number
+      duration: number
+    }
+  | {
+      success: false
+      error: string
+    }
 
 export interface OffscreenIsRecordingResult {
   isRecording: boolean
@@ -80,13 +84,15 @@ export interface OffscreenIsRecordingResult {
   startedAt?: number
 }
 
-export type OffscreenCancelRecordingResult = {
-  success: true
-  tabId: number
-} | {
-  success: false
-  error: string
-}
+export type OffscreenCancelRecordingResult =
+  | {
+      success: true
+      tabId: number
+    }
+  | {
+      success: false
+      error: string
+    }
 
 // Messages sent FROM offscreen TO background
 export interface OffscreenRecordingChunkMessage {
@@ -101,6 +107,4 @@ export interface OffscreenRecordingCancelledMessage {
   tabId: number
 }
 
-export type OffscreenOutgoingMessage =
-  | OffscreenRecordingChunkMessage
-  | OffscreenRecordingCancelledMessage
+export type OffscreenOutgoingMessage = OffscreenRecordingChunkMessage | OffscreenRecordingCancelledMessage

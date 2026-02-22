@@ -1,6 +1,6 @@
 /**
  * Extract page content as markdown using Mozilla Readability.
- * 
+ *
  * This utility injects the Readability library into the page and extracts
  * the main content, similar to Firefox Reader View.
  */
@@ -65,7 +65,7 @@ function isRegExp(value: unknown): value is RegExp {
 
 /**
  * Extract page content as markdown using Mozilla Readability.
- * 
+ *
  * Injects Readability into the page if not already present, then extracts
  * the main content. Returns plain text content (no HTML).
  */
@@ -81,7 +81,7 @@ export async function getPageMarkdown(options: GetPageMarkdownOptions): Promise<
   }
 
   // Extract content using Readability
-  const result = await page.evaluate(() => {
+  const result = (await page.evaluate(() => {
     const readability = (globalThis as any).__readability
     if (!readability) {
       throw new Error('Readability not loaded')
@@ -131,11 +131,11 @@ export async function getPageMarkdown(options: GetPageMarkdownOptions): Promise<
       publishedTime: article.publishedTime || null,
       wordCount: (article.textContent || '').split(/\s+/).filter(Boolean).length,
     }
-  }) as PageMarkdownResult & { _notReadable?: boolean }
+  })) as PageMarkdownResult & { _notReadable?: boolean }
 
   // Format output
   const lines: string[] = []
-  
+
   if (result.title) {
     lines.push(`# ${result.title}`)
     lines.push('')

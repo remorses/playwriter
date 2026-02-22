@@ -26,9 +26,11 @@ The aria snapshot feature in playwriter extracts an accessibility tree from the 
 ### Key Functions
 
 #### `getAriaSnapshot()`
+
 **Location:** Line 749-1033 in `aria-snapshot.ts`
 
 Main entry point that returns `AriaSnapshotResult` containing:
+
 - `snapshot`: String representation of the accessibility tree
 - `tree`: Structured tree with nodes
 - `refs`: Array of references to interactive elements
@@ -36,14 +38,15 @@ Main entry point that returns `AriaSnapshotResult` containing:
 - `getRefsForLocators()`: Get refs for Playwright locators
 
 **Signature:**
+
 ```typescript
-export async function getAriaSnapshot({ 
-  page, 
-  locator, 
-  refFilter, 
-  wsUrl, 
-  interactiveOnly = false, 
-  cdp 
+export async function getAriaSnapshot({
+  page,
+  locator,
+  refFilter,
+  wsUrl,
+  interactiveOnly = false,
+  cdp,
 }: {
   page: Page
   locator?: Locator
@@ -60,14 +63,16 @@ export async function getAriaSnapshot({
 
 **Command:** `DOM.getFlattenedDocument`
 **Location:** Line 772
+
 ```typescript
-const { nodes: domNodes } = await session.send('DOM.getFlattenedDocument', { 
-  depth: -1, 
-  pierce: true 
-}) as Protocol.DOM.GetFlattenedDocumentResponse
+const { nodes: domNodes } = (await session.send('DOM.getFlattenedDocument', {
+  depth: -1,
+  pierce: true,
+})) as Protocol.DOM.GetFlattenedDocumentResponse
 ```
 
 **Parameters:**
+
 - `depth: -1` - Get entire subtree
 - `pierce: true` - **Traverses iframes and shadow roots**
 
@@ -77,12 +82,14 @@ const { nodes: domNodes } = await session.send('DOM.getFlattenedDocument', {
 
 **Command:** `Accessibility.getFullAXTree`
 **Location:** Line 791
+
 ```typescript
-const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree') 
+const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree')
   as Protocol.Accessibility.GetFullAXTreeResponse
 ```
 
 **Parameters:** None specified (uses defaults)
+
 - Default: Returns AX tree for root frame
 - **Has optional `frameId` parameter** (not currently used)
 
@@ -93,10 +100,12 @@ const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree')
 ### Current Implementation
 
 **DOM Level:** ✅ **FULL SUPPORT**
+
 - `DOM.getFlattenedDocument` with `pierce: true` traverses all iframes and shadow roots
 - All DOM nodes from all frames are included in the flattened document
 
 **Accessibility Level:** ⚠️ **LIMITED**
+
 - `Accessibility.getFullAXTree` is called **without `frameId` parameter**
 - According to CDP spec, when `frameId` is omitted, **only the root frame is used**
 - Cross-origin iframes may have additional restrictions
@@ -104,6 +113,7 @@ const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree')
 ### CDP Spec Details
 
 From `Accessibility.pdl`:
+
 ```
 experimental command getFullAXTree
   parameters
@@ -126,11 +136,13 @@ experimental command getFullAXTree
 ### Evidence from Code
 
 **Scope handling (Line 760-789):**
+
 - Uses `data-pw-scope` attribute to scope snapshots to a locator
 - Builds `allowedBackendIds` set from DOM tree traversal
 - Filters AX nodes based on `backendDOMNodeId` membership in this set
 
 **Node mapping:**
+
 - Each AX node has `backendDOMNodeId` property linking to DOM node
 - DOM nodes fetched with `pierce: true` include iframe contents
 - But AX tree without `frameId` may not cover all frames
@@ -138,6 +150,7 @@ experimental command getFullAXTree
 ## Key Data Structures
 
 ### AriaSnapshotNode
+
 ```typescript
 type AriaSnapshotNode = {
   role: string
@@ -151,12 +164,13 @@ type AriaSnapshotNode = {
 ```
 
 ### AriaRef
+
 ```typescript
 interface AriaRef {
   role: string
   name: string
-  ref: string           // Full ref (testid or e1, e2, e3...)
-  shortRef: string      // Short ref (e1, e2, e3...)
+  ref: string // Full ref (testid or e1, e2, e3...)
+  shortRef: string // Short ref (e1, e2, e3...)
   backendNodeId?: Protocol.DOM.BackendNodeId
 }
 ```
@@ -184,12 +198,28 @@ Generates Playwright-compatible locators:
 **Location:** Lines 123-143
 
 Only these roles get refs in interactive mode:
+
 ```typescript
 const INTERACTIVE_ROLES = new Set([
-  'button', 'link', 'textbox', 'combobox', 'searchbox',
-  'checkbox', 'radio', 'slider', 'spinbutton', 'switch',
-  'menuitem', 'menuitemcheckbox', 'menuitemradio',
-  'option', 'tab', 'treeitem', 'img', 'video', 'audio',
+  'button',
+  'link',
+  'textbox',
+  'combobox',
+  'searchbox',
+  'checkbox',
+  'radio',
+  'slider',
+  'spinbutton',
+  'switch',
+  'menuitem',
+  'menuitemcheckbox',
+  'menuitemradio',
+  'option',
+  'tab',
+  'treeitem',
+  'img',
+  'video',
+  'audio',
 ])
 ```
 
@@ -214,7 +244,7 @@ const accessibilitySnapshot = async (options: {
     wsUrl: getCdpUrl(this.cdpConfig),
     interactiveOnly,
   })
-  
+
   // Store refs for refToLocator() function
   // Handle search filtering
   // Handle diff mode
@@ -240,10 +270,12 @@ Takes a screenshot with Vimium-style labels overlaid on interactive elements:
 **File:** `playwriter/src/aria-snapshot.test.ts`
 
 Tests against real websites:
+
 - Hacker News
 - GitHub
 
 **Coverage:**
+
 - Snapshot generation
 - Interactive-only mode
 - Locator format validation
@@ -277,12 +309,14 @@ Tests against real websites:
 To support iframes properly:
 
 1. **Enumerate frames:**
+
    ```typescript
    const { frameTree } = await session.send('Page.getFrameTree')
    // Recursively collect all frame IDs
    ```
 
 2. **Get AX tree per frame:**
+
    ```typescript
    for (const frameId of frameIds) {
      const { nodes } = await session.send('Accessibility.getFullAXTree', { frameId })
@@ -303,12 +337,14 @@ To support iframes properly:
 ## Summary
 
 **File Paths:**
+
 - Main implementation: `playwriter/src/aria-snapshot.ts`
 - Executor integration: `playwriter/src/executor.ts` (lines 533-619)
 - CDP session: `playwriter/src/cdp-session.ts`
 - Tests: `playwriter/src/aria-snapshot.test.ts`
 
 **CDP Commands:**
+
 - `DOM.enable` - Enable DOM domain
 - `DOM.getFlattenedDocument({ depth: -1, pierce: true })` - Get all DOM nodes including iframes
 - `Accessibility.enable` - Enable accessibility domain
@@ -316,6 +352,7 @@ To support iframes properly:
 - `DOM.getBoxModel({ backendNodeId })` - Get element positions for labels
 
 **Frame Handling:**
+
 - ✅ DOM tree includes iframe content (`pierce: true`)
 - ⚠️ Accessibility tree likely **only root frame** (no `frameId` parameter)
 - ❌ No frame enumeration or per-frame AX tree fetching
@@ -323,6 +360,7 @@ To support iframes properly:
 
 **Key Insight:**
 The current implementation may miss interactive elements inside iframes because:
+
 1. `Accessibility.getFullAXTree()` without `frameId` only returns root frame
 2. No iteration over child frames to collect their AX trees
 3. Cross-origin iframes would be blocked anyway for security

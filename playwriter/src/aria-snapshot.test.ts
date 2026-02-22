@@ -64,7 +64,7 @@ async function createHtmlServer({ htmlByPath }: { htmlByPath: Record<string, str
           resolve()
         })
       })
-    }
+    },
   }
 }
 
@@ -175,7 +175,10 @@ describe('aria-snapshot', () => {
     try {
       await page.goto(outerServer.baseUrl, { waitUntil: 'domcontentloaded', timeout: 10000 })
       await page.locator('[data-testid="external-iframe"]').waitFor({ timeout: 5000 })
-      await page.frameLocator('[data-testid="external-iframe"]').locator('[data-testid="iframe-button"]').waitFor({ timeout: 5000 })
+      await page
+        .frameLocator('[data-testid="external-iframe"]')
+        .locator('[data-testid="iframe-button"]')
+        .waitFor({ timeout: 5000 })
 
       // Convert iframe Locator to Frame
       const iframeHandle = await page.locator('[data-testid="external-iframe"]').elementHandle()

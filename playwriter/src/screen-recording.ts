@@ -1,7 +1,7 @@
 /**
  * Screen recording utility for playwriter using chrome.tabCapture.
  * Recording happens in the extension context, so it survives page navigation.
- * 
+ *
  * This module communicates with the relay server which forwards commands to the extension.
  * SessionId (pw-tab-X format) is used to identify which tab to record.
  */
@@ -9,26 +9,22 @@
 import os from 'node:os'
 import path from 'node:path'
 import type { Page } from '@xmorse/playwright-core'
-import type {
-  StartRecordingResult,
-  StopRecordingResult,
-  IsRecordingResult,
-  CancelRecordingResult,
-} from './protocol.js'
+import type { StartRecordingResult, StopRecordingResult, IsRecordingResult, CancelRecordingResult } from './protocol.js'
 import { EXTENSION_IDS } from './utils.js'
 
 /**
  * Generate a shell command to quit and restart Chrome with flags that allow automatic tab capture.
  * This enables screen recording without user interaction (clicking extension icon).
- * 
+ *
  * Required flags:
  * - --allowlisted-extension-id=<id> - grants the extension special privileges (one per extension)
  * - --auto-accept-this-tab-capture - auto-accepts tab capture permission requests
  */
 export function getChromeRestartCommand(): string {
   const platform = os.platform()
-  const flags = EXTENSION_IDS.map(id => `--allowlisted-extension-id=${id}`).join(' ') + ' --auto-accept-this-tab-capture'
-  
+  const flags =
+    EXTENSION_IDS.map((id) => `--allowlisted-extension-id=${id}`).join(' ') + ' --auto-accept-this-tab-capture'
+
   if (platform === 'darwin') {
     return `osascript -e 'quit app "Google Chrome"' && sleep 1 && open -a "Google Chrome" --args ${flags}`
   }
@@ -43,9 +39,11 @@ export function getChromeRestartCommand(): string {
  * Check if an error is related to missing activeTab permission for recording.
  */
 function isActiveTabPermissionError(error: string): boolean {
-  return error.includes('Extension has not been invoked') || 
-         error.includes('activeTab') ||
-         error.includes('enable recording')
+  return (
+    error.includes('Extension has not been invoked') ||
+    error.includes('activeTab') ||
+    error.includes('enable recording')
+  )
 }
 
 export interface StartRecordingOptions {
@@ -96,34 +94,41 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
     outputPath,
     relayPort = 19988,
   } = options
-  
+
   // Resolve relative paths to absolute using the caller's cwd.
   // The relay server may have a different cwd, so we must resolve here.
   const absoluteOutputPath = path.resolve(outputPath)
-  
+
   const response = await fetch(`http://127.0.0.1:${relayPort}/recording/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, frameRate, videoBitsPerSecond, audioBitsPerSecond, audio, outputPath: absoluteOutputPath }),
+    body: JSON.stringify({
+      sessionId,
+      frameRate,
+      videoBitsPerSecond,
+      audioBitsPerSecond,
+      audio,
+      outputPath: absoluteOutputPath,
+    }),
   })
 
-  const result = await response.json() as StartRecordingResult
+  const result = (await response.json()) as StartRecordingResult
 
   if (!result.success) {
     const errorMsg = result.error || 'Unknown error'
-    
+
     // If the error is about missing activeTab permission, provide helpful guidance
     if (isActiveTabPermissionError(errorMsg)) {
       const restartCmd = getChromeRestartCommand()
       throw new Error(
         `Failed to start recording: ${errorMsg}\n\n` +
-        `For automated recording, Chrome must be restarted with special flags.\n` +
-        `WARNING: This will close all Chrome windows. Save your work first!\n\n` +
-        `  ${restartCmd}\n\n` +
-        `Or click the Playwriter extension icon on the tab once to grant permission.`
+          `For automated recording, Chrome must be restarted with special flags.\n` +
+          `WARNING: This will close all Chrome windows. Save your work first!\n\n` +
+          `  ${restartCmd}\n\n` +
+          `Or click the Playwriter extension icon on the tab once to grant permission.`,
       )
     }
-    
+
     throw new Error(`Failed to start recording: ${errorMsg}`)
   }
 
@@ -138,7 +143,9 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
  * Stop recording and save to file.
  * Returns the path to the saved video file.
  */
-export async function stopRecording(options: StopRecordingOptions): Promise<{ path: string; duration: number; size: number }> {
+export async function stopRecording(
+  options: StopRecordingOptions,
+): Promise<{ path: string; duration: number; size: number }> {
   const { sessionId, relayPort = 19988 } = options
 
   const response = await fetch(`http://127.0.0.1:${relayPort}/recording/stop`, {
@@ -147,7 +154,7 @@ export async function stopRecording(options: StopRecordingOptions): Promise<{ pa
     body: JSON.stringify({ sessionId }),
   })
 
-  const result = await response.json() as StopRecordingResult
+  const result = (await response.json()) as StopRecordingResult
 
   if (!result.success) {
     throw new Error(`Failed to stop recording: ${result.error}`)
@@ -159,14 +166,18 @@ export async function stopRecording(options: StopRecordingOptions): Promise<{ pa
 /**
  * Check if recording is currently active.
  */
-export async function isRecording(options: { page: Page; sessionId?: string; relayPort?: number }): Promise<RecordingState> {
+export async function isRecording(options: {
+  page: Page
+  sessionId?: string
+  relayPort?: number
+}): Promise<RecordingState> {
   const { sessionId, relayPort = 19988 } = options
 
-  const url = sessionId 
+  const url = sessionId
     ? `http://127.0.0.1:${relayPort}/recording/status?sessionId=${encodeURIComponent(sessionId)}`
     : `http://127.0.0.1:${relayPort}/recording/status`
   const response = await fetch(url)
-  const result = await response.json() as IsRecordingResult
+  const result = (await response.json()) as IsRecordingResult
 
   return { isRecording: result.isRecording, startedAt: result.startedAt, tabId: result.tabId }
 }
@@ -183,7 +194,7 @@ export async function cancelRecording(options: { page: Page; sessionId?: string;
     body: JSON.stringify({ sessionId }),
   })
 
-  const result = await response.json() as CancelRecordingResult
+  const result = (await response.json()) as CancelRecordingResult
 
   if (!result.success) {
     throw new Error(`Failed to cancel recording: ${result.error}`)

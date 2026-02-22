@@ -2,19 +2,18 @@ import { CDPEventFor, ProtocolMapping } from './cdp-types.js'
 
 export const VERSION = 1
 
-type ForwardCDPCommand =
-  {
-    [K in keyof ProtocolMapping.Commands]: {
-      id: number
-      method: 'forwardCDPCommand'
-      params: {
-        method: K
-        sessionId?: string
-        params?: ProtocolMapping.Commands[K]['paramsType'][0]
-        source?: 'playwriter'
-      }
+type ForwardCDPCommand = {
+  [K in keyof ProtocolMapping.Commands]: {
+    id: number
+    method: 'forwardCDPCommand'
+    params: {
+      method: K
+      sessionId?: string
+      params?: ProtocolMapping.Commands[K]['paramsType'][0]
+      source?: 'playwriter'
     }
-  }[keyof ProtocolMapping.Commands]
+  }
+}[keyof ProtocolMapping.Commands]
 
 export type ExtensionCommandMessage = ForwardCDPCommand
 
@@ -29,18 +28,17 @@ export type ExtensionResponseMessage = {
  * This produces a discriminated union for narrowing, similar to ForwardCDPCommand,
  * but for forwarded CDP events. Uses CDPEvent to maintain proper type extraction.
  */
-export type ExtensionEventMessage =
-  {
-    [K in keyof ProtocolMapping.Events]: {
-      id?: undefined
-      method: 'forwardCDPEvent'
-      params: {
-        method: CDPEventFor<K>['method']
-        sessionId?: string
-        params?: CDPEventFor<K>['params']
-      }
+export type ExtensionEventMessage = {
+  [K in keyof ProtocolMapping.Events]: {
+    id?: undefined
+    method: 'forwardCDPEvent'
+    params: {
+      method: CDPEventFor<K>['method']
+      sessionId?: string
+      params?: CDPEventFor<K>['params']
     }
-  }[keyof ProtocolMapping.Events]
+  }
+}[keyof ProtocolMapping.Events]
 
 export type ExtensionLogMessage = {
   id?: undefined
@@ -78,7 +76,13 @@ export type RecordingCancelledMessage = {
   }
 }
 
-export type ExtensionMessage = ExtensionResponseMessage | ExtensionEventMessage | ExtensionLogMessage | ExtensionPongMessage | RecordingDataMessage | RecordingCancelledMessage
+export type ExtensionMessage =
+  | ExtensionResponseMessage
+  | ExtensionEventMessage
+  | ExtensionLogMessage
+  | ExtensionPongMessage
+  | RecordingDataMessage
+  | RecordingCancelledMessage
 
 // Recording command messages (MCP -> Extension via relay)
 export type StartRecordingParams = {
@@ -137,36 +141,42 @@ export type RecordingCommandMessage =
   | CancelRecordingMessage
 
 // Recording result types
-export type StartRecordingResult = {
-  success: true
-  tabId: number
-  startedAt: number
-} | {
-  success: false
-  error: string
-}
+export type StartRecordingResult =
+  | {
+      success: true
+      tabId: number
+      startedAt: number
+    }
+  | {
+      success: false
+      error: string
+    }
 
 /** Result from extension - doesn't include path/size since relay writes the file */
-export type ExtensionStopRecordingResult = {
-  success: true
-  tabId: number
-  duration: number
-} | {
-  success: false
-  error: string
-}
+export type ExtensionStopRecordingResult =
+  | {
+      success: true
+      tabId: number
+      duration: number
+    }
+  | {
+      success: false
+      error: string
+    }
 
 /** Final result from relay - includes path/size after file is written */
-export type StopRecordingResult = {
-  success: true
-  tabId: number
-  duration: number
-  path: string
-  size: number
-} | {
-  success: false
-  error: string
-}
+export type StopRecordingResult =
+  | {
+      success: true
+      tabId: number
+      duration: number
+      path: string
+      size: number
+    }
+  | {
+      success: false
+      error: string
+    }
 
 export type IsRecordingResult = {
   isRecording: boolean
@@ -193,10 +203,12 @@ export type GhostBrowserCommandMessage = {
   }
 }
 
-export type GhostBrowserCommandResult = {
-  success: true
-  result: unknown
-} | {
-  success: false
-  error: string
-}
+export type GhostBrowserCommandResult =
+  | {
+      success: true
+      result: unknown
+    }
+  | {
+      success: false
+      error: string
+    }

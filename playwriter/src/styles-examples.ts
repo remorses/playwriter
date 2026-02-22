@@ -74,4 +74,11 @@ async function compareStyles() {
   console.log(formatStylesAsText(secondary))
 }
 
-export { getElementStyles, inspectButtonStyles, getStylesWithUserAgent, findPropertySource, checkInheritedStyles, compareStyles }
+export {
+  getElementStyles,
+  inspectButtonStyles,
+  getStylesWithUserAgent,
+  findPropertySource,
+  checkInheritedStyles,
+  compareStyles,
+}

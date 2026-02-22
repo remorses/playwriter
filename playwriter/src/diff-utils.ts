@@ -16,7 +16,7 @@ export interface CreateSmartDiffOptions {
 
 /**
  * Creates a smart diff that returns full content when changes exceed threshold.
- * 
+ *
  * When more than `threshold` (default 50%) of lines have changed, showing a diff
  * is not useful - we return the full new content instead.
  */
@@ -54,10 +54,7 @@ export function createSmartDiff(options: CreateSmartDiffOptions): SmartDiffResul
   const changeRatio = Math.min(changedLines / maxLines, 1) // Cap at 100%
 
   // Build unified diff string from structured patch
-  const diffLines: string[] = [
-    `--- ${label} (previous)`,
-    `+++ ${label} (current)`,
-  ]
+  const diffLines: string[] = [`--- ${label} (previous)`, `+++ ${label} (current)`]
   for (const hunk of patch.hunks) {
     diffLines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`)
     diffLines.push(...hunk.lines)

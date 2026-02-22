@@ -25,11 +25,12 @@
    ======================================================================== */
 
 @font-face {
-  font-family: "JetBrainsMono NF Mono";
+  font-family: 'JetBrainsMono NF Mono';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("https://raw.githubusercontent.com/ryanoasis/nerd-fonts/refs/tags/v3.3.0/patched-fonts/JetBrainsMono/Ligatures/Regular/JetBrainsMonoNerdFontMono-Regular.ttf") format("truetype");
+  src: url('https://raw.githubusercontent.com/ryanoasis/nerd-fonts/refs/tags/v3.3.0/patched-fonts/JetBrainsMono/Ligatures/Regular/JetBrainsMonoNerdFontMono-Regular.ttf')
+    format('truetype');
 }
 
 /* ========================================================================
@@ -38,7 +39,9 @@
 
 .editorial-page {
   font-optical-sizing: auto;
-  font-feature-settings: "liga" 1, "calt" 1;
+  font-feature-settings:
+    'liga' 1,
+    'calt' 1;
 }
 
 .editorial-page ::selection {
@@ -119,7 +122,7 @@
 }
 
 .inline-code::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: -1.26px 0;
   background: rgba(0, 0, 0, 0.04);
@@ -144,7 +147,7 @@
    ======================================================================== */
 
 .editorial-page::before {
-  content: "";
+  content: '';
   pointer-events: none;
   z-index: 9;
   position: fixed;

@@ -24,8 +24,6 @@ export interface EvaluateResult {
   value: unknown
 }
 
-
-
 export interface ScriptInfo {
   scriptId: string
   url: string
@@ -533,9 +531,7 @@ export class Debugger {
   async listScripts({ search }: { search?: string } = {}): Promise<ScriptInfo[]> {
     await this.enable()
     const scripts = Array.from(this.scripts.values())
-    const filtered = search
-      ? scripts.filter((s) => s.url.toLowerCase().includes(search.toLowerCase()))
-      : scripts
+    const filtered = search ? scripts.filter((s) => s.url.toLowerCase().includes(search.toLowerCase())) : scripts
     return filtered.slice(0, 20)
   }
 

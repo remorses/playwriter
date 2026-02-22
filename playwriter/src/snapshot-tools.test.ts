@@ -17,87 +17,92 @@ import './test-declarations.js'
 const TEST_PORT = 19991
 
 describe('Snapshot & Screenshot Tests', () => {
-    let client: Awaited<ReturnType<typeof createMCPClient>>['client']
-    let cleanup: (() => Promise<void>) | null = null
-    let testCtx: TestContext | null = null
+  let client: Awaited<ReturnType<typeof createMCPClient>>['client']
+  let cleanup: (() => Promise<void>) | null = null
+  let testCtx: TestContext | null = null
 
-    beforeAll(async () => {
-        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-snap-test-', toggleExtension: true })
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-snap-test-', toggleExtension: true })
 
-        const result = await createMCPClient({ port: TEST_PORT })
-        client = result.client
-        cleanup = result.cleanup
-    }, 600000)
+    const result = await createMCPClient({ port: TEST_PORT })
+    client = result.client
+    cleanup = result.cleanup
+  }, 600000)
 
-    afterAll(async () => {
-        await cleanupTestContext(testCtx, cleanup)
-        cleanup = null
-        testCtx = null
+  afterAll(async () => {
+    await cleanupTestContext(testCtx, cleanup)
+    cleanup = null
+    testCtx = null
+  })
+
+  const getBrowserContext = () => {
+    if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+    return testCtx.browserContext
+  }
+
+  it('should capture screenshot correctly', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
     })
 
-    const getBrowserContext = () => {
-        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
-        return testCtx.browserContext
+    await new Promise((r) => setTimeout(r, 100))
+
+    const capturedCommands: CDPCommand[] = []
+    const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
+      if (command.method === 'Page.captureScreenshot') {
+        capturedCommands.push(command)
+      }
+    }
+    testCtx!.relayServer.on('cdp:command', commandHandler)
+
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+
+    expect(cdpPage).toBeDefined()
+
+    const viewportSize = cdpPage!.viewportSize()
+    console.log('Viewport size:', viewportSize)
+
+    const viewportScreenshot = await cdpPage!.screenshot()
+    expect(viewportScreenshot).toBeDefined()
+
+    const viewportDimensions = imageSize(viewportScreenshot)
+    console.log('Viewport screenshot dimensions:', viewportDimensions)
+    expect(viewportDimensions.width).toBeGreaterThan(0)
+    expect(viewportDimensions.height).toBeGreaterThan(0)
+    if (viewportSize) {
+      expect(viewportDimensions.width).toBe(viewportSize.width)
+      expect(viewportDimensions.height).toBe(viewportSize.height)
     }
 
-    it('should capture screenshot correctly', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const fullPageScreenshot = await cdpPage!.screenshot({ fullPage: true })
+    expect(fullPageScreenshot).toBeDefined()
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const fullPageDimensions = imageSize(fullPageScreenshot)
+    console.log('Full page screenshot dimensions:', fullPageDimensions)
+    expect(fullPageDimensions.width).toBeGreaterThan(0)
+    expect(fullPageDimensions.height).toBeGreaterThan(0)
+    expect(fullPageDimensions.width).toBeGreaterThanOrEqual(viewportDimensions.width!)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    testCtx!.relayServer.off('cdp:command', commandHandler)
 
-        await new Promise(r => setTimeout(r, 100))
-
-        const capturedCommands: CDPCommand[] = []
-        const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
-            if (command.method === 'Page.captureScreenshot') {
-                capturedCommands.push(command)
-            }
-        }
-        testCtx!.relayServer.on('cdp:command', commandHandler)
-
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-
-        expect(cdpPage).toBeDefined()
-
-        const viewportSize = cdpPage!.viewportSize()
-        console.log('Viewport size:', viewportSize)
-
-        const viewportScreenshot = await cdpPage!.screenshot()
-        expect(viewportScreenshot).toBeDefined()
-
-        const viewportDimensions = imageSize(viewportScreenshot)
-        console.log('Viewport screenshot dimensions:', viewportDimensions)
-        expect(viewportDimensions.width).toBeGreaterThan(0)
-        expect(viewportDimensions.height).toBeGreaterThan(0)
-        if (viewportSize) {
-            expect(viewportDimensions.width).toBe(viewportSize.width)
-            expect(viewportDimensions.height).toBe(viewportSize.height)
-        }
-
-        const fullPageScreenshot = await cdpPage!.screenshot({ fullPage: true })
-        expect(fullPageScreenshot).toBeDefined()
-
-        const fullPageDimensions = imageSize(fullPageScreenshot)
-        console.log('Full page screenshot dimensions:', fullPageDimensions)
-        expect(fullPageDimensions.width).toBeGreaterThan(0)
-        expect(fullPageDimensions.height).toBeGreaterThan(0)
-        expect(fullPageDimensions.width).toBeGreaterThanOrEqual(viewportDimensions.width!)
-
-        testCtx!.relayServer.off('cdp:command', commandHandler)
-
-        expect(capturedCommands.length).toBe(2)
-        expect(capturedCommands.map(c => ({
-            method: c.method,
-            params: c.params
-        }))).toMatchInlineSnapshot(`
+    expect(capturedCommands.length).toBe(2)
+    expect(
+      capturedCommands.map((c) => ({
+        method: c.method,
+        params: c.params,
+      })),
+    ).toMatchInlineSnapshot(`
           [
             {
               "method": "Page.captureScreenshot",
@@ -130,62 +135,65 @@ describe('Snapshot & Screenshot Tests', () => {
           ]
         `)
 
-        const screenshotPath = path.join(os.tmpdir(), 'playwriter-test-screenshot.png')
-        fs.writeFileSync(screenshotPath, viewportScreenshot)
-        console.log('Screenshot saved to:', screenshotPath)
+    const screenshotPath = path.join(os.tmpdir(), 'playwriter-test-screenshot.png')
+    fs.writeFileSync(screenshotPath, viewportScreenshot)
+    console.log('Screenshot saved to:', screenshotPath)
 
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should match window.innerWidth/Height without clip param', async () => {
-        // Proves that in connectOverCDP mode, Playwright already queries
-        // window.innerWidth/innerHeight for viewport screenshots, so passing
-        // a manual clip is redundant.
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should match window.innerWidth/Height without clip param', async () => {
+    // Proves that in connectOverCDP mode, Playwright already queries
+    // window.innerWidth/innerHeight for viewport screenshots, so passing
+    // a manual clip is redundant.
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        // Get actual browser viewport via JS
-        const actualViewport = await cdpPage!.evaluate(() => ({
-            width: window.innerWidth,
-            height: window.innerHeight,
-        }))
-        console.log('Actual viewport (window.inner*):', actualViewport)
+    // Get actual browser viewport via JS
+    const actualViewport = await cdpPage!.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
+    console.log('Actual viewport (window.inner*):', actualViewport)
 
-        // Plain screenshot with scale:'css', NO clip
-        const screenshot = await cdpPage!.screenshot({ scale: 'css' })
-        const dimensions = imageSize(screenshot)
-        console.log('Screenshot dimensions (no clip):', dimensions)
+    // Plain screenshot with scale:'css', NO clip
+    const screenshot = await cdpPage!.screenshot({ scale: 'css' })
+    const dimensions = imageSize(screenshot)
+    console.log('Screenshot dimensions (no clip):', dimensions)
 
-        expect(dimensions.width).toBe(actualViewport.width)
-        expect(dimensions.height).toBe(actualViewport.height)
+    expect(dimensions.width).toBe(actualViewport.width)
+    expect(dimensions.height).toBe(actualViewport.height)
 
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should capture element screenshot with correct coordinates', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should capture element screenshot with correct coordinates', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const target = { x: 200, y: 150, width: 300, height: 100 }
-        const scrolledTarget = { x: 100, y: 1500, width: 200, height: 80 }
+    const target = { x: 200, y: 150, width: 300, height: 100 }
+    const scrolledTarget = { x: 100, y: 1500, width: 200, height: 80 }
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <head>
                     <style>
@@ -214,67 +222,67 @@ describe('Snapshot & Screenshot Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        await new Promise(r => setTimeout(r, 400))
+    await new Promise((r) => setTimeout(r, 400))
 
-        const capturedCommands: CDPCommand[] = []
-        const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
-            if (command.method === 'Page.captureScreenshot') {
-                capturedCommands.push(command)
-            }
-        }
-        testCtx!.relayServer.on('cdp:command', commandHandler)
+    const capturedCommands: CDPCommand[] = []
+    const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
+      if (command.method === 'Page.captureScreenshot') {
+        capturedCommands.push(command)
+      }
+    }
+    testCtx!.relayServer.on('cdp:command', commandHandler)
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        let cdpPage
-        for (const p of browser.contexts()[0].pages()) {
-            const html = await p.content()
-            if (html.includes('scrolled-target')) {
-                cdpPage = p
-                break
-            }
-        }
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    let cdpPage
+    for (const p of browser.contexts()[0].pages()) {
+      const html = await p.content()
+      if (html.includes('scrolled-target')) {
+        cdpPage = p
+        break
+      }
+    }
+    expect(cdpPage).toBeDefined()
 
-        await cdpPage!.locator('#target').screenshot()
+    await cdpPage!.locator('#target').screenshot()
 
-        await cdpPage!.locator('#scrolled-target').screenshot()
+    await cdpPage!.locator('#scrolled-target').screenshot()
 
-        testCtx!.relayServer.off('cdp:command', commandHandler)
+    testCtx!.relayServer.off('cdp:command', commandHandler)
 
-        expect(capturedCommands.length).toBe(2)
+    expect(capturedCommands.length).toBe(2)
 
-        const targetCmd = capturedCommands[0]
-        expect(targetCmd.method).toBe('Page.captureScreenshot')
-        const targetClip = (targetCmd.params as any).clip
-        expect(targetClip.x).toBe(target.x)
-        expect(targetClip.y).toBe(target.y)
-        expect(targetClip.width).toBe(target.width)
-        expect(targetClip.height).toBe(target.height)
+    const targetCmd = capturedCommands[0]
+    expect(targetCmd.method).toBe('Page.captureScreenshot')
+    const targetClip = (targetCmd.params as any).clip
+    expect(targetClip.x).toBe(target.x)
+    expect(targetClip.y).toBe(target.y)
+    expect(targetClip.width).toBe(target.width)
+    expect(targetClip.height).toBe(target.height)
 
-        const scrolledCmd = capturedCommands[1]
-        expect(scrolledCmd.method).toBe('Page.captureScreenshot')
-        const scrolledClip = (scrolledCmd.params as any).clip
-        expect(scrolledClip.x).toBe(scrolledTarget.x)
-        expect(scrolledClip.y).toBe(scrolledTarget.y)
-        expect(scrolledClip.width).toBe(scrolledTarget.width)
-        expect(scrolledClip.height).toBe(scrolledTarget.height)
+    const scrolledCmd = capturedCommands[1]
+    expect(scrolledCmd.method).toBe('Page.captureScreenshot')
+    const scrolledClip = (scrolledCmd.params as any).clip
+    expect(scrolledClip.x).toBe(scrolledTarget.x)
+    expect(scrolledClip.y).toBe(scrolledTarget.y)
+    expect(scrolledClip.width).toBe(scrolledTarget.width)
+    expect(scrolledClip.height).toBe(scrolledTarget.height)
 
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should get locator string for element using getLocatorStringForElement', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should get locator string for element using getLocatorStringForElement', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <body>
                     <button id="test-btn">Click Me</button>
@@ -282,18 +290,18 @@ describe('Snapshot & Screenshot Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        await new Promise(r => setTimeout(r, 400))
+    await new Promise((r) => setTimeout(r, 400))
 
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -309,27 +317,27 @@ describe('Snapshot & Screenshot Tests', () => {
                     const text = await locatorFromString.textContent();
                     console.log('Locator text:', text);
                 `,
-                timeout: 30000,
-            },
-        })
+        timeout: 30000,
+      },
+    })
 
-        expect(result.isError).toBeFalsy()
-        const text = (result.content as any)[0]?.text || ''
-        expect(text).toContain('Locator string:')
-        expect(text).toContain("getByRole('button', { name: 'Click Me' })")
-        expect(text).toContain('Locator count:')
-        expect(text).toContain('Locator text:')
-        expect(text).toContain('Click Me')
+    expect(result.isError).toBeFalsy()
+    const text = (result.content as any)[0]?.text || ''
+    expect(text).toContain('Locator string:')
+    expect(text).toContain("getByRole('button', { name: 'Click Me' })")
+    expect(text).toContain('Locator count:')
+    expect(text).toContain('Locator text:')
+    expect(text).toContain('Click Me')
 
-        await page.close()
-    }, 60000)
+    await page.close()
+  }, 60000)
 
-    it('should get styles for element using getStylesForLocator', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should get styles for element using getStylesForLocator', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <head>
                     <style>
@@ -346,18 +354,18 @@ describe('Snapshot & Screenshot Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        await new Promise(r => setTimeout(r, 400))
+    await new Promise((r) => setTimeout(r, 400))
 
-        const stylesResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const stylesResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -368,13 +376,13 @@ describe('Snapshot & Screenshot Tests', () => {
                     const styles = await getStylesForLocator({ locator: btn });
                     return styles;
                 `,
-                timeout: 30000,
-            },
-        })
+        timeout: 30000,
+      },
+    })
 
-        expect(stylesResult.isError).toBeFalsy()
-        const stylesText = (stylesResult.content as any)[0]?.text || ''
-        expect(stylesText).toMatchInlineSnapshot(`
+    expect(stylesResult.isError).toBeFalsy()
+    const stylesText = (stylesResult.content as any)[0]?.text || ''
+    expect(stylesText).toMatchInlineSnapshot(`
           "[return value] {
             element: 'button#main-btn.btn',
             inlineStyle: { 'font-weight': 'bold' },
@@ -436,10 +444,10 @@ describe('Snapshot & Screenshot Tests', () => {
           }"
         `)
 
-        const formattedResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const formattedResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -450,13 +458,13 @@ describe('Snapshot & Screenshot Tests', () => {
                     const styles = await getStylesForLocator({ locator: btn });
                     return formatStylesAsText(styles);
                 `,
-                timeout: 30000,
-            },
-        })
+        timeout: 30000,
+      },
+    })
 
-        expect(formattedResult.isError).toBeFalsy()
-        const formattedText = (formattedResult.content as any)[0]?.text || ''
-        expect(formattedText).toMatchInlineSnapshot(`
+    expect(formattedResult.isError).toBeFalsy()
+    const formattedText = (formattedResult.content as any)[0]?.text || ''
+    expect(formattedText).toMatchInlineSnapshot(`
           "[return value] Element: button#main-btn.btn
 
           Inline styles:
@@ -501,42 +509,46 @@ describe('Snapshot & Screenshot Tests', () => {
             }"
         `)
 
-        await page.close()
-    }, 60000)
+    await page.close()
+  }, 60000)
 
-    it('should return correct layout metrics via CDP', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should return correct layout metrics via CDP', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        await new Promise(r => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
 
-        const layoutMetrics = await cdpSession.send('Page.getLayoutMetrics')
+    const layoutMetrics = await cdpSession.send('Page.getLayoutMetrics')
 
-        const normalized = {
-            cssLayoutViewport: layoutMetrics.cssLayoutViewport,
-            cssVisualViewport: layoutMetrics.cssVisualViewport,
-            layoutViewport: layoutMetrics.layoutViewport,
-            visualViewport: layoutMetrics.visualViewport,
-            devicePixelRatio: layoutMetrics.cssVisualViewport.clientWidth > 0
-                ? layoutMetrics.visualViewport.clientWidth / layoutMetrics.cssVisualViewport.clientWidth
-                : 1,
-        }
+    const normalized = {
+      cssLayoutViewport: layoutMetrics.cssLayoutViewport,
+      cssVisualViewport: layoutMetrics.cssVisualViewport,
+      layoutViewport: layoutMetrics.layoutViewport,
+      visualViewport: layoutMetrics.visualViewport,
+      devicePixelRatio:
+        layoutMetrics.cssVisualViewport.clientWidth > 0
+          ? layoutMetrics.visualViewport.clientWidth / layoutMetrics.cssVisualViewport.clientWidth
+          : 1,
+    }
 
-        expect(normalized).toMatchInlineSnapshot(`
+    expect(normalized).toMatchInlineSnapshot(`
           {
             "cssLayoutViewport": {
               "clientHeight": 720,
@@ -574,59 +586,62 @@ describe('Snapshot & Screenshot Tests', () => {
           }
         `)
 
-        const windowDpr = await cdpPage!.evaluate(() => (globalThis as any).devicePixelRatio)
-        console.log('window.devicePixelRatio:', windowDpr)
-        expect(windowDpr).toBe(1)
+    const windowDpr = await cdpPage!.evaluate(() => (globalThis as any).devicePixelRatio)
+    console.log('window.devicePixelRatio:', windowDpr)
+    expect(windowDpr).toBe(1)
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should support getExistingCDPSession through the relay (reusing Playwright WS)', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should support getExistingCDPSession through the relay (reusing Playwright WS)', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        await new Promise(r => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        // Use the new getCDPSessionForPage which reuses Playwright's internal WS
-        const cdpClient = await getCDPSessionForPage({ page: cdpPage! })
+    // Use the new getCDPSessionForPage which reuses Playwright's internal WS
+    const cdpClient = await getCDPSessionForPage({ page: cdpPage! })
 
-        // Should be able to send CDP commands just like the regular getCDPSessionForPage
-        const layoutMetrics = await cdpClient.send('Page.getLayoutMetrics')
-        expect(layoutMetrics).toBeDefined()
-        const metrics = layoutMetrics as { cssVisualViewport?: { clientWidth?: number } }
-        expect(metrics.cssVisualViewport).toBeDefined()
-        expect(metrics.cssVisualViewport!.clientWidth).toBeGreaterThan(0)
+    // Should be able to send CDP commands just like the regular getCDPSessionForPage
+    const layoutMetrics = await cdpClient.send('Page.getLayoutMetrics')
+    expect(layoutMetrics).toBeDefined()
+    const metrics = layoutMetrics as { cssVisualViewport?: { clientWidth?: number } }
+    expect(metrics.cssVisualViewport).toBeDefined()
+    expect(metrics.cssVisualViewport!.clientWidth).toBeGreaterThan(0)
 
-        // Test DOM access
-        const document = await cdpClient.send('DOM.getDocument')
-        expect(document).toBeDefined()
+    // Test DOM access
+    const document = await cdpClient.send('DOM.getDocument')
+    expect(document).toBeDefined()
 
-        await cdpClient.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpClient.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should get aria ref for locator using getAriaSnapshot', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should get aria ref for locator using getAriaSnapshot', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        // Use data-testid for stable refs, regular id for the button
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    // Use data-testid for stable refs, regular id for the button
+    await page.setContent(`
             <html>
                 <body>
                     <button data-testid="submit-btn">Submit Form</button>
@@ -635,252 +650,255 @@ describe('Snapshot & Screenshot Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 400))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 400))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        let cdpPage
-        for (const p of browser.contexts()[0].pages()) {
-            const html = await p.content()
-            if (html.includes('submit-btn')) {
-                cdpPage = p
-                break
-            }
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    let cdpPage
+    for (const p of browser.contexts()[0].pages()) {
+      const html = await p.content()
+      if (html.includes('submit-btn')) {
+        cdpPage = p
+        break
+      }
+    }
+    expect(cdpPage).toBeDefined()
+
+    const { getAriaSnapshot } = await import('./aria-snapshot.js')
+
+    const ariaResult = await getAriaSnapshot({
+      page: cdpPage!,
+    })
+
+    expect(ariaResult.snapshot).toBeDefined()
+    expect(ariaResult.snapshot.length).toBeGreaterThan(0)
+    expect(ariaResult.snapshot).toContain('Submit Form')
+    // Snapshot lines include Playwright locators for interactive elements
+    expect(ariaResult.snapshot).toContain('[data-testid="submit-btn"]')
+    expect(ariaResult.snapshot).toContain('[data-testid="about-link"]')
+    expect(ariaResult.snapshot).toContain('[data-testid="name-input"]')
+
+    const flattenNodes = (nodes: AriaSnapshotNode[]): AriaSnapshotNode[] => {
+      return nodes.flatMap((node) => {
+        return [node, ...flattenNodes(node.children)]
+      })
+    }
+
+    const allNodes = flattenNodes(ariaResult.tree)
+    const findByLocator = (locator: string) => {
+      return allNodes.find((node) => node.locator === locator)
+    }
+
+    const submitNode = findByLocator('[data-testid="submit-btn"]')
+    const aboutNode = findByLocator('[data-testid="about-link"]')
+    const nameNode = findByLocator('[data-testid="name-input"]')
+
+    expect(submitNode).toBeDefined()
+    expect(aboutNode).toBeDefined()
+    expect(nameNode).toBeDefined()
+
+    const submitLocator = cdpPage!.locator(submitNode!.locator!)
+    const aboutLocator = cdpPage!.locator(aboutNode!.locator!)
+    const nameLocator = cdpPage!.locator(nameNode!.locator!)
+
+    expect(await submitLocator.count()).toBe(1)
+    expect(await aboutLocator.count()).toBe(1)
+    expect(await nameLocator.count()).toBe(1)
+
+    expect(await submitLocator.textContent()).toBe('Submit Form')
+    expect(await aboutLocator.textContent()).toBe('About Us')
+    expect(await nameLocator.getAttribute('placeholder')).toBe('Enter your name')
+
+    expect(ariaResult.refToElement.size).toBeGreaterThan(0)
+    console.log('RefToElement map size:', ariaResult.refToElement.size)
+    console.log('RefToElement entries:', [...ariaResult.refToElement.entries()])
+
+    // Verify refs are stable test IDs
+    expect(ariaResult.refToElement.has('submit-btn')).toBe(true)
+    expect(ariaResult.refToElement.has('about-link')).toBe(true)
+    expect(ariaResult.refToElement.has('name-input')).toBe(true)
+
+    // Use getSelectorForRef to get CSS selector for a ref
+    const btnSelector = ariaResult.getSelectorForRef('submit-btn')
+    expect(btnSelector).toBeDefined()
+    console.log('Button selector:', btnSelector)
+
+    // Verify the selector works
+    const btnViaSelector = cdpPage!.locator(btnSelector!)
+    const btnTextViaRef = await btnViaSelector.textContent()
+    console.log('Button text via selector:', btnTextViaRef)
+    expect(btnTextViaRef).toBe('Submit Form')
+
+    // Test role and name
+    const btnInfo = ariaResult.refToElement.get('submit-btn')
+    expect(btnInfo?.role).toBe('button')
+    expect(btnInfo?.name).toBe('Submit Form')
+
+    const linkInfo = ariaResult.refToElement.get('about-link')
+    expect(linkInfo?.role).toBe('link')
+    expect(linkInfo?.name).toBe('About Us')
+
+    const inputInfo = ariaResult.refToElement.get('name-input')
+    expect(inputInfo?.role).toBe('textbox')
+
+    await browser.close()
+    await page.close()
+  }, 60000)
+
+  it('should show aria ref labels on real pages and save screenshots', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const { showAriaRefLabels, hideAriaRefLabels } = await import('./aria-snapshot.js')
+
+    // Create assets folder for screenshots
+    const assetsDir = path.join(path.dirname(new URL(import.meta.url).pathname), 'assets')
+    if (!fs.existsSync(assetsDir)) {
+      fs.mkdirSync(assetsDir, { recursive: true })
+    }
+
+    const testPages = [
+      { name: 'old-reddit', url: 'https://old.reddit.com/' },
+      { name: 'hacker-news', url: 'https://news.ycombinator.com/' },
+    ]
+
+    const loadPageWithRetries = async ({ name, url }: { name: string; url: string }) => {
+      const page = await browserContext.newPage()
+      page.setDefaultNavigationTimeout(60000)
+
+      const attempts = 2
+      let lastError: unknown = null
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+          console.log(`[labels] opening ${name}: ${url} (attempt ${attempt}/${attempts})`)
+          await page.goto(url, { waitUntil: 'load' })
+          console.log(`[labels] loaded ${name}: ${page.url()}`)
+          return { name, url, page }
+        } catch (error) {
+          lastError = error
         }
-        expect(cdpPage).toBeDefined()
+      }
 
-        const { getAriaSnapshot } = await import('./aria-snapshot.js')
+      await page.close()
+      throw new Error(`Failed to load ${name} after ${attempts} attempts`, {
+        cause: lastError instanceof Error ? lastError : undefined,
+      })
+    }
 
-        const ariaResult = await getAriaSnapshot({
-          page: cdpPage!,
-        })
+    const pages = await Promise.all(
+      testPages.map((testPage) => {
+        return loadPageWithRetries(testPage)
+      }),
+    )
 
-        expect(ariaResult.snapshot).toBeDefined()
-        expect(ariaResult.snapshot.length).toBeGreaterThan(0)
-        expect(ariaResult.snapshot).toContain('Submit Form')
-        // Snapshot lines include Playwright locators for interactive elements
-        expect(ariaResult.snapshot).toContain('[data-testid="submit-btn"]')
-        expect(ariaResult.snapshot).toContain('[data-testid="about-link"]')
-        expect(ariaResult.snapshot).toContain('[data-testid="name-input"]')
+    for (const { page } of pages) {
+      await page.bringToFront()
+      await serviceWorker.evaluate(async () => {
+        await globalThis.toggleExtensionForActiveTab()
+      })
+    }
 
-        const flattenNodes = (nodes: AriaSnapshotNode[]): AriaSnapshotNode[] => {
-          return nodes.flatMap((node) => {
-            return [node, ...flattenNodes(node.children)]
-          })
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+
+    const withTimeout = async <T>(label: string, task: () => Promise<T>, timeoutMs: number): Promise<T> => {
+      let timeoutId: NodeJS.Timeout | null = null
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Timed out after ${timeoutMs}ms: ${label}`))
+        }, timeoutMs)
+      })
+
+      try {
+        return await Promise.race([task(), timeoutPromise])
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
         }
+      }
+    }
 
-        const allNodes = flattenNodes(ariaResult.tree)
-        const findByLocator = (locator: string) => {
-          return allNodes.find((node) => node.locator === locator)
-        }
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
 
-        const submitNode = findByLocator('[data-testid="submit-btn"]')
-        const aboutNode = findByLocator('[data-testid="about-link"]')
-        const nameNode = findByLocator('[data-testid="name-input"]')
+    for (const { name, url, page } of pages) {
+      console.log(`[labels] start ${name}`)
+      const cdpPage = browser
+        .contexts()[0]
+        .pages()
+        .find((p) => p.url().includes(new URL(url).hostname))
 
-        expect(submitNode).toBeDefined()
-        expect(aboutNode).toBeDefined()
-        expect(nameNode).toBeDefined()
+      if (!cdpPage) {
+        throw new Error(`Could not find CDP page for ${name}`)
+      }
 
-        const submitLocator = cdpPage!.locator(submitNode!.locator!)
-        const aboutLocator = cdpPage!.locator(aboutNode!.locator!)
-        const nameLocator = cdpPage!.locator(nameNode!.locator!)
+      console.log(`[labels] show labels ${name}`)
+      const { labelCount } = await withTimeout(
+        `showAriaRefLabels(${name})`,
+        async () => {
+          return await showAriaRefLabels({ page: cdpPage })
+        },
+        60000,
+      )
+      console.log(`${name}: ${labelCount} labels shown`)
+      expect(labelCount).toBeGreaterThan(0)
 
-        expect(await submitLocator.count()).toBe(1)
-        expect(await aboutLocator.count()).toBe(1)
-        expect(await nameLocator.count()).toBe(1)
+      console.log(`[labels] screenshot ${name}`)
+      const screenshot = await withTimeout(
+        `screenshot(${name})`,
+        async () => {
+          return await cdpPage.screenshot({ type: 'png', fullPage: false })
+        },
+        30000,
+      )
+      const screenshotPath = path.join(assetsDir, `aria-labels-${name}.png`)
+      fs.writeFileSync(screenshotPath, screenshot)
+      console.log(`Screenshot saved: ${screenshotPath}`)
 
-        expect(await submitLocator.textContent()).toBe('Submit Form')
-        expect(await aboutLocator.textContent()).toBe('About Us')
-        expect(await nameLocator.getAttribute('placeholder')).toBe('Enter your name')
+      console.log(`[labels] count dom labels ${name}`)
+      const labelElements = await withTimeout(
+        `countLabels(${name})`,
+        async () => {
+          return await cdpPage.evaluate(() => document.querySelectorAll('.__pw_label__').length)
+        },
+        10000,
+      )
+      expect(labelElements).toBe(labelCount)
 
-        expect(ariaResult.refToElement.size).toBeGreaterThan(0)
-        console.log('RefToElement map size:', ariaResult.refToElement.size)
-        console.log('RefToElement entries:', [...ariaResult.refToElement.entries()])
+      console.log(`[labels] hide labels ${name}`)
+      await withTimeout(
+        `hideAriaRefLabels(${name})`,
+        async () => {
+          await hideAriaRefLabels({ page: cdpPage })
+        },
+        10000,
+      )
 
-        // Verify refs are stable test IDs
-        expect(ariaResult.refToElement.has('submit-btn')).toBe(true)
-        expect(ariaResult.refToElement.has('about-link')).toBe(true)
-        expect(ariaResult.refToElement.has('name-input')).toBe(true)
+      const labelsAfterHide = await withTimeout(
+        `verifyHide(${name})`,
+        async () => {
+          return await cdpPage.evaluate(() => document.getElementById('__playwriter_labels__'))
+        },
+        10000,
+      )
+      expect(labelsAfterHide).toBeNull()
 
-        // Use getSelectorForRef to get CSS selector for a ref
-        const btnSelector = ariaResult.getSelectorForRef('submit-btn')
-        expect(btnSelector).toBeDefined()
-        console.log('Button selector:', btnSelector)
+      console.log(`[labels] close page ${name}`)
+      await page.close()
+    }
 
-        // Verify the selector works
-        const btnViaSelector = cdpPage!.locator(btnSelector!)
-        const btnTextViaRef = await btnViaSelector.textContent()
-        console.log('Button text via selector:', btnTextViaRef)
-        expect(btnTextViaRef).toBe('Submit Form')
+    await browser.close()
+    console.log(`Screenshots saved to: ${assetsDir}`)
+  }, 180000)
 
-        // Test role and name
-        const btnInfo = ariaResult.refToElement.get('submit-btn')
-        expect(btnInfo?.role).toBe('button')
-        expect(btnInfo?.name).toBe('Submit Form')
+  it('should take screenshot with accessibility labels via MCP execute tool', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const linkInfo = ariaResult.refToElement.get('about-link')
-        expect(linkInfo?.role).toBe('link')
-        expect(linkInfo?.name).toBe('About Us')
-
-        const inputInfo = ariaResult.refToElement.get('name-input')
-        expect(inputInfo?.role).toBe('textbox')
-
-        await browser.close()
-        await page.close()
-    }, 60000)
-
-    it('should show aria ref labels on real pages and save screenshots', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        const { showAriaRefLabels, hideAriaRefLabels } = await import('./aria-snapshot.js')
-
-        // Create assets folder for screenshots
-        const assetsDir = path.join(path.dirname(new URL(import.meta.url).pathname), 'assets')
-        if (!fs.existsSync(assetsDir)) {
-            fs.mkdirSync(assetsDir, { recursive: true })
-        }
-
-        const testPages = [
-            { name: 'old-reddit', url: 'https://old.reddit.com/' },
-            { name: 'hacker-news', url: 'https://news.ycombinator.com/' },
-        ]
-
-        const loadPageWithRetries = async ({ name, url }: { name: string; url: string }) => {
-            const page = await browserContext.newPage()
-            page.setDefaultNavigationTimeout(60000)
-
-            const attempts = 2
-            let lastError: unknown = null
-            for (let attempt = 1; attempt <= attempts; attempt += 1) {
-                try {
-                    console.log(`[labels] opening ${name}: ${url} (attempt ${attempt}/${attempts})`)
-                    await page.goto(url, { waitUntil: 'load' })
-                    console.log(`[labels] loaded ${name}: ${page.url()}`)
-                    return { name, url, page }
-                } catch (error) {
-                    lastError = error
-                }
-            }
-
-            await page.close()
-            throw new Error(`Failed to load ${name} after ${attempts} attempts`, { cause: lastError instanceof Error ? lastError : undefined })
-        }
-
-        const pages = await Promise.all(testPages.map((testPage) => {
-            return loadPageWithRetries(testPage)
-        }))
-
-        for (const { page } of pages) {
-            await page.bringToFront()
-            await serviceWorker.evaluate(async () => {
-                await globalThis.toggleExtensionForActiveTab()
-            })
-        }
-
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-
-        const withTimeout = async <T,>(label: string, task: () => Promise<T>, timeoutMs: number): Promise<T> => {
-            let timeoutId: NodeJS.Timeout | null = null
-            const timeoutPromise = new Promise<never>((_, reject) => {
-                timeoutId = setTimeout(() => {
-                    reject(new Error(`Timed out after ${timeoutMs}ms: ${label}`))
-                }, timeoutMs)
-            })
-
-            try {
-                return await Promise.race([task(), timeoutPromise])
-            } finally {
-                if (timeoutId) {
-                    clearTimeout(timeoutId)
-                }
-            }
-        }
-
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-
-        for (const { name, url, page } of pages) {
-            console.log(`[labels] start ${name}`)
-            const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes(new URL(url).hostname))
-
-            if (!cdpPage) {
-                throw new Error(`Could not find CDP page for ${name}`)
-            }
-
-            console.log(`[labels] show labels ${name}`)
-            const { labelCount } = await withTimeout(
-                `showAriaRefLabels(${name})`,
-                async () => {
-                    return await showAriaRefLabels({ page: cdpPage })
-                },
-                60000
-            )
-            console.log(`${name}: ${labelCount} labels shown`)
-            expect(labelCount).toBeGreaterThan(0)
-
-            console.log(`[labels] screenshot ${name}`)
-            const screenshot = await withTimeout(
-                `screenshot(${name})`,
-                async () => {
-                    return await cdpPage.screenshot({ type: 'png', fullPage: false })
-                },
-                30000
-            )
-            const screenshotPath = path.join(assetsDir, `aria-labels-${name}.png`)
-            fs.writeFileSync(screenshotPath, screenshot)
-            console.log(`Screenshot saved: ${screenshotPath}`)
-
-            console.log(`[labels] count dom labels ${name}`)
-            const labelElements = await withTimeout(
-                `countLabels(${name})`,
-                async () => {
-                    return await cdpPage.evaluate(() =>
-                        document.querySelectorAll('.__pw_label__').length
-                    )
-                },
-                10000
-            )
-            expect(labelElements).toBe(labelCount)
-
-            console.log(`[labels] hide labels ${name}`)
-            await withTimeout(
-                `hideAriaRefLabels(${name})`,
-                async () => {
-                    await hideAriaRefLabels({ page: cdpPage })
-                },
-                10000
-            )
-
-            const labelsAfterHide = await withTimeout(
-                `verifyHide(${name})`,
-                async () => {
-                    return await cdpPage.evaluate(() =>
-                        document.getElementById('__playwriter_labels__')
-                    )
-                },
-                10000
-            )
-            expect(labelsAfterHide).toBeNull()
-
-            console.log(`[labels] close page ${name}`)
-            await page.close()
-        }
-
-        await browser.close()
-        console.log(`Screenshots saved to: ${assetsDir}`)
-    }, 180000)
-
-    it('should take screenshot with accessibility labels via MCP execute tool', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <head>
                     <style>
@@ -937,17 +955,17 @@ describe('Snapshot & Screenshot Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 400))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 400))
 
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -956,45 +974,45 @@ describe('Snapshot & Screenshot Tests', () => {
                     if (!testPage) throw new Error('Test page not found');
                     await screenshotWithAccessibilityLabels({ page: testPage });
                 `,
-                timeout: 15000,
-            },
-        })
+        timeout: 15000,
+      },
+    })
 
-        expect(result.isError).toBeFalsy()
+    expect(result.isError).toBeFalsy()
 
-        const content = result.content as any[]
-        expect(content.length).toBe(2)
+    const content = result.content as any[]
+    expect(content.length).toBe(2)
 
-        const textContent = content.find(c => c.type === 'text')
-        expect(textContent).toBeDefined()
-        expect(textContent.text).toContain('Screenshot saved to:')
-        expect(textContent.text).toContain('.jpg')
-        expect(textContent.text).toContain('Labels shown:')
-        expect(textContent.text).toContain('Accessibility snapshot:')
-        expect(textContent.text).toContain('Submit Form')
+    const textContent = content.find((c) => c.type === 'text')
+    expect(textContent).toBeDefined()
+    expect(textContent.text).toContain('Screenshot saved to:')
+    expect(textContent.text).toContain('.jpg')
+    expect(textContent.text).toContain('Labels shown:')
+    expect(textContent.text).toContain('Accessibility snapshot:')
+    expect(textContent.text).toContain('Submit Form')
 
-        const imageContent = content.find(c => c.type === 'image')
-        expect(imageContent).toBeDefined()
-        expect(imageContent.mimeType).toBe('image/jpeg')
-        expect(imageContent.data).toBeDefined()
-        expect(imageContent.data.length).toBeGreaterThan(100)
+    const imageContent = content.find((c) => c.type === 'image')
+    expect(imageContent).toBeDefined()
+    expect(imageContent.mimeType).toBe('image/jpeg')
+    expect(imageContent.data).toBeDefined()
+    expect(imageContent.data.length).toBeGreaterThan(100)
 
-        const buffer = Buffer.from(imageContent.data, 'base64')
-        const dimensions = imageSize(buffer)
+    const buffer = Buffer.from(imageContent.data, 'base64')
+    const dimensions = imageSize(buffer)
 
-        const viewport = await page.evaluate(() => ({
-            innerWidth: window.innerWidth,
-            innerHeight: window.innerHeight,
-            outerWidth: window.outerWidth,
-            outerHeight: window.outerHeight,
-        }))
-        console.log('Screenshot dimensions:', dimensions.width, 'x', dimensions.height)
-        console.log('Window viewport:', viewport)
+    const viewport = await page.evaluate(() => ({
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+    }))
+    console.log('Screenshot dimensions:', dimensions.width, 'x', dimensions.height)
+    console.log('Window viewport:', viewport)
 
-        expect(dimensions.type).toBe('jpg')
-        expect(dimensions.width).toBeGreaterThan(0)
-        expect(dimensions.height).toBeGreaterThan(0)
+    expect(dimensions.type).toBe('jpg')
+    expect(dimensions.width).toBeGreaterThan(0)
+    expect(dimensions.height).toBeGreaterThan(0)
 
-        await page.close()
-    }, 60000)
+    await page.close()
+  }, 60000)
 })

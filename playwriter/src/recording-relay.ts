@@ -22,7 +22,7 @@ import type {
 // Recording state - tracks active recordings and their accumulated chunks
 export interface ActiveRecording {
   tabId: number
-  sessionId?: string  // The sessionId used to start this recording, for lookup when stopping
+  sessionId?: string // The sessionId used to start this recording, for lookup when stopping
   outputPath: string
   chunks: Buffer[]
   startedAt: number
@@ -40,7 +40,7 @@ export class RecordingRelay {
   constructor(
     sendToExtension: (params: { method: string; params?: unknown; timeout?: number }) => Promise<unknown>,
     isExtensionConnected: () => boolean,
-    logger?: { log(...args: unknown[]): void; error(...args: unknown[]): void }
+    logger?: { log(...args: unknown[]): void; error(...args: unknown[]): void },
   ) {
     this.sendToExtension = sendToExtension
     this.isExtensionConnected = isExtensionConnected
@@ -58,7 +58,11 @@ export class RecordingRelay {
       const recording = this.activeRecordings.get(tabId)
       if (recording) {
         recording.chunks.push(buffer)
-        this.logger?.log(pc.blue(`Received recording chunk for tab ${tabId}: ${buffer.length} bytes (total chunks: ${recording.chunks.length})`))
+        this.logger?.log(
+          pc.blue(
+            `Received recording chunk for tab ${tabId}: ${buffer.length} bytes (total chunks: ${recording.chunks.length})`,
+          ),
+        )
       } else {
         this.logger?.log(pc.yellow(`Received recording chunk for unknown tab ${tabId}, ignoring`))
       }
@@ -140,11 +144,11 @@ export class RecordingRelay {
     }
 
     try {
-      const result = await this.sendToExtension({
+      const result = (await this.sendToExtension({
         method: 'startRecording',
         params: recordingParams,
         timeout: 10000,
-      }) as StartRecordingResult
+      })) as StartRecordingResult
 
       if (!result) {
         return { success: false, error: 'Extension returned empty result' }
@@ -158,7 +162,11 @@ export class RecordingRelay {
           chunks: [],
           startedAt: result.startedAt,
         })
-        this.logger?.log(pc.green(`Recording started for tab ${result.tabId} (sessionId: ${recordingParams.sessionId || 'none'}), output: ${outputPath}`))
+        this.logger?.log(
+          pc.green(
+            `Recording started for tab ${result.tabId} (sessionId: ${recordingParams.sessionId || 'none'}), output: ${outputPath}`,
+          ),
+        )
       }
 
       return result
@@ -211,11 +219,11 @@ export class RecordingRelay {
     })
 
     try {
-      const result = await this.sendToExtension({
+      const result = (await this.sendToExtension({
         method: 'stopRecording',
         params,
         timeout: 10000,
-      }) as StopRecordingResult
+      })) as StopRecordingResult
 
       if (!result.success) {
         recording.resolveStop = undefined
@@ -237,11 +245,11 @@ export class RecordingRelay {
     }
 
     try {
-      return await this.sendToExtension({
+      return (await this.sendToExtension({
         method: 'isRecording',
         params,
         timeout: 5000,
-      }) as IsRecordingResult
+      })) as IsRecordingResult
     } catch {
       return { isRecording: false }
     }
@@ -253,11 +261,11 @@ export class RecordingRelay {
     }
 
     try {
-      return await this.sendToExtension({
+      return (await this.sendToExtension({
         method: 'cancelRecording',
         params,
         timeout: 5000,
-      }) as CancelRecordingResult
+      })) as CancelRecordingResult
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       this.logger?.error('Cancel recording error:', error)

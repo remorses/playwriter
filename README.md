@@ -13,13 +13,13 @@
 
 Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly flagged by bot detectors, double the memory. Playwriter connects to **your running browser** instead. One Chrome extension, full Playwright API, everything you're already logged into.
 
-| | Playwright MCP | Playwriter |
-|---|---|---|
-| Browser | Spawns new Chrome | **Uses your Chrome** |
-| Extensions | None | Your existing ones |
-| Login state | Fresh | Already logged in |
-| Bot detection | Always detected | Can bypass (disconnect extension) |
-| Collaboration | Separate window | Same browser as user |
+|               | Playwright MCP    | Playwriter                        |
+| ------------- | ----------------- | --------------------------------- |
+| Browser       | Spawns new Chrome | **Uses your Chrome**              |
+| Extensions    | None              | Your existing ones                |
+| Login state   | Fresh             | Already logged in                 |
+| Bot detection | Always detected   | Can bypass (disconnect extension) |
+| Collaboration | Separate window   | Same browser as user              |
 
 ## Installation
 
@@ -28,6 +28,7 @@ Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly 
 2. Click extension icon on a tab → turns green when connected
 
 3. Install the CLI and start automating the browser:
+
    ```bash
    npm i -g playwriter
    playwriter -s 1 -e "await page.goto('https://example.com')"
@@ -83,12 +84,14 @@ console.log({ title, url: page.url() });
 Variables in scope: `page`, `context`, `state` (persists between calls), `require`, and Node.js globals.
 
 **Persist data in state:**
+
 ```bash
 playwriter -e "state.users = await page.$$eval('.user', els => els.map(e => e.textContent))"
 playwriter -e "console.log(state.users)"
 ```
 
 **Intercept network requests:**
+
 ```bash
 playwriter -e "state.requests = []; page.on('response', r => { if (r.url().includes('/api/')) state.requests.push(r.url()) })"
 playwriter -e "await Promise.all([page.waitForResponse(r => r.url().includes('/api/')), page.click('button')])"
@@ -96,6 +99,7 @@ playwriter -e "console.log(state.requests)"
 ```
 
 **Set breakpoints and debug:**
+
 ```bash
 playwriter -e "state.cdp = await getCDPSession({ page }); state.dbg = createDebugger({ cdp: state.cdp }); await state.dbg.enable()"
 playwriter -e "state.scripts = await state.dbg.listScripts({ search: 'app' }); console.log(state.scripts.map(s => s.url))"
@@ -103,12 +107,14 @@ playwriter -e "await state.dbg.setBreakpoint({ file: state.scripts[0].url, line:
 ```
 
 **Live edit page code:**
+
 ```bash
 playwriter -e "state.cdp = await getCDPSession({ page }); state.editor = createEditor({ cdp: state.cdp }); await state.editor.enable()"
 playwriter -e "await state.editor.edit({ url: 'https://example.com/app.js', oldString: 'const DEBUG = false', newString: 'const DEBUG = true' })"
 ```
 
 **Screenshot with labels:**
+
 ```bash
 playwriter -e "await screenshotWithAccessibilityLabels({ page })"
 ```
@@ -133,33 +139,33 @@ Color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=
 
 ### vs BrowserMCP
 
-| | BrowserMCP | Playwriter |
-|---|---|---|
-| Tools | 12+ dedicated tools | 1 `execute` tool |
-| API | Limited actions | Full Playwright |
-| Context usage | High (tool schemas) | Low |
-| LLM knowledge | Must learn tools | Already knows Playwright |
+|               | BrowserMCP          | Playwriter               |
+| ------------- | ------------------- | ------------------------ |
+| Tools         | 12+ dedicated tools | 1 `execute` tool         |
+| API           | Limited actions     | Full Playwright          |
+| Context usage | High (tool schemas) | Low                      |
+| LLM knowledge | Must learn tools    | Already knows Playwright |
 
 ### vs Antigravity (Jetski)
 
-| | Jetski | Playwriter |
-|---|---|---|
-| Tools | 17+ tools | 1 tool |
+|          | Jetski                       | Playwriter       |
+| -------- | ---------------------------- | ---------------- |
+| Tools    | 17+ tools                    | 1 tool           |
 | Subagent | Spawns for each browser task | Direct execution |
-| Latency | High (agent overhead) | Low |
+| Latency  | High (agent overhead)        | Low              |
 
 ### vs Claude Browser Extension
 
-| | Claude Extension | Playwriter |
-|---|---|---|
-| Agent support | Claude only | Any MCP client |
-| Windows WSL | No | Yes |
-| Context method | Screenshots (100KB+) | A11y snapshots (5-20KB) |
-| Playwright API | No | Full |
-| Debugger/breakpoints | No | Yes |
-| Live code editing | No | Yes |
-| Network interception | Limited | Full |
-| Raw CDP access | No | Yes |
+|                      | Claude Extension     | Playwriter              |
+| -------------------- | -------------------- | ----------------------- |
+| Agent support        | Claude only          | Any MCP client          |
+| Windows WSL          | No                   | Yes                     |
+| Context method       | Screenshots (100KB+) | A11y snapshots (5-20KB) |
+| Playwright API       | No                   | Full                    |
+| Debugger/breakpoints | No                   | Yes                     |
+| Live code editing    | No                   | Yes                     |
+| Network interception | Limited              | Full                    |
+| Raw CDP access       | No                   | Yes                     |
 
 ## Architecture
 
@@ -185,11 +191,13 @@ Color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=
 Control Chrome on a remote machine over the internet using [traforo](https://traforo.dev) tunnels:
 
 **On host:**
+
 ```bash
 npx -y traforo -p 19988 -t my-machine -- npx -y playwriter serve --token <secret>
 ```
 
 **From remote:**
+
 ```bash
 export PLAYWRITER_HOST=https://my-machine-tunnel.traforo.dev
 export PLAYWRITER_TOKEN=<secret>

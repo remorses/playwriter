@@ -7977,8 +7977,12 @@ test('processes x.com.html with size savings', async () => {
 
   console.log(`\n📊 x.com.html processing stats:`)
   console.log(`   Original:     ${originalSize.toLocaleString()} chars (${originalTokens.toLocaleString()} tokens)`)
-  console.log(`   Without styles: ${processedSize.toLocaleString()} chars (${processedTokens.toLocaleString()} tokens) - ${savingsPercent}% savings`)
-  console.log(`   With styles:    ${withStylesSize.toLocaleString()} chars (${withStylesTokens.toLocaleString()} tokens) - ${withStylesPercent}% savings`)
+  console.log(
+    `   Without styles: ${processedSize.toLocaleString()} chars (${processedTokens.toLocaleString()} tokens) - ${savingsPercent}% savings`,
+  )
+  console.log(
+    `   With styles:    ${withStylesSize.toLocaleString()} chars (${withStylesTokens.toLocaleString()} tokens) - ${withStylesPercent}% savings`,
+  )
 
   await expect(result).toMatchFileSnapshot('./__snapshots__/x.com.processed.html')
   await expect(resultWithStyles).toMatchFileSnapshot('./__snapshots__/x.com.processed.withStyles.html')

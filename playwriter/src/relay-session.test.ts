@@ -6,7 +6,16 @@ import { getCDPSessionForPage } from './cdp-session.js'
 import { Debugger } from './debugger.js'
 import { Editor } from './editor.js'
 import { PlaywrightExecutor } from './executor.js'
-import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, createSseServer, safeCloseCDPBrowser, type TestContext, withTimeout, js } from './test-utils.js'
+import {
+  setupTestContext,
+  cleanupTestContext,
+  getExtensionServiceWorker,
+  createSseServer,
+  safeCloseCDPBrowser,
+  type TestContext,
+  withTimeout,
+  js,
+} from './test-utils.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19993
@@ -14,121 +23,119 @@ const TEST_PORT = 19993
 // --- CDP Session Tests ---
 
 describe('CDP Session Tests', () => {
-    let testCtx: TestContext | null = null
+  let testCtx: TestContext | null = null
 
-    beforeAll(async () => {
-        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-cdp-test-', toggleExtension: true })
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-cdp-test-', toggleExtension: true })
 
-        const serviceWorker = await getExtensionServiceWorker(testCtx.browserContext)
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
-        await new Promise(r => setTimeout(r, 100))
-    }, 600000)
+    const serviceWorker = await getExtensionServiceWorker(testCtx.browserContext)
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+    await new Promise((r) => setTimeout(r, 100))
+  }, 600000)
 
-    afterAll(async () => {
-        await cleanupTestContext(testCtx)
-        testCtx = null
+  afterAll(async () => {
+    await cleanupTestContext(testCtx)
+    testCtx = null
+  })
+
+  const getBrowserContext = () => {
+    if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+    return testCtx.browserContext
+  }
+
+  it('should use Debugger class to set breakpoints and inspect variables', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const page = await browserContext.newPage()
+    const testUrl = 'https://example.com/?test=debugger-variables'
+    await page.goto(testUrl)
+    await page.bringToFront()
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
+
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page })
+    const dbg = new Debugger({ cdp: cdpSession })
+
+    await dbg.enable()
+
+    expect(dbg.isPaused()).toBe(false)
+
+    const pausedPromise = new Promise<void>((resolve) => {
+      cdpSession.on('Debugger.paused', () => {
+        resolve()
+      })
     })
 
-    const getBrowserContext = () => {
-        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
-        return testCtx.browserContext
-    }
-
-
-
-    it('should use Debugger class to set breakpoints and inspect variables', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        const page = await browserContext.newPage()
-        const testUrl = 'https://example.com/?test=debugger-variables'
-        await page.goto(testUrl)
-        await page.bringToFront()
-
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
-
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page })
-        const dbg = new Debugger({ cdp: cdpSession })
-
-        await dbg.enable()
-
-        expect(dbg.isPaused()).toBe(false)
-
-        const pausedPromise = new Promise<void>((resolve) => {
-            cdpSession.on('Debugger.paused', () => {
-                resolve()
-            })
-        })
-
-        const evalPromise = cdpSession.send('Runtime.evaluate', {
-            expression: `(function testFunction() {
+    const evalPromise = cdpSession.send('Runtime.evaluate', {
+      expression: `(function testFunction() {
                 const localVar = 'hello';
                 const numberVar = 42;
                 debugger;
                 return localVar + numberVar;
-            })()`
-        })
+            })()`,
+    })
 
-        await Promise.race([
-            pausedPromise,
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Debugger.paused timeout')), 5000))
-        ])
+    await Promise.race([
+      pausedPromise,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Debugger.paused timeout')), 5000)),
+    ])
 
-        expect(dbg.isPaused()).toBe(true)
+    expect(dbg.isPaused()).toBe(true)
 
-        const location = await dbg.getLocation()
-        expect(location.callstack[0].functionName).toBe('testFunction')
-        expect(location.sourceContext).toContain('debugger')
+    const location = await dbg.getLocation()
+    expect(location.callstack[0].functionName).toBe('testFunction')
+    expect(location.sourceContext).toContain('debugger')
 
-        const vars = await dbg.inspectLocalVariables()
-        expect(vars).toMatchInlineSnapshot(`
+    const vars = await dbg.inspectLocalVariables()
+    expect(vars).toMatchInlineSnapshot(`
           {
             "localVar": "hello",
             "numberVar": 42,
           }
         `)
 
-        const evalResult = await dbg.evaluate({ expression: 'localVar + " world"' })
-        expect(evalResult.value).toBe('hello world')
+    const evalResult = await dbg.evaluate({ expression: 'localVar + " world"' })
+    expect(evalResult.value).toBe('hello world')
 
-        await dbg.resume()
-        await new Promise(r => setTimeout(r, 100))
-        expect(dbg.isPaused()).toBe(false)
-        await evalPromise
+    await dbg.resume()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(dbg.isPaused()).toBe(false)
+    await evalPromise
 
-        await cdpSession.detach()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await page.close()
+  }, 60000)
 
-    it('should reuse cached CDP session and close on page close', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should reuse cached CDP session and close on page close', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        const testUrl = 'https://example.com/?test=debugger-step'
-        await page.goto(testUrl)
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    const testUrl = 'https://example.com/?test=debugger-step'
+    await page.goto(testUrl)
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const executor = new PlaywrightExecutor({
-            cdpConfig: { port: TEST_PORT },
-            logger: {
-                log: () => {},
-                error: () => {},
-            },
-        })
+    const executor = new PlaywrightExecutor({
+      cdpConfig: { port: TEST_PORT },
+      logger: {
+        log: () => {},
+        error: () => {},
+      },
+    })
 
-        const result = await executor.execute(js`
+    const result = await executor.execute(js`
             const sessionA = await getCDPSession({ page })
             const sessionB = await getCDPSession({ page })
             await sessionA.send('Runtime.evaluate', { expression: '1 + 1', returnByValue: true })
@@ -136,52 +143,55 @@ describe('CDP Session Tests', () => {
             return evalResult.result.value
         `)
 
-        expect(result.isError).toBe(false)
-        expect(result.text).toContain('[return value] 4')
+    expect(result.isError).toBe(false)
+    expect(result.text).toContain('[return value] 4')
 
-        await page.close()
-    }, 60000)
+    await page.close()
+  }, 60000)
 
-    it('should list scripts with Debugger class', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should list scripts with Debugger class', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        // Use a page with actual script URLs (not just inline scripts)
-        const page = await browserContext.newPage()
-        await page.goto('https://news.ycombinator.com/')
-        await page.bringToFront()
+    // Use a page with actual script URLs (not just inline scripts)
+    const page = await browserContext.newPage()
+    await page.goto('https://news.ycombinator.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('news.ycombinator'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('news.ycombinator'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
-        const dbg = new Debugger({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const dbg = new Debugger({ cdp: cdpSession })
 
-        await dbg.enable()
+    await dbg.enable()
 
-        const scripts = await dbg.listScripts()
-        expect(scripts.length).toBeGreaterThan(0)
-        expect(scripts[0]).toHaveProperty('scriptId')
-        expect(scripts[0]).toHaveProperty('url')
+    const scripts = await dbg.listScripts()
+    expect(scripts.length).toBeGreaterThan(0)
+    expect(scripts[0]).toHaveProperty('scriptId')
+    expect(scripts[0]).toHaveProperty('url')
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should manage breakpoints with Debugger class', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should manage breakpoints with Debugger class', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <head>
                     <script src="data:text/javascript,function testFunc() { return 42; }"></script>
@@ -189,62 +199,62 @@ describe('CDP Session Tests', () => {
                 <body></body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page })
-        const dbg = new Debugger({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page })
+    const dbg = new Debugger({ cdp: cdpSession })
 
-        await dbg.enable()
+    await dbg.enable()
 
-        expect(dbg.listBreakpoints()).toHaveLength(0)
+    expect(dbg.listBreakpoints()).toHaveLength(0)
 
-        const bpId = await dbg.setBreakpoint({ file: 'https://example.com/test.js', line: 1 })
-        expect(typeof bpId).toBe('string')
-        expect(dbg.listBreakpoints()).toHaveLength(1)
-        expect(dbg.listBreakpoints()[0]).toMatchObject({
-            id: bpId,
-            file: 'https://example.com/test.js',
-            line: 1,
-        })
+    const bpId = await dbg.setBreakpoint({ file: 'https://example.com/test.js', line: 1 })
+    expect(typeof bpId).toBe('string')
+    expect(dbg.listBreakpoints()).toHaveLength(1)
+    expect(dbg.listBreakpoints()[0]).toMatchObject({
+      id: bpId,
+      file: 'https://example.com/test.js',
+      line: 1,
+    })
 
-        await dbg.deleteBreakpoint({ breakpointId: bpId })
-        expect(dbg.listBreakpoints()).toHaveLength(0)
+    await dbg.deleteBreakpoint({ breakpointId: bpId })
+    expect(dbg.listBreakpoints()).toHaveLength(0)
 
-        await cdpSession.detach()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await page.close()
+  }, 60000)
 
-    it('should step through code with Debugger class', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should step through code with Debugger class', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page })
-        const dbg = new Debugger({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page })
+    const dbg = new Debugger({ cdp: cdpSession })
 
-        await dbg.enable()
+    await dbg.enable()
 
-        const pausedPromise = new Promise<void>((resolve) => {
-            cdpSession.on('Debugger.paused', () => resolve())
-        })
+    const pausedPromise = new Promise<void>((resolve) => {
+      cdpSession.on('Debugger.paused', () => resolve())
+    })
 
-        const evalPromise = cdpSession.send('Runtime.evaluate', {
-            expression: `(function outer() {
+    const evalPromise = cdpSession.send('Runtime.evaluate', {
+      expression: `(function outer() {
                 function inner() {
                     const x = 1;
                     debugger;
@@ -253,63 +263,63 @@ describe('CDP Session Tests', () => {
                 }
                 const result = inner();
                 return result;
-            })()`
-        })
+            })()`,
+    })
 
-        await pausedPromise
-        expect(dbg.isPaused()).toBe(true)
+    await pausedPromise
+    expect(dbg.isPaused()).toBe(true)
 
-        const location1 = await dbg.getLocation()
-        expect(location1.callstack.length).toBeGreaterThanOrEqual(2)
-        expect(location1.callstack[0].functionName).toBe('inner')
-        expect(location1.callstack[1].functionName).toBe('outer')
+    const location1 = await dbg.getLocation()
+    expect(location1.callstack.length).toBeGreaterThanOrEqual(2)
+    expect(location1.callstack[0].functionName).toBe('inner')
+    expect(location1.callstack[1].functionName).toBe('outer')
 
-        const stepOverPromise = new Promise<void>((resolve) => {
-            cdpSession.on('Debugger.paused', () => resolve())
-        })
-        await dbg.stepOver()
-        await stepOverPromise
+    const stepOverPromise = new Promise<void>((resolve) => {
+      cdpSession.on('Debugger.paused', () => resolve())
+    })
+    await dbg.stepOver()
+    await stepOverPromise
 
-        const location2 = await dbg.getLocation()
-        expect(location2.lineNumber).toBeGreaterThan(location1.lineNumber)
+    const location2 = await dbg.getLocation()
+    expect(location2.lineNumber).toBeGreaterThan(location1.lineNumber)
 
-        const stepOutPromise = new Promise<void>((resolve) => {
-            cdpSession.on('Debugger.paused', () => resolve())
-        })
-        await dbg.stepOut()
-        await stepOutPromise
+    const stepOutPromise = new Promise<void>((resolve) => {
+      cdpSession.on('Debugger.paused', () => resolve())
+    })
+    await dbg.stepOut()
+    await stepOutPromise
 
-        const location3 = await dbg.getLocation()
-        expect(location3.callstack[0].functionName).toBe('outer')
+    const location3 = await dbg.getLocation()
+    expect(location3.callstack[0].functionName).toBe('outer')
 
-        await dbg.resume()
-        await evalPromise
+    await dbg.resume()
+    await evalPromise
 
-        await cdpSession.detach()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await page.close()
+  }, 60000)
 
-    it('should profile JavaScript execution using CDP Profiler', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should profile JavaScript execution using CDP Profiler', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        const testUrl = 'https://example.com/?test=debugger-profiler'
-        await page.goto(testUrl)
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    const testUrl = 'https://example.com/?test=debugger-profiler'
+    await page.goto(testUrl)
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page })
-        await cdpSession.send('Profiler.enable')
-        await cdpSession.send('Profiler.start')
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page })
+    await cdpSession.send('Profiler.enable')
+    await cdpSession.send('Profiler.start')
 
-        await cdpSession.send('Runtime.evaluate', {
-            expression: `(() => {
+    await cdpSession.send('Runtime.evaluate', {
+      expression: `(() => {
                 function fibonacci(n) {
                     if (n <= 1) return n
                     return fibonacci(n - 1) + fibonacci(n - 2)
@@ -320,116 +330,122 @@ describe('CDP Session Tests', () => {
                 for (let i = 0; i < 1000; i++) {
                     document.querySelectorAll('*')
                 }
-            })()`
-        })
+            })()`,
+    })
 
-        const stopResult = await cdpSession.send('Profiler.stop')
-        const profile = stopResult.profile
+    const stopResult = await cdpSession.send('Profiler.stop')
+    const profile = stopResult.profile
 
-        const functionNames = profile.nodes
-            .map(n => n.callFrame.functionName)
-            .filter(name => name && name.length > 0)
-            .slice(0, 10)
+    const functionNames = profile.nodes
+      .map((n) => n.callFrame.functionName)
+      .filter((name) => name && name.length > 0)
+      .slice(0, 10)
 
-        expect(profile.nodes.length).toBeGreaterThan(0)
-        expect(profile.endTime - profile.startTime).toBeGreaterThan(0)
-        expect(functionNames.every((name) => typeof name === 'string')).toBe(true)
+    expect(profile.nodes.length).toBeGreaterThan(0)
+    expect(profile.endTime - profile.startTime).toBeGreaterThan(0)
+    expect(functionNames.every((name) => typeof name === 'string')).toBe(true)
 
-        await cdpSession.send('Profiler.disable')
-        await cdpSession.detach()
-        await page.close()
-    }, 60000)
+    await cdpSession.send('Profiler.disable')
+    await cdpSession.detach()
+    await page.close()
+  }, 60000)
 
-    it('should update Target.getTargets URL after page navigation', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should update Target.getTargets URL after page navigation', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
 
-        const initialTargets = await cdpSession.send('Target.getTargets')
-        const initialPageTarget = initialTargets.targetInfos.find(t => t.type === 'page' && t.url.includes('example.com'))
-        expect(initialPageTarget?.url).toBe('https://example.com/')
+    const initialTargets = await cdpSession.send('Target.getTargets')
+    const initialPageTarget = initialTargets.targetInfos.find((t) => t.type === 'page' && t.url.includes('example.com'))
+    expect(initialPageTarget?.url).toBe('https://example.com/')
 
-        await cdpPage!.goto('https://example.org/', { waitUntil: 'domcontentloaded' })
-        await new Promise(r => setTimeout(r, 100))
+    await cdpPage!.goto('https://example.org/', { waitUntil: 'domcontentloaded' })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const afterNavTargets = await cdpSession.send('Target.getTargets')
-        const allPageTargets = afterNavTargets.targetInfos.filter(t => t.type === 'page')
+    const afterNavTargets = await cdpSession.send('Target.getTargets')
+    const allPageTargets = afterNavTargets.targetInfos.filter((t) => t.type === 'page')
 
-        const aboutBlankTargets = allPageTargets.filter(t => t.url === 'about:blank')
-        expect(aboutBlankTargets).toHaveLength(0)
+    const aboutBlankTargets = allPageTargets.filter((t) => t.url === 'about:blank')
+    expect(aboutBlankTargets).toHaveLength(0)
 
-        const exampleComTargets = allPageTargets.filter(t => t.url.includes('example.com'))
-        expect(exampleComTargets).toHaveLength(0)
+    const exampleComTargets = allPageTargets.filter((t) => t.url.includes('example.com'))
+    expect(exampleComTargets).toHaveLength(0)
 
-        const exampleOrgTargets = allPageTargets.filter(t => t.url.includes('example.org'))
-        expect(exampleOrgTargets).toHaveLength(1)
+    const exampleOrgTargets = allPageTargets.filter((t) => t.url.includes('example.org'))
+    expect(exampleOrgTargets).toHaveLength(1)
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should return correct targets for multiple pages via Target.getTargets', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should return correct targets for multiple pages via Target.getTargets', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
 
-        const page1 = await browserContext.newPage()
-        await page1.goto('https://example.com/')
-        await page1.bringToFront()
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    const page1 = await browserContext.newPage()
+    await page1.goto('https://example.com/')
+    await page1.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        const page2 = await browserContext.newPage()
-        await page2.goto('https://example.org/')
-        await page2.bringToFront()
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    const page2 = await browserContext.newPage()
+    await page2.goto('https://example.org/')
+    await page2.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        await new Promise(r => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
 
-        const { targetInfos } = await cdpSession.send('Target.getTargets')
-        const allPageTargets = targetInfos.filter(t => t.type === 'page')
+    const { targetInfos } = await cdpSession.send('Target.getTargets')
+    const allPageTargets = targetInfos.filter((t) => t.type === 'page')
 
-        const aboutBlankTargets = allPageTargets.filter(t => t.url === 'about:blank')
-        expect(aboutBlankTargets).toHaveLength(0)
+    const aboutBlankTargets = allPageTargets.filter((t) => t.url === 'about:blank')
+    expect(aboutBlankTargets).toHaveLength(0)
 
-        const pageTargets = allPageTargets
-            .map(t => ({ type: t.type, url: t.url }))
-            .sort((a, b) => a.url.localeCompare(b.url))
+    const pageTargets = allPageTargets
+      .map((t) => ({ type: t.type, url: t.url }))
+      .sort((a, b) => a.url.localeCompare(b.url))
 
-        expect(pageTargets).toMatchInlineSnapshot(`
+    expect(pageTargets).toMatchInlineSnapshot(`
           [
             {
               "type": "page",
@@ -442,163 +458,172 @@ describe('CDP Session Tests', () => {
           ]
         `)
 
-        await cdpSession.detach()
-        await browser.close()
-        await page1.close()
-        await page2.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page1.close()
+    await page2.close()
+  }, 60000)
 
-    it('should create CDP session for page after navigation', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should create CDP session for page after navigation', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        await page.goto('https://example.org/', { waitUntil: 'domcontentloaded' })
-        await new Promise(r => setTimeout(r, 100))
+    await page.goto('https://example.org/', { waitUntil: 'domcontentloaded' })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.org'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.org'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
 
-        const evalResult = await cdpSession.send('Runtime.evaluate', {
-            expression: 'document.title',
-            returnByValue: true,
-        })
-        expect(evalResult.result.value).toContain('Example Domain')
+    const evalResult = await cdpSession.send('Runtime.evaluate', {
+      expression: 'document.title',
+      returnByValue: true,
+    })
+    expect(evalResult.result.value).toContain('Example Domain')
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should maintain CDP session functionality after page URL change', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should maintain CDP session functionality after page URL change', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        const initialUrl = 'https://example.com/'
-        await page.goto(initialUrl)
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    const initialUrl = 'https://example.com/'
+    await page.goto(initialUrl)
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
 
-        const initialEvalResult = await cdpSession.send('Runtime.evaluate', {
-            expression: 'document.title',
-            returnByValue: true,
-        })
-        expect(initialEvalResult.result.value).toBe('Example Domain')
+    const initialEvalResult = await cdpSession.send('Runtime.evaluate', {
+      expression: 'document.title',
+      returnByValue: true,
+    })
+    expect(initialEvalResult.result.value).toBe('Example Domain')
 
-        const newUrl = 'https://example.org/'
-        await cdpPage!.goto(newUrl, { waitUntil: 'domcontentloaded' })
+    const newUrl = 'https://example.org/'
+    await cdpPage!.goto(newUrl, { waitUntil: 'domcontentloaded' })
 
-        expect(cdpPage!.url()).toBe(newUrl)
+    expect(cdpPage!.url()).toBe(newUrl)
 
-        const layoutMetrics = await cdpSession.send('Page.getLayoutMetrics')
-        expect(layoutMetrics.cssVisualViewport).toBeDefined()
-        expect(layoutMetrics.cssVisualViewport.clientWidth).toBeGreaterThan(0)
+    const layoutMetrics = await cdpSession.send('Page.getLayoutMetrics')
+    expect(layoutMetrics.cssVisualViewport).toBeDefined()
+    expect(layoutMetrics.cssVisualViewport.clientWidth).toBeGreaterThan(0)
 
-        const afterNavEvalResult = await cdpSession.send('Runtime.evaluate', {
-            expression: 'document.title',
-            returnByValue: true,
-        })
-        expect(afterNavEvalResult.result.value).toContain('Example Domain')
+    const afterNavEvalResult = await cdpSession.send('Runtime.evaluate', {
+      expression: 'document.title',
+      returnByValue: true,
+    })
+    expect(afterNavEvalResult.result.value).toContain('Example Domain')
 
-        const locationResult = await cdpSession.send('Runtime.evaluate', {
-            expression: 'window.location.href',
-            returnByValue: true,
-        })
-        expect(locationResult.result.value).toBe(newUrl)
+    const locationResult = await cdpSession.send('Runtime.evaluate', {
+      expression: 'window.location.href',
+      returnByValue: true,
+    })
+    expect(locationResult.result.value).toBe(newUrl)
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should pause on all exceptions with setPauseOnExceptions', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should pause on all exceptions with setPauseOnExceptions', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
-        const dbg = new Debugger({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const dbg = new Debugger({ cdp: cdpSession })
 
-        await dbg.enable()
-        await dbg.setPauseOnExceptions({ state: 'all' })
+    await dbg.enable()
+    await dbg.setPauseOnExceptions({ state: 'all' })
 
-        const pausedPromise = new Promise<void>((resolve) => {
-            cdpSession.on('Debugger.paused', () => resolve())
-        })
+    const pausedPromise = new Promise<void>((resolve) => {
+      cdpSession.on('Debugger.paused', () => resolve())
+    })
 
-        const evalPromise = cdpSession.send('Runtime.evaluate', {
-            expression: `(function() {
+    const evalPromise = cdpSession.send('Runtime.evaluate', {
+      expression: `(function() {
                 try {
                     throw new Error('Caught test error');
                 } catch (e) {
                     // caught but should still pause with state 'all'
                 }
-            })()`
-        })
+            })()`,
+    })
 
-        await Promise.race([
-            pausedPromise,
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Debugger.paused timeout')), 5000))
-        ])
+    await Promise.race([
+      pausedPromise,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Debugger.paused timeout')), 5000)),
+    ])
 
-        expect(dbg.isPaused()).toBe(true)
+    expect(dbg.isPaused()).toBe(true)
 
-        const location = await dbg.getLocation()
-        expect(location.sourceContext).toContain('throw')
+    const location = await dbg.getLocation()
+    expect(location.sourceContext).toContain('throw')
 
-        await dbg.resume()
-        await evalPromise
+    await dbg.resume()
+    await evalPromise
 
-        await dbg.setPauseOnExceptions({ state: 'none' })
+    await dbg.setPauseOnExceptions({ state: 'none' })
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should inspect local and global variables with inline snapshots', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should inspect local and global variables with inline snapshots', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <head>
                     <script>
@@ -618,51 +643,51 @@ describe('CDP Session Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        let cdpPage
-        for (const p of browser.contexts()[0].pages()) {
-            const html = await p.content()
-            if (html.includes('runTest')) {
-                cdpPage = p
-                break
-            }
-        }
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    let cdpPage
+    for (const p of browser.contexts()[0].pages()) {
+      const html = await p.content()
+      if (html.includes('runTest')) {
+        cdpPage = p
+        break
+      }
+    }
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
-        const dbg = new Debugger({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const dbg = new Debugger({ cdp: cdpSession })
 
-        await dbg.enable()
+    await dbg.enable()
 
-        const globalVars = await dbg.inspectGlobalVariables()
-        expect(globalVars).toMatchInlineSnapshot(`
+    const globalVars = await dbg.inspectGlobalVariables()
+    expect(globalVars).toMatchInlineSnapshot(`
           [
             "GLOBAL_CONFIG",
           ]
         `)
 
-        const pausedPromise = new Promise<void>((resolve) => {
-            cdpSession.on('Debugger.paused', () => resolve())
-        })
+    const pausedPromise = new Promise<void>((resolve) => {
+      cdpSession.on('Debugger.paused', () => resolve())
+    })
 
-        // Don't await - we want it to pause at breakpoint
-        const evalPromise = cdpPage!.evaluate('runTest()').catch(() => {
-            // Ignore errors from evaluate when browser closes
-        })
+    // Don't await - we want it to pause at breakpoint
+    const evalPromise = cdpPage!.evaluate('runTest()').catch(() => {
+      // Ignore errors from evaluate when browser closes
+    })
 
-        await pausedPromise
-        expect(dbg.isPaused()).toBe(true)
+    await pausedPromise
+    expect(dbg.isPaused()).toBe(true)
 
-        const localVars = await dbg.inspectLocalVariables()
-        expect(localVars).toMatchInlineSnapshot(`
+    const localVars = await dbg.inspectLocalVariables()
+    expect(localVars).toMatchInlineSnapshot(`
           {
             "GLOBAL_CONFIG": "production",
             "scores": "[array]",
@@ -672,204 +697,213 @@ describe('CDP Session Tests', () => {
           }
         `)
 
-        await dbg.resume()
-        // Wait for evaluate to complete after resume
-        await evalPromise
+    await dbg.resume()
+    // Wait for evaluate to complete after resume
+    await evalPromise
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should click at correct coordinates on high-DPI simulation', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should click at correct coordinates on high-DPI simulation', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const h1Bounds = await cdpPage!.locator('h1').boundingBox()
-        expect(h1Bounds).toBeDefined()
-        console.log('H1 bounding box:', h1Bounds)
+    const h1Bounds = await cdpPage!.locator('h1').boundingBox()
+    expect(h1Bounds).toBeDefined()
+    console.log('H1 bounding box:', h1Bounds)
 
-        await cdpPage!.evaluate(() => {
-            (window as any).clickedAt = null;
-            document.addEventListener('click', (e) => {
-                (window as any).clickedAt = { x: e.clientX, y: e.clientY };
-            });
-        })
+    await cdpPage!.evaluate(() => {
+      ;(window as any).clickedAt = null
+      document.addEventListener('click', (e) => {
+        ;(window as any).clickedAt = { x: e.clientX, y: e.clientY }
+      })
+    })
 
-        await cdpPage!.locator('h1').click()
+    await cdpPage!.locator('h1').click()
 
-        const clickedAt = await cdpPage!.evaluate(() => (window as any).clickedAt)
-        console.log('Clicked at:', clickedAt)
+    const clickedAt = await cdpPage!.evaluate(() => (window as any).clickedAt)
+    console.log('Clicked at:', clickedAt)
 
-        expect(clickedAt).toBeDefined()
-        expect(clickedAt.x).toBeGreaterThan(0)
-        expect(clickedAt.y).toBeGreaterThan(0)
+    expect(clickedAt).toBeDefined()
+    expect(clickedAt.x).toBeGreaterThan(0)
+    expect(clickedAt.y).toBeGreaterThan(0)
 
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should use Editor class to list, read, and edit scripts', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should use Editor class to list, read, and edit scripts', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
-        const editor = new Editor({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const editor = new Editor({ cdp: cdpSession })
 
-        await editor.enable()
+    await editor.enable()
 
-        await cdpPage!.addScriptTag({
-            content: `
+    await cdpPage!.addScriptTag({
+      content: `
                 function greetUser(name) {
                     console.log('Hello, ' + name);
                     return 'Hello, ' + name;
                 }
             `,
-        })
-        await new Promise(r => setTimeout(r, 100))
-        const scripts = await editor.list()
-        expect(scripts.length).toBeGreaterThan(0)
+    })
+    await new Promise((r) => setTimeout(r, 100))
+    const scripts = await editor.list()
+    expect(scripts.length).toBeGreaterThan(0)
 
-        const matches = await editor.grep({ regex: /greetUser/ })
-        expect(matches.length).toBeGreaterThan(0)
+    const matches = await editor.grep({ regex: /greetUser/ })
+    expect(matches.length).toBeGreaterThan(0)
 
-        const match = matches[0]
-        const { content, totalLines } = await editor.read({ url: match.url })
-        expect(content).toContain('greetUser')
-        expect(totalLines).toBeGreaterThan(0)
+    const match = matches[0]
+    const { content, totalLines } = await editor.read({ url: match.url })
+    expect(content).toContain('greetUser')
+    expect(totalLines).toBeGreaterThan(0)
 
-        await editor.edit({
-            url: match.url,
-            oldString: "console.log('Hello, ' + name);",
-            newString: "console.log('Hello, ' + name); console.log('EDITOR_TEST_MARKER');",
-        })
+    await editor.edit({
+      url: match.url,
+      oldString: "console.log('Hello, ' + name);",
+      newString: "console.log('Hello, ' + name); console.log('EDITOR_TEST_MARKER');",
+    })
 
-        const consoleLogs: string[] = []
-        cdpPage!.on('console', msg => {
-            consoleLogs.push(msg.text())
-        })
+    const consoleLogs: string[] = []
+    cdpPage!.on('console', (msg) => {
+      consoleLogs.push(msg.text())
+    })
 
-        await cdpPage!.evaluate(() => {
-            (window as any).greetUser('World')
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await cdpPage!.evaluate(() => {
+      ;(window as any).greetUser('World')
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        expect(consoleLogs).toContain('Hello, World')
-        expect(consoleLogs).toContain('EDITOR_TEST_MARKER')
+    expect(consoleLogs).toContain('Hello, World')
+    expect(consoleLogs).toContain('EDITOR_TEST_MARKER')
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('editor can list, read, and edit CSS stylesheets', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('editor can list, read, and edit CSS stylesheets', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
-        const editor = new Editor({ cdp: cdpSession })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const editor = new Editor({ cdp: cdpSession })
 
-        await editor.enable()
+    await editor.enable()
 
-        await cdpPage!.addStyleTag({
-            content: `
+    await cdpPage!.addStyleTag({
+      content: `
                 .editor-test-element {
                     color: rgb(255, 0, 0);
                     background-color: rgb(0, 0, 255);
                 }
             `,
-        })
-        await new Promise(r => setTimeout(r, 100))
-        const stylesheets = await editor.list({ pattern: /inline-css:/ })
-        expect(stylesheets.length).toBeGreaterThan(0)
+    })
+    await new Promise((r) => setTimeout(r, 100))
+    const stylesheets = await editor.list({ pattern: /inline-css:/ })
+    expect(stylesheets.length).toBeGreaterThan(0)
 
-        const cssMatches = await editor.grep({ regex: /editor-test-element/, pattern: /inline-css:/ })
-        expect(cssMatches.length).toBeGreaterThan(0)
+    const cssMatches = await editor.grep({ regex: /editor-test-element/, pattern: /inline-css:/ })
+    expect(cssMatches.length).toBeGreaterThan(0)
 
-        const cssMatch = cssMatches[0]
-        const { content, totalLines } = await editor.read({ url: cssMatch.url })
-        expect(content).toContain('editor-test-element')
-        expect(content).toContain('rgb(255, 0, 0)')
-        expect(totalLines).toBeGreaterThan(0)
+    const cssMatch = cssMatches[0]
+    const { content, totalLines } = await editor.read({ url: cssMatch.url })
+    expect(content).toContain('editor-test-element')
+    expect(content).toContain('rgb(255, 0, 0)')
+    expect(totalLines).toBeGreaterThan(0)
 
-        await cdpPage!.evaluate(() => {
-            const el = document.createElement('div')
-            el.className = 'editor-test-element'
-            el.id = 'test-div'
-            el.textContent = 'Test'
-            document.body.appendChild(el)
-        })
+    await cdpPage!.evaluate(() => {
+      const el = document.createElement('div')
+      el.className = 'editor-test-element'
+      el.id = 'test-div'
+      el.textContent = 'Test'
+      document.body.appendChild(el)
+    })
 
-        const colorBefore = await cdpPage!.evaluate(() => {
-            const el = document.getElementById('test-div')!
-            return window.getComputedStyle(el).color
-        })
-        expect(colorBefore).toBe('rgb(255, 0, 0)')
+    const colorBefore = await cdpPage!.evaluate(() => {
+      const el = document.getElementById('test-div')!
+      return window.getComputedStyle(el).color
+    })
+    expect(colorBefore).toBe('rgb(255, 0, 0)')
 
-        await editor.edit({
-            url: cssMatch.url,
-            oldString: 'color: rgb(255, 0, 0);',
-            newString: 'color: rgb(0, 255, 0);',
-        })
+    await editor.edit({
+      url: cssMatch.url,
+      oldString: 'color: rgb(255, 0, 0);',
+      newString: 'color: rgb(0, 255, 0);',
+    })
 
-        const colorAfter = await cdpPage!.evaluate(() => {
-            const el = document.getElementById('test-div')!
-            return window.getComputedStyle(el).color
-        })
-        expect(colorAfter).toBe('rgb(0, 255, 0)')
+    const colorAfter = await cdpPage!.evaluate(() => {
+      const el = document.getElementById('test-div')!
+      return window.getComputedStyle(el).color
+    })
+    expect(colorAfter).toBe('rgb(0, 255, 0)')
 
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-    it('should inject bippy and find React fiber with getReactSource', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should inject bippy and find React fiber with getReactSource', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <!DOCTYPE html>
             <html>
             <head>
@@ -888,399 +922,412 @@ describe('CDP Session Tests', () => {
             </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 500))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 500))
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const pages = browser.contexts()[0].pages()
-        const cdpPage = pages.find(p => p.url().startsWith('about:'))
-        expect(cdpPage).toBeDefined()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const pages = browser.contexts()[0].pages()
+    const cdpPage = pages.find((p) => p.url().startsWith('about:'))
+    expect(cdpPage).toBeDefined()
 
-        const btn = cdpPage!.locator('#react-btn')
-        const btnCount = await btn.count()
-        expect(btnCount).toBe(1)
+    const btn = cdpPage!.locator('#react-btn')
+    const btnCount = await btn.count()
+    expect(btnCount).toBe(1)
 
-        const hasBippyBefore = await cdpPage!.evaluate(() => !!(globalThis as any).__bippy)
-        expect(hasBippyBefore).toBe(false)
+    const hasBippyBefore = await cdpPage!.evaluate(() => !!(globalThis as any).__bippy)
+    expect(hasBippyBefore).toBe(false)
 
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
 
-        const { getReactSource } = await import('./react-source.js')
-        const source = await getReactSource({ locator: btn, cdp: cdpSession })
+    const { getReactSource } = await import('./react-source.js')
+    const source = await getReactSource({ locator: btn, cdp: cdpSession })
 
-        const hasBippyAfter = await cdpPage!.evaluate(() => !!(globalThis as any).__bippy)
-        expect(hasBippyAfter).toBe(true)
+    const hasBippyAfter = await cdpPage!.evaluate(() => !!(globalThis as any).__bippy)
+    expect(hasBippyAfter).toBe(true)
 
-        const hasFiber = await btn.evaluate((el) => {
-            const bippy = (globalThis as any).__bippy
-            const fiber = bippy.getFiberFromHostInstance(el)
-            return !!fiber
-        })
-        expect(hasFiber).toBe(true)
+    const hasFiber = await btn.evaluate((el) => {
+      const bippy = (globalThis as any).__bippy
+      const fiber = bippy.getFiberFromHostInstance(el)
+      return !!fiber
+    })
+    expect(hasFiber).toBe(true)
 
-        const componentName = await btn.evaluate((el) => {
-            const bippy = (globalThis as any).__bippy
-            const fiber = bippy.getFiberFromHostInstance(el)
-            let current = fiber
-            while (current) {
-                if (bippy.isCompositeFiber(current)) {
-                    return bippy.getDisplayName(current.type)
-                }
-                current = current.return
-            }
-            return null
-        })
-        expect(componentName).toBe('MyComponent')
+    const componentName = await btn.evaluate((el) => {
+      const bippy = (globalThis as any).__bippy
+      const fiber = bippy.getFiberFromHostInstance(el)
+      let current = fiber
+      while (current) {
+        if (bippy.isCompositeFiber(current)) {
+          return bippy.getDisplayName(current.type)
+        }
+        current = current.return
+      }
+      return null
+    })
+    expect(componentName).toBe('MyComponent')
 
-        console.log('Component name from fiber:', componentName)
-        console.log('Source location (null for UMD React, works on local dev servers with JSX transform):', source)
+    console.log('Component name from fiber:', componentName)
+    console.log('Source location (null for UMD React, works on local dev servers with JSX transform):', source)
 
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await browser.close()
+    await page.close()
+  }, 60000)
 })
 
 // --- Service Worker Target Tests ---
 
 describe('Service Worker Target Tests', () => {
-    let testCtx: TestContext | null = null
+  let testCtx: TestContext | null = null
 
-    beforeAll(async () => {
-        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-sw-test-', toggleExtension: true })
-    }, 600000)
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-sw-test-', toggleExtension: true })
+  }, 600000)
 
-    afterAll(async () => {
-        await cleanupTestContext(testCtx)
-        testCtx = null
+  afterAll(async () => {
+    await cleanupTestContext(testCtx)
+    testCtx = null
+  })
+
+  const getBrowserContext = () => {
+    if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+    return testCtx.browserContext
+  }
+
+  it('should not expose service worker targets to Playwright (issue #14)', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const page = await browserContext.newPage()
+    await page.goto('https://web.dev/', { waitUntil: 'load' })
+    await page.bringToFront()
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
     })
+    await new Promise((r) => setTimeout(r, 500))
 
-    const getBrowserContext = () => {
-        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
-        return testCtx.browserContext
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const context = browser.contexts()[0]
+
+    const pages = context.pages()
+
+    for (const p of pages) {
+      const url = p.url()
+      console.log('Page URL:', url)
+      expect(url).not.toMatch(/sw\.js$/i)
+      expect(url).not.toMatch(/service.?worker/i)
     }
 
-    it('should not expose service worker targets to Playwright (issue #14)', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const targetPage = pages.find((p) => p.url().includes('web.dev'))
+    expect(targetPage).toBeDefined()
 
-        const page = await browserContext.newPage()
-        await page.goto('https://web.dev/', { waitUntil: 'load' })
-        await page.bringToFront()
+    const title = await targetPage!.title()
+    expect(title).toBeTruthy()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
+    await safeCloseCDPBrowser(browser)
+    await page.close()
+  }, 60000)
+
+  it('should allow reading response bodies after re-enabling Network buffering', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/')
+    await page.bringToFront()
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
+
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url().includes('example.com'))
+    expect(cdpPage).toBeDefined()
+
+    const wsUrl = getCdpUrl({ port: TEST_PORT })
+    const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
+
+    await cdpSession.send('Network.disable')
+    await cdpSession.send('Network.enable', {
+      maxTotalBufferSize: 10000000,
+      maxResourceBufferSize: 5000000,
+    })
+
+    const [response] = await Promise.all([
+      cdpPage!.waitForResponse((resp) => resp.url() === 'https://example.com/'),
+      cdpPage!.goto('https://example.com/'),
+    ])
+
+    const body = await response.text()
+
+    expect(body).toBeDefined()
+    expect(body).toContain('Example Domain')
+    expect(body).toContain('</html>')
+
+    await cdpSession.detach()
+    await browser.close()
+    await page.close()
+  }, 60000)
+
+  it('should stream SSE without waiting for response end', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await withTimeout({
+      promise: getExtensionServiceWorker(browserContext),
+      timeoutMs: 5000,
+      errorMessage: 'getExtensionServiceWorker timed out',
+    })
+    const sseServer = await withTimeout({
+      promise: createSseServer(),
+      timeoutMs: 5000,
+      errorMessage: 'createSseServer timed out',
+    })
+    let page: Awaited<ReturnType<typeof browserContext.newPage>> | null = null
+    let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+
+    try {
+      page = await withTimeout({
+        promise: browserContext.newPage(),
+        timeoutMs: 5000,
+        errorMessage: 'newPage timed out',
+      })
+      await withTimeout({
+        promise: page.goto(`${sseServer.baseUrl}/`),
+        timeoutMs: 5000,
+        errorMessage: 'page.goto timed out',
+      })
+      await page.bringToFront()
+
+      await withTimeout({
+        promise: serviceWorker.evaluate(async () => {
+          await globalThis.toggleExtensionForActiveTab()
+        }),
+        timeoutMs: 5000,
+        errorMessage: 'toggleExtensionForActiveTab timed out',
+      })
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100)
+      })
+
+      browser = await withTimeout({
+        promise: chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
+        timeoutMs: 5000,
+        errorMessage: 'connectOverCDP timed out',
+      })
+      const cdpPage = browser
+        .contexts()[0]
+        .pages()
+        .find((p) => {
+          return p.url().startsWith(sseServer.baseUrl)
         })
-        await new Promise(r => setTimeout(r, 500))
+      expect(cdpPage).toBeDefined()
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const context = browser.contexts()[0]
+      await cdpPage!.evaluate(() => {
+        return window.startSse()
+      })
+      await withTimeout({
+        promise: cdpPage!.waitForFunction(
+          () => {
+            return window.__sseMessages.length > 0
+          },
+          { timeout: 5000 },
+        ),
+        timeoutMs: 7000,
+        errorMessage: 'SSE message not received in time',
+      })
 
-        const pages = context.pages()
+      const firstMessage = await cdpPage!.evaluate(() => {
+        return window.__sseMessages[0]
+      })
+      expect(firstMessage).toBe('hello')
 
-        for (const p of pages) {
-            const url = p.url()
-            console.log('Page URL:', url)
-            expect(url).not.toMatch(/sw\.js$/i)
-            expect(url).not.toMatch(/service.?worker/i)
+      const sseState = sseServer.getState()
+      expect(sseState.connected).toBe(true)
+      expect(sseState.finished).toBe(false)
+      expect(sseState.closed).toBe(false)
+      expect(sseState.writeCount).toBeGreaterThan(0)
+
+      const readyState = await cdpPage!.evaluate(() => {
+        if (!window.__sseSource) {
+          return -1
         }
+        return window.__sseSource.readyState
+      })
+      expect(readyState).toBe(1)
 
-        const targetPage = pages.find(p => p.url().includes('web.dev'))
-        expect(targetPage).toBeDefined()
-
-        const title = await targetPage!.title()
-        expect(title).toBeTruthy()
-
-        await safeCloseCDPBrowser(browser)
-        await page.close()
-    }, 60000)
-
-    it('should allow reading response bodies after re-enabling Network buffering', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com/')
-        await page.bringToFront()
-
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
+      await cdpPage!.evaluate(() => {
+        window.stopSse()
+      })
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100)
+      })
+    } finally {
+      if (browser) {
+        await withTimeout({
+          promise: browser.close(),
+          timeoutMs: 5000,
+          errorMessage: 'browser.close timed out',
         })
-        await new Promise(r => setTimeout(r, 100))
-
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url().includes('example.com'))
-        expect(cdpPage).toBeDefined()
-
-        const wsUrl = getCdpUrl({ port: TEST_PORT })
-        const cdpSession = await getCDPSessionForPage({ page: cdpPage! })
-
-        await cdpSession.send('Network.disable')
-        await cdpSession.send('Network.enable', {
-            maxTotalBufferSize: 10000000,
-            maxResourceBufferSize: 5000000
+      }
+      if (page) {
+        await withTimeout({
+          promise: page.close(),
+          timeoutMs: 5000,
+          errorMessage: 'page.close timed out',
         })
-
-        const [response] = await Promise.all([
-            cdpPage!.waitForResponse(resp => resp.url() === 'https://example.com/'),
-            cdpPage!.goto('https://example.com/')
-        ])
-
-        const body = await response.text()
-
-        expect(body).toBeDefined()
-        expect(body).toContain('Example Domain')
-        expect(body).toContain('</html>')
-
-        await cdpSession.detach()
-        await browser.close()
-        await page.close()
-    }, 60000)
-
-    it('should stream SSE without waiting for response end', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await withTimeout({
-            promise: getExtensionServiceWorker(browserContext),
-            timeoutMs: 5000,
-            errorMessage: 'getExtensionServiceWorker timed out',
-        })
-        const sseServer = await withTimeout({
-            promise: createSseServer(),
-            timeoutMs: 5000,
-            errorMessage: 'createSseServer timed out',
-        })
-        let page: Awaited<ReturnType<typeof browserContext.newPage>> | null = null
-        let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
-
-        try {
-            page = await withTimeout({
-                promise: browserContext.newPage(),
-                timeoutMs: 5000,
-                errorMessage: 'newPage timed out',
-            })
-            await withTimeout({
-                promise: page.goto(`${sseServer.baseUrl}/`),
-                timeoutMs: 5000,
-                errorMessage: 'page.goto timed out',
-            })
-            await page.bringToFront()
-
-            await withTimeout({
-                promise: serviceWorker.evaluate(async () => {
-                    await globalThis.toggleExtensionForActiveTab()
-                }),
-                timeoutMs: 5000,
-                errorMessage: 'toggleExtensionForActiveTab timed out',
-            })
-            await new Promise((resolve) => {
-                setTimeout(resolve, 100)
-            })
-
-            browser = await withTimeout({
-                promise: chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
-                timeoutMs: 5000,
-                errorMessage: 'connectOverCDP timed out',
-            })
-            const cdpPage = browser.contexts()[0].pages().find((p) => {
-                return p.url().startsWith(sseServer.baseUrl)
-            })
-            expect(cdpPage).toBeDefined()
-
-            await cdpPage!.evaluate(() => {
-                return window.startSse()
-            })
-            await withTimeout({
-                promise: cdpPage!.waitForFunction(() => {
-                    return window.__sseMessages.length > 0
-                }, { timeout: 5000 }),
-                timeoutMs: 7000,
-                errorMessage: 'SSE message not received in time',
-            })
-
-            const firstMessage = await cdpPage!.evaluate(() => {
-                return window.__sseMessages[0]
-            })
-            expect(firstMessage).toBe('hello')
-
-            const sseState = sseServer.getState()
-            expect(sseState.connected).toBe(true)
-            expect(sseState.finished).toBe(false)
-            expect(sseState.closed).toBe(false)
-            expect(sseState.writeCount).toBeGreaterThan(0)
-
-            const readyState = await cdpPage!.evaluate(() => {
-                if (!window.__sseSource) {
-                    return -1
-                }
-                return window.__sseSource.readyState
-            })
-            expect(readyState).toBe(1)
-
-            await cdpPage!.evaluate(() => {
-                window.stopSse()
-            })
-            await new Promise((resolve) => {
-                setTimeout(resolve, 100)
-            })
-        } finally {
-            if (browser) {
-                await withTimeout({
-                    promise: browser.close(),
-                    timeoutMs: 5000,
-                    errorMessage: 'browser.close timed out',
-                })
-            }
-            if (page) {
-                await withTimeout({
-                    promise: page.close(),
-                    timeoutMs: 5000,
-                    errorMessage: 'page.close timed out',
-                })
-            }
-            await withTimeout({
-                promise: sseServer.close(),
-                timeoutMs: 5000,
-                errorMessage: 'sseServer.close timed out',
-            })
-        }
-    }, 60000)
+      }
+      await withTimeout({
+        promise: sseServer.close(),
+        timeoutMs: 5000,
+        errorMessage: 'sseServer.close timed out',
+      })
+    }
+  }, 60000)
 })
 
 // --- Auto-enable Tests ---
 
 describe('Auto-enable Tests', () => {
-    let testCtx: TestContext | null = null
-    let client: Awaited<ReturnType<typeof createMCPClient>>['client']
-    let cleanup: (() => Promise<void>) | null = null
+  let testCtx: TestContext | null = null
+  let client: Awaited<ReturnType<typeof createMCPClient>>['client']
+  let cleanup: (() => Promise<void>) | null = null
 
-    beforeAll(async () => {
-        process.env.PLAYWRITER_AUTO_ENABLE = '1'
-        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-auto-test-' })
+  beforeAll(async () => {
+    process.env.PLAYWRITER_AUTO_ENABLE = '1'
+    testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-auto-test-' })
 
-        const result = await createMCPClient({ port: TEST_PORT })
-        client = result.client
-        cleanup = result.cleanup
+    const result = await createMCPClient({ port: TEST_PORT })
+    client = result.client
+    cleanup = result.cleanup
 
-        // Disconnect all tabs to start with a clean state
-        const serviceWorker = await getExtensionServiceWorker(testCtx.browserContext)
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
-        await new Promise(r => setTimeout(r, 100))
-    }, 600000)
+    // Disconnect all tabs to start with a clean state
+    const serviceWorker = await getExtensionServiceWorker(testCtx.browserContext)
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+    await new Promise((r) => setTimeout(r, 100))
+  }, 600000)
 
-    afterAll(async () => {
-        delete process.env.PLAYWRITER_AUTO_ENABLE
-        await cleanupTestContext(testCtx, cleanup)
-        cleanup = null
-        testCtx = null
+  afterAll(async () => {
+    delete process.env.PLAYWRITER_AUTO_ENABLE
+    await cleanupTestContext(testCtx, cleanup)
+    cleanup = null
+    testCtx = null
+  })
+
+  const getBrowserContext = () => {
+    if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+    return testCtx.browserContext
+  }
+
+  it('should auto-create a tab when Playwright connects and no tabs exist', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+    await new Promise((r) => setTimeout(r, 100))
+
+    const tabCountBefore = await serviceWorker.evaluate(() => {
+      const state = globalThis.getExtensionState()
+      return state.tabs.size
+    })
+    expect(tabCountBefore).toBe(0)
+
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+
+    const pages = browser.contexts()[0].pages()
+    expect(pages.length).toBeGreaterThan(0)
+    expect(pages.length).toBe(1)
+
+    const autoCreatedPage = pages[0]
+    expect(autoCreatedPage.url()).toBe('about:blank')
+
+    const tabCountAfter = await serviceWorker.evaluate(() => {
+      const state = globalThis.getExtensionState()
+      return state.tabs.size
+    })
+    expect(tabCountAfter).toBe(1)
+
+    await autoCreatedPage.setContent('<h1>Auto-created page</h1>')
+    const title = await autoCreatedPage.locator('h1').textContent()
+    expect(title).toBe('Auto-created page')
+
+    await browser.close()
+  }, 60000)
+
+  it('should auto-create a page when MCP executes with no connected pages', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+    await new Promise((r) => {
+      setTimeout(r, 100)
     })
 
-    const getBrowserContext = () => {
-        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
-        return testCtx.browserContext
-    }
+    const tabCountBefore = await serviceWorker.evaluate(() => {
+      const state = globalThis.getExtensionState()
+      return state.tabs.size
+    })
+    expect(tabCountBefore).toBe(0)
 
-    it('should auto-create a tab when Playwright connects and no tabs exist', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
-        await new Promise(r => setTimeout(r, 100))
-
-        const tabCountBefore = await serviceWorker.evaluate(() => {
-            const state = globalThis.getExtensionState()
-            return state.tabs.size
-        })
-        expect(tabCountBefore).toBe(0)
-
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-
-        const pages = browser.contexts()[0].pages()
-        expect(pages.length).toBeGreaterThan(0)
-        expect(pages.length).toBe(1)
-
-        const autoCreatedPage = pages[0]
-        expect(autoCreatedPage.url()).toBe('about:blank')
-
-        const tabCountAfter = await serviceWorker.evaluate(() => {
-            const state = globalThis.getExtensionState()
-            return state.tabs.size
-        })
-        expect(tabCountAfter).toBe(1)
-
-        await autoCreatedPage.setContent('<h1>Auto-created page</h1>')
-        const title = await autoCreatedPage.locator('h1').textContent()
-        expect(title).toBe('Auto-created page')
-
-        await browser.close()
-    }, 60000)
-
-    it('should auto-create a page when MCP executes with no connected pages', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
-        await new Promise((r) => { setTimeout(r, 100) })
-
-        const tabCountBefore = await serviceWorker.evaluate(() => {
-            const state = globalThis.getExtensionState()
-            return state.tabs.size
-        })
-        expect(tabCountBefore).toBe(0)
-
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     return { pageCount: context.pages().length, url: page.url() };
                 `,
-            },
-        })
+      },
+    })
 
-        expect((result as any).isError).toBeFalsy()
-        const text = (result as any).content[0].text
-        expect(text).toContain('pageCount')
-        expect(text).toContain('about:blank')
+    expect((result as any).isError).toBeFalsy()
+    const text = (result as any).content[0].text
+    expect(text).toContain('pageCount')
+    expect(text).toContain('about:blank')
 
-        const tabCountAfter = await serviceWorker.evaluate(() => {
-            const state = globalThis.getExtensionState()
-            return state.tabs.size
-        })
-        expect(tabCountAfter).toBe(1)
+    const tabCountAfter = await serviceWorker.evaluate(() => {
+      const state = globalThis.getExtensionState()
+      return state.tabs.size
+    })
+    expect(tabCountAfter).toBe(1)
 
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     await page.close();
                     return { remaining: context.pages().length };
                 `,
-            },
-        })
+      },
+    })
 
-        await new Promise((r) => { setTimeout(r, 100) })
+    await new Promise((r) => {
+      setTimeout(r, 100)
+    })
 
-        const afterCloseResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const afterCloseResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     return { pageCount: context.pages().length, url: page.url() };
                 `,
-            },
-        })
+      },
+    })
 
-        expect((afterCloseResult as any).isError).toBeFalsy()
-        const afterCloseText = (afterCloseResult as any).content[0].text
-        expect(afterCloseText).toContain('pageCount')
-        expect(afterCloseText).toContain('about:blank')
-    }, 60000)
+    expect((afterCloseResult as any).isError).toBeFalsy()
+    const afterCloseText = (afterCloseResult as any).content[0].text
+    expect(afterCloseText).toContain('pageCount')
+    expect(afterCloseText).toContain('about:blank')
+  }, 60000)
 })

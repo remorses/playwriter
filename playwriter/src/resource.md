@@ -1,5 +1,3 @@
-
-
 You can also find `getByRole` to get elements on the page.
 
 ```javascript
@@ -14,9 +12,7 @@ await page.getByRole('link', { name: 'About' }).click()
 await page.getByRole('textbox', { name: 'Email' }).fill('user@example.com')
 
 // For a heading with { "role": "heading", "name": "Welcome to Example.com" }
-const headingText = await page
-    .getByRole('heading', { name: 'Welcome to Example.com' })
-    .textContent()
+const headingText = await page.getByRole('heading', { name: 'Welcome to Example.com' }).textContent()
 console.log('Heading text:', headingText)
 ```
 
@@ -223,17 +219,14 @@ const pageTitle = await page.evaluate(() => document.title)
 
 // Modify page
 await page.evaluate(() => {
-    document.body.style.backgroundColor = 'red'
+  document.body.style.backgroundColor = 'red'
 })
 
 // Pass arguments to page context
 const sum = await page.evaluate(([a, b]) => a + b, [5, 3])
 
 // Work with elements
-const elementText = await page.evaluate(
-    (el) => el.textContent,
-    await page.getByRole('heading'),
-)
+const elementText = await page.evaluate((el) => el.textContent, await page.getByRole('heading'))
 ```
 
 ### Execute JavaScript on Element
@@ -244,8 +237,8 @@ const href = await page.getByRole('link').evaluate((el) => el.href)
 
 // Modify element
 await page.getByRole('button').evaluate((el) => {
-    el.style.backgroundColor = 'green'
-    el.disabled = true
+  el.style.backgroundColor = 'green'
+  el.disabled = true
 })
 
 // Scroll element into view
@@ -261,9 +254,7 @@ await page.getByText('Section').evaluate((el) => el.scrollIntoView())
 await page.getByLabel('Upload file').setInputFiles('/path/to/file.pdf')
 
 // Upload multiple files
-await page
-    .getByLabel('Upload files')
-    .setInputFiles(['/path/to/file1.pdf', '/path/to/file2.pdf'])
+await page.getByLabel('Upload files').setInputFiles(['/path/to/file1.pdf', '/path/to/file2.pdf'])
 
 // Clear file input
 await page.getByLabel('Upload file').setInputFiles([])
@@ -280,8 +271,7 @@ await page.locator('input[type="file"]').setInputFiles('/path/to/file.pdf')
 ```javascript
 // Wait for a specific request to complete and get its response
 const response = await page.waitForResponse(
-    (response) =>
-        response.url().includes('/api/user') && response.status() === 200,
+  (response) => response.url().includes('/api/user') && response.status() === 200,
 )
 
 // Get response data
@@ -295,11 +285,11 @@ console.log('Request method:', request.method())
 
 // Get all resources loaded by the page
 const resources = await page.evaluate(() =>
-    performance.getEntriesByType('resource').map((r) => ({
-        name: r.name,
-        duration: r.duration,
-        size: r.transferSize,
-    })),
+  performance.getEntriesByType('resource').map((r) => ({
+    name: r.name,
+    duration: r.duration,
+    size: r.transferSize,
+  })),
 )
 console.log('Page resources:', resources)
 ```
@@ -314,9 +304,9 @@ console.log('Page resources:', resources)
 
 // To trigger console messages from the page:
 await page.evaluate(() => {
-    console.log('This message will be captured')
-    console.error('This error will be captured')
-    console.warn('This warning will be captured')
+  console.log('This message will be captured')
+  console.error('This error will be captured')
+  console.warn('This warning will be captured')
 })
 
 // Then use the console_logs MCP tool to retrieve all captured messages
@@ -338,10 +328,7 @@ await page.waitForURL(/github\.com.*\/pull/)
 await page.waitForURL(/\/new-org/)
 
 // Wait for text to appear
-await page.waitForFunction(
-    (text) => document.body.textContent.includes(text),
-    'Success!',
-)
+await page.waitForFunction((text) => document.body.textContent.includes(text), 'Success!')
 
 // Wait for navigation
 await page.waitForURL('**/success')
@@ -350,10 +337,7 @@ await page.waitForURL('**/success')
 await waitForPageLoad({ page })
 
 // Wait for specific condition
-await page.waitForFunction(
-    (text) => document.querySelector('.status')?.textContent === text,
-    'Ready',
-)
+await page.waitForFunction((text) => document.querySelector('.status')?.textContent === text, 'Ready')
 ```
 
 ### Wait for Text to Appear or Disappear
@@ -374,30 +358,18 @@ await page.getByText('Success!').first().waitFor({ state: 'visible' })
 console.log('Processing finished and success message appeared')
 
 // Example: Wait for error message to disappear before proceeding
-await page
-    .getByText('Error: Please try again')
-    .first()
-    .waitFor({ state: 'hidden' })
+await page.getByText('Error: Please try again').first().waitFor({ state: 'hidden' })
 await page.getByRole('button', { name: 'Submit' }).click()
 
 // Example: Wait for confirmation text after form submission
 await page.getByRole('button', { name: 'Save' }).click()
-await page
-    .getByText('Your changes have been saved')
-    .first()
-    .waitFor({ state: 'visible' })
+await page.getByText('Your changes have been saved').first().waitFor({ state: 'visible' })
 console.log('Save confirmed')
 
 // Example: Wait for dynamic content to load
 await page.getByRole('button', { name: 'Load More' }).click()
-await page
-    .getByText('Loading more items...')
-    .first()
-    .waitFor({ state: 'visible' })
-await page
-    .getByText('Loading more items...')
-    .first()
-    .waitFor({ state: 'hidden' })
+await page.getByText('Loading more items...').first().waitFor({ state: 'visible' })
+await page.getByText('Loading more items...').first().waitFor({ state: 'hidden' })
 console.log('Additional items loaded')
 ```
 

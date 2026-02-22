@@ -5,32 +5,36 @@ The getStylesForLocator function inspects CSS styles applied to an element, simi
 ## Types
 
 ```ts
-import type { ICDPSession } from './cdp-session.js';
-import type { Locator } from '@xmorse/playwright-core';
+import type { ICDPSession } from './cdp-session.js'
+import type { Locator } from '@xmorse/playwright-core'
 export interface StyleSource {
-    url: string;
-    line: number;
-    column: number;
+  url: string
+  line: number
+  column: number
 }
-export type StyleDeclarations = Record<string, string>;
+export type StyleDeclarations = Record<string, string>
 export interface StyleRule {
-    selector: string;
-    source: StyleSource | null;
-    origin: 'regular' | 'user-agent' | 'injected' | 'inspector';
-    declarations: StyleDeclarations;
-    inheritedFrom: string | null;
+  selector: string
+  source: StyleSource | null
+  origin: 'regular' | 'user-agent' | 'injected' | 'inspector'
+  declarations: StyleDeclarations
+  inheritedFrom: string | null
 }
 export interface StylesResult {
-    element: string;
-    inlineStyle: StyleDeclarations | null;
-    rules: StyleRule[];
+  element: string
+  inlineStyle: StyleDeclarations | null
+  rules: StyleRule[]
 }
-export declare function getStylesForLocator({ locator, cdp: cdpSession, includeUserAgentStyles, }: {
-    locator: Locator;
-    cdp: ICDPSession;
-    includeUserAgentStyles?: boolean;
-}): Promise<StylesResult>;
-export declare function formatStylesAsText(styles: StylesResult): string;
+export declare function getStylesForLocator({
+  locator,
+  cdp: cdpSession,
+  includeUserAgentStyles,
+}: {
+  locator: Locator
+  cdp: ICDPSession
+  includeUserAgentStyles?: boolean
+}): Promise<StylesResult>
+export declare function formatStylesAsText(styles: StylesResult): string
 ```
 
 ## Examples
@@ -112,6 +116,12 @@ async function compareStyles() {
   console.log(formatStylesAsText(secondary))
 }
 
-export { getElementStyles, inspectButtonStyles, getStylesWithUserAgent, findPropertySource, checkInheritedStyles, compareStyles }
-
+export {
+  getElementStyles,
+  inspectButtonStyles,
+  getStylesWithUserAgent,
+  findPropertySource,
+  checkInheritedStyles,
+  compareStyles,
+}
 ```

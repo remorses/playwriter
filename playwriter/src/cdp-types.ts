@@ -1,55 +1,55 @@
-import type { Protocol } from 'devtools-protocol';
-import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
+import type { Protocol } from 'devtools-protocol'
+import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js'
 
-export type CDPCommandSource = 'playwriter';
+export type CDPCommandSource = 'playwriter'
 
 export type CDPCommandFor<T extends keyof ProtocolMapping.Commands> = {
-  id: number;
-  sessionId?: string;
-  method: T;
-  params?: ProtocolMapping.Commands[T]['paramsType'][0];
-  source?: CDPCommandSource;
-};
+  id: number
+  sessionId?: string
+  method: T
+  params?: ProtocolMapping.Commands[T]['paramsType'][0]
+  source?: CDPCommandSource
+}
 
 export type CDPCommand = {
-  [K in keyof ProtocolMapping.Commands]: CDPCommandFor<K>;
-}[keyof ProtocolMapping.Commands];
+  [K in keyof ProtocolMapping.Commands]: CDPCommandFor<K>
+}[keyof ProtocolMapping.Commands]
 
 export type CDPResponseFor<T extends keyof ProtocolMapping.Commands> = {
-  id: number;
-  sessionId?: string;
-  result?: ProtocolMapping.Commands[T]['returnType'];
-  error?: { code?: number; message: string };
-};
+  id: number
+  sessionId?: string
+  result?: ProtocolMapping.Commands[T]['returnType']
+  error?: { code?: number; message: string }
+}
 
 export type CDPResponse = {
-  [K in keyof ProtocolMapping.Commands]: CDPResponseFor<K>;
-}[keyof ProtocolMapping.Commands];
+  [K in keyof ProtocolMapping.Commands]: CDPResponseFor<K>
+}[keyof ProtocolMapping.Commands]
 
 export type CDPEventFor<T extends keyof ProtocolMapping.Events> = {
-  method: T;
-  sessionId?: string;
-  params?: ProtocolMapping.Events[T][0];
-};
+  method: T
+  sessionId?: string
+  params?: ProtocolMapping.Events[T][0]
+}
 
 export type CDPEvent = {
-  [K in keyof ProtocolMapping.Events]: CDPEventFor<K>;
-}[keyof ProtocolMapping.Events];
+  [K in keyof ProtocolMapping.Events]: CDPEventFor<K>
+}[keyof ProtocolMapping.Events]
 
 export type CDPResponseBase = {
-  id: number;
-  sessionId?: string;
-  result?: unknown;
-  error?: { code?: number; message: string };
-};
+  id: number
+  sessionId?: string
+  result?: unknown
+  error?: { code?: number; message: string }
+}
 
 export type CDPEventBase = {
-  method: string;
-  sessionId?: string;
-  params?: unknown;
-};
+  method: string
+  sessionId?: string
+  params?: unknown
+}
 
-export type CDPMessage = CDPCommand | CDPResponse | CDPEvent;
+export type CDPMessage = CDPCommand | CDPResponse | CDPEvent
 
 export type RelayServerEvents = {
   'cdp:command': (data: { clientId: string; command: CDPCommand }) => void
@@ -57,14 +57,14 @@ export type RelayServerEvents = {
   'cdp:response': (data: { clientId: string; response: CDPResponseBase; command: CDPCommand }) => void
 }
 
-export { Protocol, ProtocolMapping };
+export { Protocol, ProtocolMapping }
 
 // types tests. to see if types are right with some simple examples
 if (false as any) {
   const browserVersionCommand = {
     id: 1,
     method: 'Browser.getVersion',
-  } satisfies CDPCommand;
+  } satisfies CDPCommand
 
   const browserVersionResponse = {
     id: 1,
@@ -74,8 +74,8 @@ if (false as any) {
       revision: '123',
       userAgent: 'Mozilla/5.0',
       jsVersion: 'V8',
-    }
-  } satisfies CDPResponse;
+    },
+  } satisfies CDPResponse
 
   const targetAttachCommand = {
     id: 2,
@@ -83,13 +83,13 @@ if (false as any) {
     params: {
       autoAttach: true,
       waitForDebuggerOnStart: false,
-    }
-  } satisfies CDPCommand;
+    },
+  } satisfies CDPCommand
 
   const targetAttachResponse = {
     id: 2,
     result: undefined,
-  } satisfies CDPResponse;
+  } satisfies CDPResponse
 
   const attachedToTargetEvent = {
     method: 'Target.attachedToTarget',
@@ -104,8 +104,8 @@ if (false as any) {
         canAccessOpener: false,
       },
       waitingForDebugger: false,
-    }
-  } satisfies CDPEvent;
+    },
+  } satisfies CDPEvent
 
   const consoleMessageEvent = {
     method: 'Runtime.consoleAPICalled',
@@ -114,23 +114,23 @@ if (false as any) {
       args: [],
       executionContextId: 1,
       timestamp: 123456789,
-    }
-  } satisfies CDPEvent;
+    },
+  } satisfies CDPEvent
 
   const pageNavigateCommand = {
     id: 3,
     method: 'Page.navigate',
     params: {
       url: 'https://example.com',
-    }
-  } satisfies CDPCommand;
+    },
+  } satisfies CDPCommand
 
   const pageNavigateResponse = {
     id: 3,
     result: {
       frameId: 'frame-1',
-    }
-  } satisfies CDPResponse;
+    },
+  } satisfies CDPResponse
 
   const networkRequestEvent = {
     method: 'Network.requestWillBeSent',
@@ -153,6 +153,6 @@ if (false as any) {
       },
       redirectHasExtraInfo: false,
       type: 'XHR',
-    }
-  } satisfies CDPEvent;
+    },
+  } satisfies CDPEvent
 }

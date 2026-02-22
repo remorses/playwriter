@@ -294,7 +294,7 @@ export class Editor {
   private async setSource(
     id: { scriptId: string } | { styleSheetId: string },
     content: string,
-    dryRun = false
+    dryRun = false,
   ): Promise<EditResult> {
     if ('styleSheetId' in id) {
       await this.cdp.send('CSS.setStyleSheetText', { styleSheetId: id.styleSheetId, text: content })
@@ -410,7 +410,15 @@ export class Editor {
    * @param options.content - New content
    * @param options.dryRun - If true, validate without applying (default false, only works for JS)
    */
-  async write({ url, content, dryRun = false }: { url: string; content: string; dryRun?: boolean }): Promise<EditResult> {
+  async write({
+    url,
+    content,
+    dryRun = false,
+  }: {
+    url: string
+    content: string
+    dryRun?: boolean
+  }): Promise<EditResult> {
     await this.enable()
     const id = this.getIdByUrl(url)
     return this.setSource(id, content, dryRun)

@@ -15,7 +15,9 @@ Dark mode uses `prefers-color-scheme` media query, configured in `globals.css`:
 ```css
 /* WRONG - silently produces no output */
 @variant dark {
-  .my-class { color: white; }
+  .my-class {
+    color: white;
+  }
 }
 
 /* CORRECT - nest inside the selector */
@@ -37,9 +39,9 @@ Dark mode uses `prefers-color-scheme` media query, configured in `globals.css`:
 
 ```css
 /* globals.css — this is the Tailwind entry point */
-@import "tailwindcss";
-@import "./editorial.css";       /* editorial page styles (class names, layout) */
-@import "./editorial-prism.css"; /* prism syntax highlighting */
+@import 'tailwindcss';
+@import './editorial.css'; /* editorial page styles (class names, layout) */
+@import './editorial-prism.css'; /* prism syntax highlighting */
 @custom-variant dark (@media (prefers-color-scheme: dark));
 ```
 
@@ -54,7 +56,7 @@ For files with many dark mode selectors (like prism syntax colors), define CSS v
 Every `<img>` must have explicit `width` and `height` attributes matching the intrinsic pixel dimensions of the source file. Add `style={{ height: "auto" }}` to keep it responsive. This lets the browser reserve the correct aspect ratio space before the image loads, preventing layout shift.
 
 ```tsx
-<img src="/photo.png" width={1280} height={800} style={{ maxWidth: "100%", height: "auto" }} />
+<img src='/photo.png' width={1280} height={800} style={{ maxWidth: '100%', height: 'auto' }} />
 ```
 
 Use `sips -g pixelWidth -g pixelHeight <file>` to get dimensions on macOS.

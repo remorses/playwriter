@@ -8,273 +8,281 @@ import './test-declarations.js'
 const TEST_PORT = 19990
 
 describe('Extension Connection Tests', () => {
-    let client: Awaited<ReturnType<typeof createMCPClient>>['client']
-    let cleanup: (() => Promise<void>) | null = null
-    let testCtx: TestContext | null = null
+  let client: Awaited<ReturnType<typeof createMCPClient>>['client']
+  let cleanup: (() => Promise<void>) | null = null
+  let testCtx: TestContext | null = null
 
-    beforeAll(async () => {
-        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-conn-test-', toggleExtension: true })
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-conn-test-', toggleExtension: true })
 
-        const result = await createMCPClient({ port: TEST_PORT })
-        client = result.client
-        cleanup = result.cleanup
-    }, 600000)
+    const result = await createMCPClient({ port: TEST_PORT })
+    client = result.client
+    cleanup = result.cleanup
+  }, 600000)
 
-    afterAll(async () => {
-        await cleanupTestContext(testCtx, cleanup)
-        cleanup = null
-        testCtx = null
+  afterAll(async () => {
+    await cleanupTestContext(testCtx, cleanup)
+    cleanup = null
+    testCtx = null
+  })
+
+  const getBrowserContext = () => {
+    if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+    return testCtx.browserContext
+  }
+
+  it('should handle new pages and toggling with new connections', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    // 1. Create a new page
+    const page = await browserContext.newPage()
+    const testUrl = 'https://example.com/'
+    await page.goto(testUrl)
+
+    await page.bringToFront()
+
+    // 2. Enable extension on this new tab
+    const result = await serviceWorker.evaluate(async () => {
+      return await globalThis.toggleExtensionForActiveTab()
     })
+    expect(result.isConnected).toBe(true)
 
-    const getBrowserContext = () => {
-        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
-        return testCtx.browserContext
+    // 3. Verify we can connect via direct CDP and see the page
+    let directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    let contexts = directBrowser.contexts()
+    let pages = contexts[0].pages()
+
+    let foundPage = pages.find((p) => p.url() === testUrl)
+    expect(foundPage).toBeDefined()
+    expect(foundPage?.url()).toBe(testUrl)
+
+    const sum1 = await foundPage?.evaluate(() => 1 + 1)
+    expect(sum1).toBe(2)
+
+    await directBrowser.close()
+
+    // 4. Disable extension on this tab
+    const resultDisabled = await serviceWorker.evaluate(async () => {
+      return await globalThis.toggleExtensionForActiveTab()
+    })
+    expect(resultDisabled.isConnected).toBe(false)
+
+    // 5. Connect again - page should NOT be visible
+    directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    contexts = directBrowser.contexts()
+    pages = contexts[0].pages()
+
+    foundPage = pages.find((p) => p.url() === testUrl)
+    expect(foundPage).toBeUndefined()
+
+    await directBrowser.close()
+
+    // 6. Re-enable extension
+    const resultEnabled = await serviceWorker.evaluate(async () => {
+      return await globalThis.toggleExtensionForActiveTab()
+    })
+    expect(resultEnabled.isConnected).toBe(true)
+
+    // 7. Verify page is back
+    directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    await new Promise((r) => setTimeout(r, 100))
+
+    contexts = directBrowser.contexts()
+    if (contexts[0].pages().length === 0) {
+      await new Promise((r) => setTimeout(r, 100))
     }
+    pages = contexts[0].pages()
 
-    it('should handle new pages and toggling with new connections', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    foundPage = pages.find((p) => p.url() === testUrl)
+    expect(foundPage).toBeDefined()
+    expect(foundPage?.url()).toBe(testUrl)
 
-        // 1. Create a new page
-        const page = await browserContext.newPage()
-        const testUrl = 'https://example.com/'
-        await page.goto(testUrl)
+    const sum2 = await foundPage?.evaluate(() => 2 + 2)
+    expect(sum2).toBe(4)
 
-        await page.bringToFront()
+    await directBrowser.close()
+    await page.close()
+  }, 120000)
 
-        // 2. Enable extension on this new tab
-        const result = await serviceWorker.evaluate(async () => {
-            return await globalThis.toggleExtensionForActiveTab()
-        })
-        expect(result.isConnected).toBe(true)
+  it('should handle new pages and toggling with persistent connection', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        // 3. Verify we can connect via direct CDP and see the page
-        let directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        let contexts = directBrowser.contexts()
-        let pages = contexts[0].pages()
+    const directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    await new Promise((r) => setTimeout(r, 100))
 
-        let foundPage = pages.find(p => p.url() === testUrl)
-        expect(foundPage).toBeDefined()
-        expect(foundPage?.url()).toBe(testUrl)
+    // 1. Create a new page
+    const page = await browserContext.newPage()
+    const testUrl = 'https://example.com/persistent'
+    await page.goto(testUrl)
+    await page.bringToFront()
 
-        const sum1 = await foundPage?.evaluate(() => 1 + 1)
-        expect(sum1).toBe(2)
-
-        await directBrowser.close()
-
-        // 4. Disable extension on this tab
-        const resultDisabled = await serviceWorker.evaluate(async () => {
-            return await globalThis.toggleExtensionForActiveTab()
-        })
-        expect(resultDisabled.isConnected).toBe(false)
-
-        // 5. Connect again - page should NOT be visible
-        directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        contexts = directBrowser.contexts()
-        pages = contexts[0].pages()
-
-        foundPage = pages.find(p => p.url() === testUrl)
-        expect(foundPage).toBeUndefined()
-
-        await directBrowser.close()
-
-        // 6. Re-enable extension
-        const resultEnabled = await serviceWorker.evaluate(async () => {
-            return await globalThis.toggleExtensionForActiveTab()
-        })
-        expect(resultEnabled.isConnected).toBe(true)
-
-        // 7. Verify page is back
-        directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        await new Promise(r => setTimeout(r, 100))
-
-        contexts = directBrowser.contexts()
-        if (contexts[0].pages().length === 0) {
-             await new Promise(r => setTimeout(r, 100))
-        }
-        pages = contexts[0].pages()
-
-        foundPage = pages.find(p => p.url() === testUrl)
-        expect(foundPage).toBeDefined()
-        expect(foundPage?.url()).toBe(testUrl)
-
-        const sum2 = await foundPage?.evaluate(() => 2 + 2)
-        expect(sum2).toBe(4)
-
-        await directBrowser.close()
-        await page.close()
-    }, 120000)
-
-    it('should handle new pages and toggling with persistent connection', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-
-        const directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        await new Promise(r => setTimeout(r, 100))
-
-        // 1. Create a new page
-        const page = await browserContext.newPage()
-        const testUrl = 'https://example.com/persistent'
-        await page.goto(testUrl)
-        await page.bringToFront()
-
-        // 2. Enable extension
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-
-        // 3. Verify page appears (polling)
-        let foundPage
-        for (let i = 0; i < 50; i++) {
-            const pages = directBrowser.contexts()[0].pages()
-            foundPage = pages.find(p => p.url() === testUrl)
-            if (foundPage) break
-            await new Promise(r => setTimeout(r, 100))
-        }
-        expect(foundPage).toBeDefined()
-        expect(foundPage?.url()).toBe(testUrl)
-
-        const sum1 = await foundPage?.evaluate(() => 10 + 20)
-        expect(sum1).toBe(30)
-
-        // 4. Disable extension
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-
-        // 5. Verify page disappears (polling)
-        for (let i = 0; i < 50; i++) {
-            const pages = directBrowser.contexts()[0].pages()
-            foundPage = pages.find(p => p.url() === testUrl)
-            if (!foundPage) break
-            await new Promise(r => setTimeout(r, 100))
-        }
-        expect(foundPage).toBeUndefined()
-
-        // 6. Re-enable extension
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-
-        // 7. Verify page reappears (polling)
-        for (let i = 0; i < 50; i++) {
-            const pages = directBrowser.contexts()[0].pages()
-            foundPage = pages.find(p => p.url() === testUrl)
-            if (foundPage) break
-            await new Promise(r => setTimeout(r, 100))
-        }
-        expect(foundPage).toBeDefined()
-        expect(foundPage?.url()).toBe(testUrl)
-
-        const sum2 = await foundPage?.evaluate(() => 30 + 40)
-        expect(sum2).toBe(70)
-
-        await page.close()
-        await directBrowser.close()
+    // 2. Enable extension
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
     })
 
-    it('should maintain connection across reloads and navigation', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    // 3. Verify page appears (polling)
+    let foundPage
+    for (let i = 0; i < 50; i++) {
+      const pages = directBrowser.contexts()[0].pages()
+      foundPage = pages.find((p) => p.url() === testUrl)
+      if (foundPage) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(foundPage).toBeDefined()
+    expect(foundPage?.url()).toBe(testUrl)
 
-        // 1. Setup page
-        const page = await browserContext.newPage()
-        const initialUrl = 'https://example.com/'
-        await page.goto(initialUrl)
-        await page.bringToFront()
+    const sum1 = await foundPage?.evaluate(() => 10 + 20)
+    expect(sum1).toBe(30)
 
-        // 2. Enable extension
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-
-        // 3. Connect via CDP
-        const cdpUrl = getCdpUrl({ port: TEST_PORT })
-        const directBrowser = await chromium.connectOverCDP(cdpUrl)
-        const connectedPage = directBrowser.contexts()[0].pages().find(p => p.url() === initialUrl)
-        expect(connectedPage).toBeDefined()
-
-        expect(await connectedPage?.evaluate(() => 1 + 1)).toBe(2)
-
-        // 4. Reload
-        await connectedPage?.reload()
-        await connectedPage?.waitForLoadState('domcontentloaded')
-        expect(await connectedPage?.title()).toBe('Example Domain')
-
-        expect(await connectedPage?.evaluate(() => 2 + 2)).toBe(4)
-
-        // 5. Navigate to new URL
-        const newUrl = 'https://example.org/'
-        await connectedPage?.goto(newUrl)
-        await connectedPage?.waitForLoadState('domcontentloaded')
-
-        expect(connectedPage?.url()).toBe(newUrl)
-        expect(await connectedPage?.title()).toContain('Example Domain')
-
-        expect(await connectedPage?.evaluate(() => 3 + 3)).toBe(6)
-
-        await directBrowser.close()
-        await page.close()
+    // 4. Disable extension
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
     })
 
-    it('should support multiple concurrent tabs', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
-        await new Promise(resolve => setTimeout(resolve, 100))
+    // 5. Verify page disappears (polling)
+    for (let i = 0; i < 50; i++) {
+      const pages = directBrowser.contexts()[0].pages()
+      foundPage = pages.find((p) => p.url() === testUrl)
+      if (!foundPage) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(foundPage).toBeUndefined()
 
-        // Tab A
-        const pageA = await browserContext.newPage()
-        await pageA.goto('https://example.com/tab-a')
-        await pageA.bringToFront()
-        await new Promise(resolve => setTimeout(resolve, 100))
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    // 6. Re-enable extension
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        // Tab B
-        const pageB = await browserContext.newPage()
-        await pageB.goto('https://example.com/tab-b')
-        await pageB.bringToFront()
-        await new Promise(resolve => setTimeout(resolve, 100))
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    // 7. Verify page reappears (polling)
+    for (let i = 0; i < 50; i++) {
+      const pages = directBrowser.contexts()[0].pages()
+      foundPage = pages.find((p) => p.url() === testUrl)
+      if (foundPage) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(foundPage).toBeDefined()
+    expect(foundPage?.url()).toBe(testUrl)
 
-        // Get target IDs for both
-        const targetIds = await serviceWorker.evaluate(async () => {
-             const state = globalThis.getExtensionState()
-             const chrome = globalThis.chrome
-             const tabs = await chrome.tabs.query({})
-             const tabA = tabs.find((t: any) => t.url?.includes('tab-a'))
-             const tabB = tabs.find((t: any) => t.url?.includes('tab-b'))
-             return {
-                 idA: state.tabs.get(tabA?.id ?? -1)?.targetId,
-                 idB: state.tabs.get(tabB?.id ?? -1)?.targetId
-             }
-        })
+    const sum2 = await foundPage?.evaluate(() => 30 + 40)
+    expect(sum2).toBe(70)
 
-        expect(targetIds).toMatchInlineSnapshot({
-            idA: expect.any(String),
-            idB: expect.any(String)
-        }, `
+    await page.close()
+    await directBrowser.close()
+  })
+
+  it('should maintain connection across reloads and navigation', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    // 1. Setup page
+    const page = await browserContext.newPage()
+    const initialUrl = 'https://example.com/'
+    await page.goto(initialUrl)
+    await page.bringToFront()
+
+    // 2. Enable extension
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    // 3. Connect via CDP
+    const cdpUrl = getCdpUrl({ port: TEST_PORT })
+    const directBrowser = await chromium.connectOverCDP(cdpUrl)
+    const connectedPage = directBrowser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url() === initialUrl)
+    expect(connectedPage).toBeDefined()
+
+    expect(await connectedPage?.evaluate(() => 1 + 1)).toBe(2)
+
+    // 4. Reload
+    await connectedPage?.reload()
+    await connectedPage?.waitForLoadState('domcontentloaded')
+    expect(await connectedPage?.title()).toBe('Example Domain')
+
+    expect(await connectedPage?.evaluate(() => 2 + 2)).toBe(4)
+
+    // 5. Navigate to new URL
+    const newUrl = 'https://example.org/'
+    await connectedPage?.goto(newUrl)
+    await connectedPage?.waitForLoadState('domcontentloaded')
+
+    expect(connectedPage?.url()).toBe(newUrl)
+    expect(await connectedPage?.title()).toContain('Example Domain')
+
+    expect(await connectedPage?.evaluate(() => 3 + 3)).toBe(6)
+
+    await directBrowser.close()
+    await page.close()
+  })
+
+  it('should support multiple concurrent tabs', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // Tab A
+    const pageA = await browserContext.newPage()
+    await pageA.goto('https://example.com/tab-a')
+    await pageA.bringToFront()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    // Tab B
+    const pageB = await browserContext.newPage()
+    await pageB.goto('https://example.com/tab-b')
+    await pageB.bringToFront()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    // Get target IDs for both
+    const targetIds = await serviceWorker.evaluate(async () => {
+      const state = globalThis.getExtensionState()
+      const chrome = globalThis.chrome
+      const tabs = await chrome.tabs.query({})
+      const tabA = tabs.find((t: any) => t.url?.includes('tab-a'))
+      const tabB = tabs.find((t: any) => t.url?.includes('tab-b'))
+      return {
+        idA: state.tabs.get(tabA?.id ?? -1)?.targetId,
+        idB: state.tabs.get(tabB?.id ?? -1)?.targetId,
+      }
+    })
+
+    expect(targetIds).toMatchInlineSnapshot(
+      {
+        idA: expect.any(String),
+        idB: expect.any(String),
+      },
+      `
           {
             "idA": Any<String>,
             "idB": Any<String>,
           }
-        `)
-        expect(targetIds.idA).not.toBe(targetIds.idB)
+        `,
+    )
+    expect(targetIds.idA).not.toBe(targetIds.idB)
 
-        // Verify independent connections
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    // Verify independent connections
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
 
-        const pages = browser.contexts()[0].pages()
+    const pages = browser.contexts()[0].pages()
 
-        const results = await Promise.all(pages.map(async (p) => ({
-            url: p.url(),
-            title: await p.title()
-        })))
+    const results = await Promise.all(
+      pages.map(async (p) => ({
+        url: p.url(),
+        title: await p.title(),
+      })),
+    )
 
-        expect(results).toMatchInlineSnapshot(`
+    expect(results).toMatchInlineSnapshot(`
           [
             {
               "title": "",
@@ -291,253 +299,256 @@ describe('Extension Connection Tests', () => {
           ]
         `)
 
-        // Verify execution on both pages
-        const pageA_CDP = pages.find(p => p.url().includes('tab-a'))
-        const pageB_CDP = pages.find(p => p.url().includes('tab-b'))
+    // Verify execution on both pages
+    const pageA_CDP = pages.find((p) => p.url().includes('tab-a'))
+    const pageB_CDP = pages.find((p) => p.url().includes('tab-b'))
 
-        expect(await pageA_CDP?.evaluate(() => 10 + 10)).toBe(20)
-        expect(await pageB_CDP?.evaluate(() => 20 + 20)).toBe(40)
+    expect(await pageA_CDP?.evaluate(() => 10 + 10)).toBe(20)
+    expect(await pageB_CDP?.evaluate(() => 20 + 20)).toBe(40)
 
-        await browser.close()
-        await pageA.close()
-        await pageB.close()
+    await browser.close()
+    await pageA.close()
+    await pageB.close()
+  })
+
+  it('should warn and switch page when the active page closes', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const pageA = await browserContext.newPage()
+    await pageA.goto('https://example.com/close-warning-a')
+    await pageA.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
     })
 
-    it('should warn and switch page when the active page closes', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const pageB = await browserContext.newPage()
+    await pageB.goto('https://example.com/close-warning-b')
+    await pageB.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        const pageA = await browserContext.newPage()
-        await pageA.goto('https://example.com/close-warning-a')
-        await pageA.bringToFront()
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-
-        const pageB = await browserContext.newPage()
-        await pageB.goto('https://example.com/close-warning-b')
-        await pageB.bringToFront()
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-
-        const closeResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const closeResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           state.page = page;
           const closedUrl = state.page.url();
           await state.page.close();
           return { closedUrl, remainingPages: context.pages().length };
         `,
-            },
-        })
-
-        const closeOutput = (closeResult as any).content[0].text
-        expect(closeOutput).toContain('[WARNING] The current page in state.page was closed')
-        expect(closeOutput).toContain('Switched active page to index')
-        expect((closeResult as any).isError).not.toBe(true)
-
-        const nextResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
-          return { pageUrl: page.url(), pagesCount: context.pages().length };
-        `,
-            },
-        })
-
-        const nextOutput = (nextResult as any).content[0].text
-        expect(nextOutput).toContain('pagesCount')
-        expect(nextOutput).not.toContain('No Playwright pages are available')
-        expect(nextOutput).not.toContain('[WARNING] The current page was closed')
-        expect((nextResult as any).isError).not.toBe(true)
-
-        if (!pageA.isClosed()) {
-            await pageA.close()
-        }
-        if (!pageB.isClosed()) {
-            await pageB.close()
-        }
+      },
     })
 
-    it('should switch page without warning when closed page is not stored in state', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const closeOutput = (closeResult as any).content[0].text
+    expect(closeOutput).toContain('[WARNING] The current page in state.page was closed')
+    expect(closeOutput).toContain('Switched active page to index')
+    expect((closeResult as any).isError).not.toBe(true)
 
-        const pageA = await browserContext.newPage()
-        await pageA.goto('https://example.com/close-no-state-warning-a')
-        await pageA.bringToFront()
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    const nextResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          return { pageUrl: page.url(), pagesCount: context.pages().length };
+        `,
+      },
+    })
 
-        const pageB = await browserContext.newPage()
-        await pageB.goto('https://example.com/close-no-state-warning-b')
-        await pageB.bringToFront()
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    const nextOutput = (nextResult as any).content[0].text
+    expect(nextOutput).toContain('pagesCount')
+    expect(nextOutput).not.toContain('No Playwright pages are available')
+    expect(nextOutput).not.toContain('[WARNING] The current page was closed')
+    expect((nextResult as any).isError).not.toBe(true)
 
-        const closeResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    if (!pageA.isClosed()) {
+      await pageA.close()
+    }
+    if (!pageB.isClosed()) {
+      await pageB.close()
+    }
+  })
+
+  it('should switch page without warning when closed page is not stored in state', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const pageA = await browserContext.newPage()
+    await pageA.goto('https://example.com/close-no-state-warning-a')
+    await pageA.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const pageB = await browserContext.newPage()
+    await pageB.goto('https://example.com/close-no-state-warning-b')
+    await pageB.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const closeResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const closedUrl = page.url();
           await page.close();
           return { closedUrl, remainingPages: context.pages().length };
         `,
-            },
-        })
-
-        const closeOutput = (closeResult as any).content[0].text
-        expect(closeOutput).not.toContain('[WARNING] The current page in state.page was closed')
-        expect(closeOutput).not.toContain('Switched active page to index')
-        expect((closeResult as any).isError).not.toBe(true)
-
-        const nextResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
-          return { pageUrl: page.url(), pagesCount: context.pages().length };
-        `,
-            },
-        })
-
-        const nextOutput = (nextResult as any).content[0].text
-        expect(nextOutput).toContain('pagesCount')
-        expect((nextResult as any).isError).not.toBe(true)
-
-        if (!pageA.isClosed()) {
-            await pageA.close()
-        }
-        if (!pageB.isClosed()) {
-            await pageB.close()
-        }
+      },
     })
 
-    it('should show correct url when enabling extension after navigation', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const closeOutput = (closeResult as any).content[0].text
+    expect(closeOutput).not.toContain('[WARNING] The current page in state.page was closed')
+    expect(closeOutput).not.toContain('Switched active page to index')
+    expect((closeResult as any).isError).not.toBe(true)
 
-        const page = await browserContext.newPage()
-        const targetUrl = 'https://example.com/late-enable'
-        await page.goto(targetUrl)
-        await page.bringToFront()
+    const nextResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          return { pageUrl: page.url(), pagesCount: context.pages().length };
+        `,
+      },
+    })
 
-        await page.waitForLoadState('domcontentloaded')
+    const nextOutput = (nextResult as any).content[0].text
+    expect(nextOutput).toContain('pagesCount')
+    expect((nextResult as any).isError).not.toBe(true)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+    if (!pageA.isClosed()) {
+      await pageA.close()
+    }
+    if (!pageB.isClosed()) {
+      await pageB.close()
+    }
+  })
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        await new Promise(r => setTimeout(r, 100))
+  it('should show correct url when enabling extension after navigation', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const cdpPage = browser.contexts()[0].pages().find(p => p.url() === targetUrl)
+    const page = await browserContext.newPage()
+    const targetUrl = 'https://example.com/late-enable'
+    await page.goto(targetUrl)
+    await page.bringToFront()
 
-        expect(cdpPage).toBeDefined()
-        expect(cdpPage?.url()).toBe(targetUrl)
+    await page.waitForLoadState('domcontentloaded')
 
-        await browser.close()
-        await page.close()
-    }, 60000)
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-    it('should be able to reconnect after disconnecting everything', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    await new Promise((r) => setTimeout(r, 100))
 
-        const pages = await browserContext.pages()
-        expect(pages.length).toBeGreaterThan(0)
-        const page = pages[0]
+    const cdpPage = browser
+      .contexts()[0]
+      .pages()
+      .find((p) => p.url() === targetUrl)
 
-        await page.goto('https://example.com/disconnect-test')
-        await page.waitForLoadState('domcontentloaded')
-        await page.bringToFront()
+    expect(cdpPage).toBeDefined()
+    expect(cdpPage?.url()).toBe(targetUrl)
 
-        // Enable extension on this page
-        const initialEnable = await serviceWorker.evaluate(async () => {
-            return await globalThis.toggleExtensionForActiveTab()
-        })
-        console.log('Initial enable result:', initialEnable)
-        expect(initialEnable.isConnected).toBe(true)
+    await browser.close()
+    await page.close()
+  }, 60000)
 
-        await new Promise(resolve => setTimeout(resolve, 100))
+  it('should be able to reconnect after disconnecting everything', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        // Verify MCP can see the page
-        const beforeDisconnect = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const pages = await browserContext.pages()
+    expect(pages.length).toBeGreaterThan(0)
+    const page = pages[0]
+
+    await page.goto('https://example.com/disconnect-test')
+    await page.waitForLoadState('domcontentloaded')
+    await page.bringToFront()
+
+    // Enable extension on this page
+    const initialEnable = await serviceWorker.evaluate(async () => {
+      return await globalThis.toggleExtensionForActiveTab()
+    })
+    console.log('Initial enable result:', initialEnable)
+    expect(initialEnable.isConnected).toBe(true)
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // Verify MCP can see the page
+    const beforeDisconnect = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const pages = context.pages();
           console.log('Pages before disconnect:', pages.length);
           const testPage = pages.find(p => p.url().includes('disconnect-test'));
           console.log('Found test page:', !!testPage);
           return { pagesCount: pages.length, foundTestPage: !!testPage };
         `,
-            },
-        })
+      },
+    })
 
-        const beforeOutput = (beforeDisconnect as any).content[0].text
-        expect(beforeOutput).toContain('foundTestPage')
-        console.log('Before disconnect:', beforeOutput)
+    const beforeOutput = (beforeDisconnect as any).content[0].text
+    expect(beforeOutput).toContain('foundTestPage')
+    console.log('Before disconnect:', beforeOutput)
 
-        // 2. Disconnect everything
-        console.log('Calling disconnectEverything...')
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
+    // 2. Disconnect everything
+    console.log('Calling disconnectEverything...')
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
 
-        await new Promise(resolve => setTimeout(resolve, 100))
+    await new Promise((resolve) => setTimeout(resolve, 100))
 
-        // 3. Verify MCP cannot execute code anymore (no pages available)
-        const afterDisconnect = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // 3. Verify MCP cannot execute code anymore (no pages available)
+    const afterDisconnect = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const pages = context.pages();
           console.log('Pages after disconnect:', pages.length);
           return { pagesCount: pages.length };
         `,
-            },
-        })
+      },
+    })
 
-        const afterDisconnectOutput = (afterDisconnect as any).content[0].text
-        console.log('After disconnect:', afterDisconnectOutput)
-        expect((afterDisconnect as any).isError).toBe(true)
-        expect(afterDisconnectOutput).toContain('No Playwright pages are available')
+    const afterDisconnectOutput = (afterDisconnect as any).content[0].text
+    console.log('After disconnect:', afterDisconnectOutput)
+    expect((afterDisconnect as any).isError).toBe(true)
+    expect(afterDisconnectOutput).toContain('No Playwright pages are available')
 
-        // 4. Re-enable extension on the same page
-        console.log('Re-enabling extension...')
-        await page.bringToFront()
-        const reconnectResult = await serviceWorker.evaluate(async () => {
-            console.log('About to call toggleExtensionForActiveTab')
-            const result = await globalThis.toggleExtensionForActiveTab()
-            console.log('toggleExtensionForActiveTab result:', result)
-            return result
-        })
+    // 4. Re-enable extension on the same page
+    console.log('Re-enabling extension...')
+    await page.bringToFront()
+    const reconnectResult = await serviceWorker.evaluate(async () => {
+      console.log('About to call toggleExtensionForActiveTab')
+      const result = await globalThis.toggleExtensionForActiveTab()
+      console.log('toggleExtensionForActiveTab result:', result)
+      return result
+    })
 
-        console.log('Reconnect result:', reconnectResult)
-        expect(reconnectResult.isConnected).toBe(true)
+    console.log('Reconnect result:', reconnectResult)
+    expect(reconnectResult.isConnected).toBe(true)
 
-        console.log('Waiting for reconnection to stabilize...')
-        await new Promise(resolve => setTimeout(resolve, 100))
+    console.log('Waiting for reconnection to stabilize...')
+    await new Promise((resolve) => setTimeout(resolve, 100))
 
-        // 5. Reset the MCP client's playwright connection
-        console.log('Resetting MCP playwright connection...')
-        const resetResult = await client.callTool({
-            name: 'reset',
-            arguments: {},
-        })
-        console.log('Reset result:', (resetResult as any).content[0].text)
-        expect((resetResult as any).content[0].text).toContain('Connection reset successfully')
+    // 5. Reset the MCP client's playwright connection
+    console.log('Resetting MCP playwright connection...')
+    const resetResult = await client.callTool({
+      name: 'reset',
+      arguments: {},
+    })
+    console.log('Reset result:', (resetResult as any).content[0].text)
+    expect((resetResult as any).content[0].text).toContain('Connection reset successfully')
 
-        // 6. Verify MCP can see the page again
-        console.log('Attempting to access page via MCP...')
-        const afterReconnect = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // 6. Verify MCP can see the page again
+    console.log('Attempting to access page via MCP...')
+    const afterReconnect = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           console.log('Checking pages after reconnect...');
           const pages = context.pages();
           console.log('Pages after reconnect:', pages.length);
@@ -557,38 +568,38 @@ describe('Extension Connection Tests', () => {
 
           return { pagesCount: pages.length, foundTestPage: false };
         `,
-            },
-        })
-
-        const afterReconnectOutput = (afterReconnect as any).content[0].text
-        console.log('After reconnect:', afterReconnectOutput)
-        expect(afterReconnectOutput).toContain('foundTestPage')
-        expect(afterReconnectOutput).toContain('disconnect-test')
-
-        // Clean up
-        await page.goto('about:blank')
+      },
     })
 
-    it('should auto-reconnect MCP after extension WebSocket reconnects', async () => {
-        const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
+    const afterReconnectOutput = (afterReconnect as any).content[0].text
+    console.log('After reconnect:', afterReconnectOutput)
+    expect(afterReconnectOutput).toContain('foundTestPage')
+    expect(afterReconnectOutput).toContain('disconnect-test')
 
-        // 1. Create a test page and enable extension
-        const page = await testCtx!.browserContext.newPage()
-        await page.goto('https://example.com/auto-reconnect-test')
-        await page.waitForLoadState('domcontentloaded')
-        await page.bringToFront()
+    // Clean up
+    await page.goto('about:blank')
+  })
 
-        const initialEnable = await serviceWorker.evaluate(async () => {
-            return await globalThis.toggleExtensionForActiveTab()
-        })
-        expect(initialEnable.isConnected).toBe(true)
-        await new Promise(resolve => setTimeout(resolve, 100))
+  it('should auto-reconnect MCP after extension WebSocket reconnects', async () => {
+    const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
 
-        // 2. Verify MCP can execute commands
-        const beforeResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // 1. Create a test page and enable extension
+    const page = await testCtx!.browserContext.newPage()
+    await page.goto('https://example.com/auto-reconnect-test')
+    await page.waitForLoadState('domcontentloaded')
+    await page.bringToFront()
+
+    const initialEnable = await serviceWorker.evaluate(async () => {
+      return await globalThis.toggleExtensionForActiveTab()
+    })
+    expect(initialEnable.isConnected).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // 2. Verify MCP can execute commands
+    const beforeResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           let testPage;
           for (let i = 0; i < 20; i++) {
             const pages = context.pages();
@@ -599,32 +610,32 @@ describe('Extension Connection Tests', () => {
           const pages = context.pages();
           return { pagesCount: pages.length, foundTestPage: !!testPage, url: testPage?.url() };
         `,
-            },
-        })
-        const beforeOutput = (beforeResult as any).content[0].text
-        expect(beforeOutput).toContain('foundTestPage')
-        expect(beforeOutput).toContain('true')
-        expect(beforeOutput).toContain('auto-reconnect-test')
+      },
+    })
+    const beforeOutput = (beforeResult as any).content[0].text
+    expect(beforeOutput).toContain('foundTestPage')
+    expect(beforeOutput).toContain('true')
+    expect(beforeOutput).toContain('auto-reconnect-test')
 
-        // 3. Simulate extension WebSocket reconnection
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
-        await new Promise(resolve => setTimeout(resolve, 100))
+    // 3. Simulate extension WebSocket reconnection
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
 
-        // Re-enable extension
-        await page.bringToFront()
-        const reconnectResult = await serviceWorker.evaluate(async () => {
-            return await globalThis.toggleExtensionForActiveTab()
-        })
-        expect(reconnectResult.isConnected).toBe(true)
-        await new Promise(resolve => setTimeout(resolve, 100))
+    // Re-enable extension
+    await page.bringToFront()
+    const reconnectResult = await serviceWorker.evaluate(async () => {
+      return await globalThis.toggleExtensionForActiveTab()
+    })
+    expect(reconnectResult.isConnected).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 100))
 
-        // 4. Execute command WITHOUT calling resetPlaywright()
-        const afterResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // 4. Execute command WITHOUT calling resetPlaywright()
+    const afterResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           let testPage;
           for (let i = 0; i < 20; i++) {
             const pages = context.pages();
@@ -635,112 +646,112 @@ describe('Extension Connection Tests', () => {
           const pages = context.pages();
           return { pagesCount: pages.length, foundTestPage: !!testPage, url: testPage?.url() };
         `,
-            },
-        })
-
-        const afterOutput = (afterResult as any).content[0].text
-        expect(afterOutput).toContain('foundTestPage')
-        expect(afterOutput).toContain('true')
-        expect(afterOutput).toContain('auto-reconnect-test')
-        expect(afterOutput).not.toContain('Extension not connected')
-        expect((afterResult as any).isError).not.toBe(true)
-
-        // Clean up
-        await page.goto('about:blank')
+      },
     })
 
-    it('should maintain correct page.url() with service worker pages', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const afterOutput = (afterResult as any).content[0].text
+    expect(afterOutput).toContain('foundTestPage')
+    expect(afterOutput).toContain('true')
+    expect(afterOutput).toContain('auto-reconnect-test')
+    expect(afterOutput).not.toContain('Extension not connected')
+    expect((afterResult as any).isError).not.toBe(true)
 
-        const page = await browserContext.newPage()
-        const targetUrl = 'https://example.com/sw-test'
-        await page.goto(targetUrl)
-        await page.bringToFront()
+    // Clean up
+    await page.goto('about:blank')
+  })
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+  it('should maintain correct page.url() with service worker pages', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        await new Promise(r => setTimeout(r, 100))
+    const page = await browserContext.newPage()
+    const targetUrl = 'https://example.com/sw-test'
+    await page.goto(targetUrl)
+    await page.bringToFront()
 
-        const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        const cdpPages = browser.contexts()[0].pages()
-        const testPage = cdpPages.find(p => p.url().includes('sw-test'))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-        expect(testPage).toBeDefined()
-        expect(testPage?.url()).toContain('sw-test')
-        expect(testPage?.url()).not.toContain('sw.js')
+    await new Promise((r) => setTimeout(r, 100))
 
-        await browser.close()
-        await page.close()
-    }, 30000)
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const cdpPages = browser.contexts()[0].pages()
+    const testPage = cdpPages.find((p) => p.url().includes('sw-test'))
 
-    it('should maintain correct page.url() after repeated connections', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    expect(testPage).toBeDefined()
+    expect(testPage?.url()).toContain('sw-test')
+    expect(testPage?.url()).not.toContain('sw.js')
 
-        const page = await browserContext.newPage()
-        const targetUrl = 'https://example.com/repeated-test'
-        await page.goto(targetUrl)
-        await page.bringToFront()
+    await browser.close()
+    await page.close()
+  }, 30000)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+  it('should maintain correct page.url() after repeated connections', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        for (let i = 0; i < 5; i++) {
-            const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-            const cdpPages = browser.contexts()[0].pages()
-            const testPage = cdpPages.find(p => p.url().includes('repeated-test'))
+    const page = await browserContext.newPage()
+    const targetUrl = 'https://example.com/repeated-test'
+    await page.goto(targetUrl)
+    await page.bringToFront()
 
-            expect(testPage).toBeDefined()
-            expect(testPage?.url()).toBe(targetUrl)
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
 
-            await browser.close()
-            await new Promise(r => setTimeout(r, 100))
-        }
+    for (let i = 0; i < 5; i++) {
+      const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+      const cdpPages = browser.contexts()[0].pages()
+      const testPage = cdpPages.find((p) => p.url().includes('repeated-test'))
 
-        await page.close()
-    }, 30000)
+      expect(testPage).toBeDefined()
+      expect(testPage?.url()).toBe(targetUrl)
 
-    it('should maintain correct page.url() with concurrent MCP and CDP connections', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+      await browser.close()
+      await new Promise((r) => setTimeout(r, 100))
+    }
 
-        const page = await browserContext.newPage()
-        const targetUrl = 'https://example.com/concurrent-test'
-        await page.goto(targetUrl)
-        await page.bringToFront()
+    await page.close()
+  }, 30000)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
+  it('should maintain correct page.url() with concurrent MCP and CDP connections', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        await new Promise(r => setTimeout(r, 400))
+    const page = await browserContext.newPage()
+    const targetUrl = 'https://example.com/concurrent-test'
+    await page.goto(targetUrl)
+    await page.bringToFront()
 
-        const [mcpResult, cdpBrowser] = await Promise.all([
-            client.callTool({
-                name: 'execute',
-                arguments: {
-                    code: js`
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    await new Promise((r) => setTimeout(r, 400))
+
+    const [mcpResult, cdpBrowser] = await Promise.all([
+      client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
               const pages = context.pages();
               const testPage = pages.find(p => p.url().includes('concurrent-test'));
               return { url: testPage?.url(), found: !!testPage };
             `,
-                },
-            }),
-            chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
-        ])
+        },
+      }),
+      chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
+    ])
 
-        const mcpOutput = (mcpResult as any).content[0].text
-        expect(mcpOutput).toContain(targetUrl)
+    const mcpOutput = (mcpResult as any).content[0].text
+    expect(mcpOutput).toContain(targetUrl)
 
-        const cdpPages = cdpBrowser.contexts()[0].pages()
-        const cdpPage = cdpPages.find(p => p.url().includes('concurrent-test'))
-        expect(cdpPage?.url()).toBe(targetUrl)
+    const cdpPages = cdpBrowser.contexts()[0].pages()
+    const cdpPage = cdpPages.find((p) => p.url().includes('concurrent-test'))
+    expect(cdpPage?.url()).toBe(targetUrl)
 
-        await cdpBrowser.close()
-        await page.close()
-    }, 30000)
+    await cdpBrowser.close()
+    await page.close()
+  }, 30000)
 })

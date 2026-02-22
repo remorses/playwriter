@@ -12,7 +12,13 @@ Buffer.prototype[util.inspect.custom] = function () {
 }
 import { killPortProcess } from './kill-port.js'
 import { VERSION, LOG_FILE_PATH, LOG_CDP_FILE_PATH, parseRelayHost } from './utils.js'
-import { ensureRelayServer, RELAY_PORT, waitForExtension, getExtensionOutdatedWarning, getExtensionStatus } from './relay-client.js'
+import {
+  ensureRelayServer,
+  RELAY_PORT,
+  waitForExtension,
+  getExtensionOutdatedWarning,
+  getExtensionStatus,
+} from './relay-client.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -76,7 +82,7 @@ async function fetchExtensionsStatus(host?: string): Promise<ExtensionStatus[]> 
       if (!fallback.ok) {
         return []
       }
-      const fallbackData = await fallback.json() as {
+      const fallbackData = (await fallback.json()) as {
         connected: boolean
         activeTargets: number
         browser: string | null
@@ -86,16 +92,18 @@ async function fetchExtensionsStatus(host?: string): Promise<ExtensionStatus[]> 
       if (!fallbackData?.connected) {
         return []
       }
-      return [{
-        extensionId: 'default',
-        stableKey: undefined,
-        browser: fallbackData?.browser,
-        profile: fallbackData?.profile,
-        activeTargets: fallbackData?.activeTargets,
-        playwriterVersion: fallbackData?.playwriterVersion || null,
-      }]
+      return [
+        {
+          extensionId: 'default',
+          stableKey: undefined,
+          browser: fallbackData?.browser,
+          profile: fallbackData?.profile,
+          activeTargets: fallbackData?.activeTargets,
+          playwriterVersion: fallbackData?.playwriterVersion || null,
+        },
+      ]
     }
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       extensions: ExtensionStatus[]
     }
     return data?.extensions || []
@@ -150,7 +158,9 @@ async function executeCode(options: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token || process.env.PLAYWRITER_TOKEN ? { 'Authorization': `Bearer ${token || process.env.PLAYWRITER_TOKEN}` } : {}),
+        ...(token || process.env.PLAYWRITER_TOKEN
+          ? { Authorization: `Bearer ${token || process.env.PLAYWRITER_TOKEN}` }
+          : {}),
       },
       body: JSON.stringify({ sessionId, code, timeout, cwd }),
     })
@@ -161,7 +171,11 @@ async function executeCode(options: {
       process.exit(1)
     }
 
-    const result = await response.json() as { text: string; images: Array<{ data: string; mimeType: string }>; isError: boolean }
+    const result = (await response.json()) as {
+      text: string
+      images: Array<{ data: string; mimeType: string }>
+      isError: boolean
+    }
 
     // Print output
     if (result.text) {
@@ -205,7 +219,6 @@ cli
         logger: console,
       })
     }
-
 
     const extensions = await fetchExtensionsStatus(options.host)
     if (extensions.length === 0) {
@@ -253,9 +266,10 @@ cli
 
     try {
       const serverUrl = await getServerUrl(options.host)
-      const extensionId = selectedExtension.extensionId === 'default'
-        ? null
-        : (selectedExtension.stableKey || selectedExtension.extensionId)
+      const extensionId =
+        selectedExtension.extensionId === 'default'
+          ? null
+          : selectedExtension.stableKey || selectedExtension.extensionId
       const cwd = process.cwd()
       const response = await fetch(`${serverUrl}/cli/session/new`, {
         method: 'POST',
@@ -267,7 +281,7 @@ cli
         console.error(`Error: ${response.status} ${text}`)
         process.exit(1)
       }
-      const result = await response.json() as { id: string; extensionId: string | null }
+      const result = (await response.json()) as { id: string; extensionId: string | null }
       console.log(`Session ${result.id} created. Use with: playwriter -s ${result.id} -e "..."`)
     } catch (error: any) {
       console.error(`Error: ${error.message}`)
@@ -300,7 +314,7 @@ cli
         console.error(`Error: ${response.status} ${await response.text()}`)
         process.exit(1)
       }
-      const result = await response.json() as {
+      const result = (await response.json()) as {
         sessions: Array<{
           id: string
           stateKeys: string[]
@@ -335,7 +349,7 @@ cli
         '  ' +
         'EXT'.padEnd(extensionWidth) +
         '  ' +
-        'STATE KEYS'
+        'STATE KEYS',
     )
     console.log('-'.repeat(idWidth + browserWidth + profileWidth + extensionWidth + stateWidth + 8))
 
@@ -351,7 +365,7 @@ cli
           '  ' +
           (session.extensionId || '-').padEnd(extensionWidth) +
           '  ' +
-          stateStr
+          stateStr,
       )
     }
   })
@@ -374,7 +388,7 @@ cli
       })
 
       if (!response.ok) {
-        const result = await response.json() as { error: string }
+        const result = (await response.json()) as { error: string }
         console.error(`Error: ${result.error}`)
         process.exit(1)
       }
@@ -410,8 +424,10 @@ cli
         process.exit(1)
       }
 
-      const result = await response.json() as { success: boolean; pageUrl: string; pagesCount: number }
-      console.log(`Connection reset successfully. ${result.pagesCount} page(s) available. Current page URL: ${result.pageUrl}`)
+      const result = (await response.json()) as { success: boolean; pageUrl: string; pagesCount: number }
+      console.log(
+        `Connection reset successfully. ${result.pagesCount} page(s) available. Current page URL: ${result.pageUrl}`,
+      )
     } catch (error: any) {
       console.error(`Error: ${error.message}`)
       process.exit(1)
@@ -512,20 +528,16 @@ cli
     })
   })
 
-cli
-  .command('logfile', 'Print the path to the relay server log file')
-  .action(() => {
-    console.log(`relay: ${LOG_FILE_PATH}`)
-    console.log(`cdp: ${LOG_CDP_FILE_PATH}`)
-  })
+cli.command('logfile', 'Print the path to the relay server log file').action(() => {
+  console.log(`relay: ${LOG_FILE_PATH}`)
+  console.log(`cdp: ${LOG_CDP_FILE_PATH}`)
+})
 
-cli
-  .command('skill', 'Print the full playwriter usage instructions')
-  .action(() => {
-    const skillPath = path.join(__dirname, '..', 'src', 'skill.md')
-    const content = fs.readFileSync(skillPath, 'utf-8')
-    console.log(content)
-  })
+cli.command('skill', 'Print the full playwriter usage instructions').action(() => {
+  const skillPath = path.join(__dirname, '..', 'src', 'skill.md')
+  const content = fs.readFileSync(skillPath, 'utf-8')
+  console.log(content)
+})
 
 cli.help()
 cli.version(VERSION)

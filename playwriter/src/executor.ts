@@ -452,7 +452,7 @@ export class PlaywrightExecutor {
 
   private setupPageConsoleListener(page: Page) {
     // Use targetId() if available, fallback to internal _guid for CDP connections
-    const targetId = page.targetId() || (page as any)._guid as string | undefined
+    const targetId = page.targetId() || ((page as any)._guid as string | undefined)
     if (!targetId) {
       return
     }
@@ -488,7 +488,11 @@ export class PlaywrightExecutor {
     })
   }
 
-  private async checkExtensionStatus(): Promise<{ connected: boolean; activeTargets: number; playwriterVersion: string | null }> {
+  private async checkExtensionStatus(): Promise<{
+    connected: boolean
+    activeTargets: number
+    playwriterVersion: string | null
+  }> {
     const { host = '127.0.0.1', port = 19988, extensionId } = this.cdpConfig
     const { httpBaseUrl } = parseRelayHost(host, port)
     const notConnected = { connected: false, activeTargets: 0, playwriterVersion: null }
@@ -504,10 +508,19 @@ export class PlaywrightExecutor {
           if (!fallback.ok) {
             return notConnected
           }
-          return (await fallback.json()) as { connected: boolean; activeTargets: number; playwriterVersion: string | null }
+          return (await fallback.json()) as {
+            connected: boolean
+            activeTargets: number
+            playwriterVersion: string | null
+          }
         }
-        const data = await response.json() as {
-          extensions: Array<{ extensionId: string; stableKey?: string; activeTargets: number; playwriterVersion?: string | null }>
+        const data = (await response.json()) as {
+          extensions: Array<{
+            extensionId: string
+            stableKey?: string
+            activeTargets: number
+            playwriterVersion?: string | null
+          }>
         }
         const extension = data.extensions.find((item) => {
           return item.extensionId === extensionId || item.stableKey === extensionId
@@ -515,7 +528,11 @@ export class PlaywrightExecutor {
         if (!extension) {
           return notConnected
         }
-        return { connected: true, activeTargets: extension.activeTargets, playwriterVersion: extension?.playwriterVersion || null }
+        return {
+          connected: true,
+          activeTargets: extension.activeTargets,
+          playwriterVersion: extension?.playwriterVersion || null,
+        }
       }
 
       const response = await fetch(`${httpBaseUrl}/extension/status`, {
@@ -663,7 +680,13 @@ export class PlaywrightExecutor {
         const formattedArgs = args
           .map((arg) => {
             if (typeof arg === 'string') return arg
-            return util.inspect(arg, { depth: 4, colors: false, maxArrayLength: 100, maxStringLength: 1000, breakLength: 80 })
+            return util.inspect(arg, {
+              depth: 4,
+              colors: false,
+              maxArrayLength: 100,
+              maxStringLength: 1000,
+              breakLength: 80,
+            })
           })
           .join(' ')
         text += `[${method}] ${formattedArgs}\n`
@@ -710,14 +733,25 @@ export class PlaywrightExecutor {
         /** Only include interactive elements (default: true) */
         interactiveOnly?: boolean
       }) => {
-        const { page: targetPage, frame, locator, search, showDiffSinceLastCall = true, interactiveOnly = false } = options
+        const {
+          page: targetPage,
+          frame,
+          locator,
+          search,
+          showDiffSinceLastCall = true,
+          interactiveOnly = false,
+        } = options
         const resolvedPage = targetPage || page
         if (!resolvedPage) {
           throw new Error('snapshot requires a page')
         }
 
         // Use new in-page implementation via getAriaSnapshot
-        const { snapshot: rawSnapshot, refs, getSelectorForRef } = await getAriaSnapshot({
+        const {
+          snapshot: rawSnapshot,
+          refs,
+          getSelectorForRef,
+        } = await getAriaSnapshot({
           page: resolvedPage,
           frame,
           locator,
@@ -829,7 +863,7 @@ export class PlaywrightExecutor {
 
         if (filterPage) {
           // Use targetId() if available, fallback to internal _guid for CDP connections
-          const targetId = filterPage.targetId() || (filterPage as any)._guid as string | undefined
+          const targetId = filterPage.targetId() || ((filterPage as any)._guid as string | undefined)
           if (!targetId) {
             throw new Error('Could not get page targetId')
           }
@@ -984,9 +1018,7 @@ export class PlaywrightExecutor {
 
       const vmContext = vm.createContext(vmContextObj)
       const autoReturn = shouldAutoReturn(code)
-      const wrappedCode = autoReturn
-        ? `(async () => { return await (${code}) })()`
-        : `(async () => { ${code} })()`
+      const wrappedCode = autoReturn ? `(async () => { return await (${code}) })()` : `(async () => { ${code} })()`
       const hasExplicitReturn = autoReturn || /\breturn\b/.test(code)
 
       const result = await Promise.race([
@@ -1003,7 +1035,13 @@ export class PlaywrightExecutor {
           const formatted =
             typeof resolvedResult === 'string'
               ? resolvedResult
-              : util.inspect(resolvedResult, { depth: 4, colors: false, maxArrayLength: 100, maxStringLength: 1000, breakLength: 80 })
+              : util.inspect(resolvedResult, {
+                  depth: 4,
+                  colors: false,
+                  maxArrayLength: 100,
+                  maxStringLength: 1000,
+                  breakLength: 80,
+                })
           if (formatted.trim()) {
             responseText += `[return value] ${formatted}\n`
           }

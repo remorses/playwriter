@@ -91,12 +91,12 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
   if (executor) {
     return executor
   }
-  
+
   const remote = getRemoteConfig()
   if (!remote) {
     await ensureRelayServerForMcp()
   }
-  
+
   // Pass config instead of pre-generated URL so executor can generate unique URLs for each connection
   const cdpConfig = remote || { port: RELAY_PORT }
   executor = new PlaywrightExecutor({
@@ -104,7 +104,7 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
     logger: mcpLogger,
     cwd: process.cwd(),
   })
-  
+
   return executor
 }
 
@@ -198,37 +198,37 @@ server.tool(
       if (!remote) {
         await ensureRelayServerForMcp()
       }
-      
+
       const exec = await getOrCreateExecutor()
       const result = await exec.execute(code, timeout)
-      
+
       // Transform executor result to MCP format
       const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
         { type: 'text', text: result.text },
       ]
-      
+
       for (const image of result.images) {
         content.push({ type: 'image', data: image.data, mimeType: image.mimeType })
       }
-      
+
       if (result.isError) {
         return { content, isError: true }
       }
-      
+
       return { content }
     } catch (error: any) {
       const errorStack = error.stack || error.message
       const isTimeoutError = error instanceof CodeExecutionTimeoutError || error.name === 'TimeoutError'
-      
+
       console.error('Error in execute tool:', errorStack)
       if (!isTimeoutError) {
         sendLogToRelayServer('error', 'Error in execute tool:', errorStack)
       }
-      
+
       const resetHint = isTimeoutError
         ? ''
         : '\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call the `reset` tool to reconnect. Do NOT reset for other non-connection non-internal errors.]'
-      
+
       return {
         content: [{ type: 'text', text: `Error executing code: ${error.message}\n${errorStack}${resetHint}` }],
         isError: true,
@@ -256,13 +256,16 @@ server.tool(
       if (!remote) {
         await ensureRelayServerForMcp()
       }
-      
+
       const exec = await getOrCreateExecutor()
       const { page, context } = await exec.reset()
       const pagesCount = context.pages().length
       return {
         content: [
-          { type: 'text', text: `Connection reset successfully. ${pagesCount} page(s) available. Current page URL: ${page.url()}` },
+          {
+            type: 'text',
+            text: `Connection reset successfully. ${pagesCount} page(s) available. Current page URL: ${page.url()}`,
+          },
         ],
       }
     } catch (error: any) {

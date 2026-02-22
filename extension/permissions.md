@@ -19,10 +19,12 @@ Essential for core functionality. This permission allows the extension to attach
 **Note: This permission is automatically removed during production builds and is only included in test builds.**
 
 The tabs permission is only needed during development/testing to:
+
 - Access the URL property of tabs for test identification (finding tabs by URL pattern)
 - Query all tabs with full information for test assertions
 
 In production, the extension functions perfectly without the tabs permission because:
+
 - Tab event listeners (onRemoved, onActivated, onUpdated) work without it
 - chrome.tabs.create() and chrome.tabs.remove() work without it
 - chrome.tabs.query() for active tab works without it
@@ -44,11 +46,13 @@ All extension code (JavaScript, HTML, CSS) is fully bundled within the extension
 The extension establishes a WebSocket connection to `ws://localhost:19988` - a local server running on the user's own machine. This connection is used exclusively for **message passing** (sending and receiving JSON data), NOT code execution.
 
 **What the WebSocket is used for:**
+
 - Receiving CDP (Chrome DevTools Protocol) command messages in JSON format from local Playwright scripts
 - Forwarding these command messages to attached browser tabs via the `chrome.debugger` API
 - Sending CDP event messages back to the local Playwright scripts
 
 **What it is NOT used for:**
+
 - Downloading or executing JavaScript, WebAssembly, or any other executable code
 - Connecting to external/remote servers (strictly localhost only)
 - Loading remote configurations that modify extension behavior
@@ -66,6 +70,7 @@ This is functionally similar to Native Messaging but uses WebSockets for cross-p
 ## Screenshots Required
 
 Need to provide at least one screenshot showing:
+
 - Extension icon in toolbar (gray when disconnected, green when connected)
 - Extension attached to a tab with Chrome's "debugging this browser" banner visible
 - Welcome page or usage demonstration

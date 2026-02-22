@@ -28,6 +28,7 @@ npx -y @playwriter/install-mcp playwriter@latest
 3. Use the `execute` tool to run Playwright code
 
 The MCP exposes:
+
 - `execute` tool - run Playwright code snippets
 - `reset` tool - reconnect if connection issues occur
 

@@ -1,18 +1,18 @@
 /**
  * Consolidated build script for all client-side JavaScript bundles.
- * 
+ *
  * These bundles are injected into pages via CDP Runtime.evaluate or page.evaluate().
  * All bundles are built as browser-targeted IIFEs that expose their APIs on globalThis.
- * 
+ *
  * Injection flow (see react-source.ts, page-markdown.ts for examples):
  * 1. Bundle is read from dist/*.js via fs.readFileSync (cached after first read)
  * 2. Check if already injected: `await page.evaluate(() => !!globalThis.__name)`
  * 3. If not present, inject: `await page.evaluate(code)` or `cdp.send('Runtime.evaluate', { expression: code })`
  * 4. Use the exposed global in subsequent evaluate calls: `globalThis.__readability`, `globalThis.__bippy`, etc.
- * 
+ *
  * Each bundle uses a separate Bun.build() call (not multiple entrypoints in one call)
  * to ensure fully self-contained output with no shared chunks.
- * 
+ *
  * Two types of bundles:
  * 1. Source file bundles - directly bundle a TypeScript source file
  * 2. Wrapper bundles - create entry code that imports from npm packages and exposes on globalThis

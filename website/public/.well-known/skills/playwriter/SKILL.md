@@ -12,6 +12,7 @@ playwriter skill
 ```
 
 This outputs the complete documentation including:
+
 - Session management and timeout configuration
 - Selector strategies (and which ones to AVOID)
 - Rules to prevent timeouts and failures

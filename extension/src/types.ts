@@ -18,7 +18,7 @@ export interface ExtensionState {
   errorText: string | undefined
 }
 
-/** 
+/**
  * Recording state - stored in service worker to track active recordings.
  * The actual MediaRecorder/MediaStream live in the offscreen document.
  */

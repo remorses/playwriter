@@ -61,7 +61,11 @@ interface OffscreenRecordingState {
 // Map of tabId -> recording state for concurrent recording support
 const recordings = new Map<number, OffscreenRecordingState>()
 
-type OffscreenResult = OffscreenStartRecordingResult | OffscreenStopRecordingResult | OffscreenIsRecordingResult | OffscreenCancelRecordingResult
+type OffscreenResult =
+  | OffscreenStartRecordingResult
+  | OffscreenStopRecordingResult
+  | OffscreenIsRecordingResult
+  | OffscreenCancelRecordingResult
 
 chrome.runtime.onMessage.addListener((message: OffscreenMessage, _sender, sendResponse) => {
   handleMessage(message).then(sendResponse)
@@ -93,12 +97,14 @@ async function handleStartRecording(params: OffscreenStartRecordingMessage): Pro
   try {
     // Build Chrome-specific tabCapture constraints
     // These use Chrome's proprietary API that TypeScript doesn't have built-in types for
-    const audioConstraints: ChromeTabCaptureAudioConstraints | false = params.audio ? {
-      mandatory: {
-        chromeMediaSource: 'tab',
-        chromeMediaSourceId: params.streamId,
-      }
-    } : false
+    const audioConstraints: ChromeTabCaptureAudioConstraints | false = params.audio
+      ? {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: params.streamId,
+          },
+        }
+      : false
 
     const videoConstraints: ChromeTabCaptureVideoConstraints = {
       mandatory: {
@@ -106,7 +112,7 @@ async function handleStartRecording(params: OffscreenStartRecordingMessage): Pro
         chromeMediaSourceId: params.streamId,
         minFrameRate: params.frameRate || 30,
         maxFrameRate: params.frameRate || 30,
-      }
+      },
     }
 
     // Get media stream from the streamId provided by tabCapture.getMediaStreamId
@@ -160,13 +166,13 @@ async function handleStartRecording(params: OffscreenStartRecordingMessage): Pro
       const timeout = setTimeout(() => {
         reject(new Error('MediaRecorder failed to start within 5 seconds'))
       }, 5000)
-      
+
       recorder.onstart = () => {
         clearTimeout(timeout)
         console.log(`MediaRecorder started for tab ${tabId}`)
         resolve()
       }
-      
+
       // Start with 1 second chunks
       recorder.start(1000)
     })
@@ -206,7 +212,9 @@ async function handleStopRecording(params: OffscreenStopRecordingMessage): Promi
     })
 
     // Stop all tracks
-    stream.getTracks().forEach((track: MediaStreamTrack) => { track.stop() })
+    stream.getTracks().forEach((track: MediaStreamTrack) => {
+      track.stop()
+    })
 
     const duration = Date.now() - startedAt
 
@@ -260,7 +268,9 @@ function handleCancelRecordingForTab(tabId: number): OffscreenCancelRecordingRes
     if (recorder.state !== 'inactive') {
       recorder.stop()
     }
-    stream.getTracks().forEach((track: MediaStreamTrack) => { track.stop() })
+    stream.getTracks().forEach((track: MediaStreamTrack) => {
+      track.stop()
+    })
 
     chrome.runtime.sendMessage({
       action: 'recordingCancelled',

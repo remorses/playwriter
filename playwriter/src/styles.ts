@@ -120,12 +120,12 @@ export async function getStylesForLocator({
   const matchedStyles = await cdp.send('CSS.getMatchedStylesForNode', { nodeId })
 
   const stylesheetUrls = new Map<string, string>()
-  
+
   const processStyleSheetId = async (styleSheetId: string | undefined): Promise<StyleSource | null> => {
     if (!styleSheetId) {
       return null
     }
-    
+
     if (!stylesheetUrls.has(styleSheetId)) {
       try {
         const header = await cdp.send('CSS.getStyleSheetText', { styleSheetId })
@@ -134,7 +134,7 @@ export async function getStylesForLocator({
         stylesheetUrls.set(styleSheetId, '')
       }
     }
-    
+
     return null
   }
 
@@ -145,14 +145,15 @@ export async function getStylesForLocator({
       const rule = ruleMatch.rule
       const sourceRange = (rule as any).selectorList?.range as SourceRange | undefined
       const styleSheetId = rule.styleSheetId
-      
+
       let source: StyleSource | null = null
       if (styleSheetId && sourceRange) {
         const styleSheet = (matchedStyles as any).cssStyleSheetHeaders?.find(
-          (h: CSSStyleSheetHeader) => h.styleSheetId === styleSheetId
+          (h: CSSStyleSheetHeader) => h.styleSheetId === styleSheetId,
         )
-        const url = styleSheet?.sourceURL || (rule as any).origin === 'user-agent' ? 'user-agent' : `stylesheet:${styleSheetId}`
-        
+        const url =
+          styleSheet?.sourceURL || (rule as any).origin === 'user-agent' ? 'user-agent' : `stylesheet:${styleSheetId}`
+
         source = {
           url: (rule as any).styleSheetId ? await getStylesheetUrl(cdp, styleSheetId) : 'user-agent',
           line: sourceRange.startLine + 1,
@@ -224,9 +225,7 @@ export async function getStylesForLocator({
     }
   }
 
-  const filteredRules = includeUserAgentStyles
-    ? rules
-    : rules.filter((r) => r.origin !== 'user-agent')
+  const filteredRules = includeUserAgentStyles ? rules : rules.filter((r) => r.origin !== 'user-agent')
 
   return {
     element: elementDescription,
@@ -239,7 +238,7 @@ function extractDeclarations(style: CSSStyle): StyleDeclarations {
   if (!style?.cssProperties) {
     return {}
   }
-  
+
   const result: StyleDeclarations = {}
   for (const prop of style.cssProperties) {
     if (!prop.value || prop.value === 'initial' || prop.name.startsWith('-webkit-')) {
@@ -253,13 +252,13 @@ function extractDeclarations(style: CSSStyle): StyleDeclarations {
 
 function formatElementDescription(node: any): string {
   let desc = node.localName || node.nodeName?.toLowerCase() || 'element'
-  
+
   if (node.attributes) {
     const attrs: Record<string, string> = {}
     for (let i = 0; i < node.attributes.length; i += 2) {
       attrs[node.attributes[i]] = node.attributes[i + 1]
     }
-    
+
     if (attrs.id) {
       desc += `#${attrs.id}`
     }
@@ -267,7 +266,7 @@ function formatElementDescription(node: any): string {
       desc += `.${attrs.class.split(' ').join('.')}`
     }
   }
-  
+
   return desc
 }
 
@@ -282,10 +281,10 @@ async function getStylesheetUrl(cdp: ICDPSession, styleSheetId: string): Promise
 
 export function formatStylesAsText(styles: StylesResult): string {
   const lines: string[] = []
-  
+
   lines.push(`Element: ${styles.element}`)
   lines.push('')
-  
+
   if (styles.inlineStyle) {
     lines.push('Inline styles:')
     for (const [prop, value] of Object.entries(styles.inlineStyle)) {
@@ -293,10 +292,10 @@ export function formatStylesAsText(styles: StylesResult): string {
     }
     lines.push('')
   }
-  
+
   const directRules = styles.rules.filter((r) => !r.inheritedFrom)
   const inheritedRules = styles.rules.filter((r) => r.inheritedFrom)
-  
+
   if (directRules.length > 0) {
     lines.push('Matched rules:')
     for (const rule of directRules) {
@@ -312,7 +311,7 @@ export function formatStylesAsText(styles: StylesResult): string {
     }
     lines.push('')
   }
-  
+
   if (inheritedRules.length > 0) {
     const byAncestor = new Map<string, StyleRule[]>()
     for (const rule of inheritedRules) {
@@ -322,7 +321,7 @@ export function formatStylesAsText(styles: StylesResult): string {
       }
       byAncestor.get(key)!.push(rule)
     }
-    
+
     for (const [ancestor, rules] of byAncestor) {
       lines.push(`Inherited from ${ancestor}:`)
       for (const rule of rules) {
@@ -339,6 +338,6 @@ export function formatStylesAsText(styles: StylesResult): string {
       lines.push('')
     }
   }
-  
+
   return lines.join('\n')
 }

@@ -13,7 +13,7 @@ breaking changes to the WS protocol MUST never be made. publishing the extension
 
 ## architecture
 
-- user installs the extension in chrome. we assume there is only one chrome window for now, the first opened. 
+- user installs the extension in chrome. we assume there is only one chrome window for now, the first opened.
 - extension connects to a websocket server on port 19988. if this server is not yet open, it retries connecting in a loop
 - the MCP spawns the ws server if not already listening on 19988, in background. the mcp then connects to this same server with a playwright client
 - the server exposes /cdp/client-id which is used by playwright clients to communicate with the extension
@@ -54,10 +54,10 @@ to test CLI changes without publishing:
 ```bash
  # mac/linux: kill any existing relay on 19988
  lsof -ti :19988 | xargs kill
- 
+
  # windows (powershell): kill any existing relay on 19988
  Get-NetTCPConnection -LocalPort 19988 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
- 
+
  tsx playwriter/src/cli.ts -s 1 -e "await page.goto('https://example.com')"
  tsx playwriter/src/cli.ts -s 1 -e "console.log(await accessibilitySnapshot({ page }))"
  tsx playwriter/src/cli.ts session new
@@ -96,10 +96,10 @@ tests use these utilities from `test-utils.ts`:
 
 ```ts
 // setup browser with extension loaded + relay server
-const testCtx = await setupTestContext({ 
-  port: 19987, 
+const testCtx = await setupTestContext({
+  port: 19987,
   tempDirPrefix: 'pw-test-',
-  toggleExtension: true  // creates initial page with extension enabled
+  toggleExtension: true, // creates initial page with extension enabled
 })
 
 // get extension service worker to call extension functions
@@ -122,7 +122,7 @@ import { createMCPClient } from './mcp-client.js'
 const { client, cleanup } = await createMCPClient({ port: 19987 })
 const result = await client.callTool({
   name: 'execute',
-  arguments: { code: 'await page.goto("https://example.com")' }
+  arguments: { code: 'await page.goto("https://example.com")' },
 })
 ```
 
@@ -171,9 +171,7 @@ when you do an any change, update relevant CHANGELOG.md files for each package.
 
 also bump package.json versions and IMPORTANTLY also the extension/manifest.json version!
 
-
 you also MUST always bump the playwright core package.json version too on any changes made there. so during publishing we know if that package needs to also be published, first, before publishing playwriter. checking if its version is already publishing in npm with `npm show @xmorse/playwright-core version`
-
 
 ## debugging playwriter mcp issues
 
@@ -209,7 +207,7 @@ cd playwright && git branch
 git checkout playwriter
 ```
 
-make sure to always bump the package json and update the 
+make sure to always bump the package json and update the
 
 ### bootstrapping the repo
 
@@ -220,6 +218,7 @@ pnpm bootstrap
 ```
 
 this does:
+
 1. `git submodule update --init` - init the playwright submodule
 2. `pnpm install` - install deps and link workspace packages
 3. `node playwright/utils/generate_injected.js` - generate browser scripts to `src/generated/`
@@ -240,16 +239,18 @@ upstream playwright bundles all dependencies into single files (zero runtime dep
 **1. dependencies in package.json** - ws, debug, pngjs, commander, etc. are regular deps
 
 **2. rewritten bundle files** - `playwright/packages/playwright-core/src/utilsBundle.ts`, `zipBundle.ts`, `mcpBundle.ts` import directly:
+
 ```ts
 // before (bundled)
-export const ws = require('./utilsBundleImpl').ws;
+export const ws = require('./utilsBundleImpl').ws
 
-// after (direct)  
-import wsLibrary from 'ws';
-export const ws = wsLibrary;
+// after (direct)
+import wsLibrary from 'ws'
+export const ws = wsLibrary
 ```
 
 **3. simple build script** (`playwright/packages/playwright-core/build.mjs`) - just esbuild transpile + copy vendored files:
+
 ```bash
 # transpile src/**/*.ts → lib/**/*.js (0.1s)
 # copy third_party/lockfile.js, third_party/extract-zip.js
@@ -257,11 +258,11 @@ export const ws = wsLibrary;
 
 **4. generated files** - `playwright/packages/playwright-core/src/generated/*.ts` are browser scripts created by `playwright/utils/generate_injected.js`. these only need regenerating if upstream changes injected scripts.
 
-| | upstream | ours |
-|---|---|---|
-| build time | ~30s | 0.1s |
+|              | upstream    | ours           |
+| ------------ | ----------- | -------------- |
+| build time   | ~30s        | 0.1s           |
 | dependencies | 0 (bundled) | ~20 (external) |
-| trace-viewer | built | skipped |
+| trace-viewer | built       | skipped        |
 
 ### key source files
 
@@ -278,7 +279,7 @@ ignore ./claude-extension. this is the source code of the Claude Chrome extensio
 
 you can find the logfile for playwriter executing `playwriter logfile`. read that then to understand issues happening and debug them
 
- `playwriter logfile` also logs a jsonl file with all CDP commands and events being sent between extension, cli, mcp and relay. the cdp log is a jsonl file (one json object per line). you can use jq to process and read it efficiently. for example, list direction + method:
+`playwriter logfile` also logs a jsonl file with all CDP commands and events being sent between extension, cli, mcp and relay. the cdp log is a jsonl file (one json object per line). you can use jq to process and read it efficiently. for example, list direction + method:
 
 ```bash
 jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
@@ -364,35 +365,36 @@ you can open files when i ask me "open in zed the line where ..." using the comm
 - if you encounter typescript lint errors for an npm package, read the node_modules/package/\*.d.ts files to understand the typescript types of the package. if you cannot understand them, ask me to help you with it.
 
 - NEVER silently suppress errors in catch {} blocks if they contain more than one function call
+
 ```ts
 // BAD. DO NOT DO THIS
-let favicon: string | undefined;
+let favicon: string | undefined
 if (docsConfig?.favicon) {
-  if (typeof docsConfig.favicon === "string") {
-    favicon = docsConfig.favicon;
+  if (typeof docsConfig.favicon === 'string') {
+    favicon = docsConfig.favicon
   } else if (docsConfig.favicon?.light) {
     // Use light favicon as default, could be enhanced with theme detection
-    favicon = docsConfig.favicon.light;
+    favicon = docsConfig.favicon.light
   }
 }
 // DO THIS. use an iife. Immediately Invoked Function Expression
 const favicon: string = (() => {
   if (!docsConfig?.favicon) {
-    return "";
+    return ''
   }
-  if (typeof docsConfig.favicon === "string") {
-    return docsConfig.favicon;
+  if (typeof docsConfig.favicon === 'string') {
+    return docsConfig.favicon
   }
   if (docsConfig.favicon?.light) {
     // Use light favicon as default, could be enhanced with theme detection
-    return docsConfig.favicon.light;
+    return docsConfig.favicon.light
   }
-  return "";
-})();
+  return ''
+})()
 // if you already know the type use it:
 const favicon: string = () => {
   // ...
-};
+}
 ```
 
 - when a package has to import files from another packages in the workspace never add a new tsconfig path, instead add that package as a workspace dependency using `pnpm i "package@workspace:*"`
@@ -409,12 +411,12 @@ always specify the type when creating arrays, especially for empty arrays. if yo
 
 ```ts
 // BAD: Type will be never[]
-const items = [];
+const items = []
 
 // GOOD: Specify the expected type
-const items: string[] = [];
-const numbers: number[] = [];
-const users: User[] = [];
+const items: string[] = []
+const numbers: number[] = []
+const users: User[] = []
 ```
 
 remember to always add the explicit type to avoid unexpected type inference.
@@ -572,7 +574,7 @@ to understand how the code you are writing works, you should add inline snapshot
 
 - for very long snapshots you should use `toMatchFileSnapshot(filename)` instead of `toMatchInlineSnapshot()`. put the snapshot files in a snapshots/ directory and use the appropriate extension for the file based on the content
 
-never test client react components. only React and browser independent code. 
+never test client react components. only React and browser independent code.
 
 most tests should be simple calls to functions with some expect calls, no mocks. test files should be called the same as the file where the tested function is being exported from.
 
@@ -589,11 +591,12 @@ sometimes tests work directly on database data, using prisma. to run these tests
 never write tests yourself that call prisma or interact with database or emails. for these, ask the user to write them for you.
 
 changelogs.md
+
 # writing docs
 
 when generating a .md or .mdx file to document things, always add a frontmatter with title and description. also add a prompt field with the exact prompt used to generate the doc. use @ to reference files and urls and provide any context necessary to be able to recreate this file from scratch using a model. if you used urls also reference them. reference all files you had to read to create the doc. use yaml | syntax to add this prompt and never go over the column width of 80
-# github
 
+# github
 
 you can use the `gh` cli to do operations on github for the current repository. For example: open issues, open PRs, check actions status, read workflow logs, etc.
 
@@ -677,6 +680,7 @@ This will download the source code in ./opensrc. which should be put in .gitigno
 you can control the browser using the playwright mcp tools. these tools let you control the browser to get information or accomplish actions
 
 if i ask you to test something in the browser, know that the website dev server is already running at http://localhost:7664 for website and :7777 for docs-website (but docs-website needs to use the website domain specifically, for example name-hash.localhost:7777)
+
 # zod
 
 when you need to create a complex type that comes from a prisma table, do not create a new schema that tries to recreate the prisma table structure. instead just use `z.any() as ZodType<PrismaTable>)` to get type safety but leave any in the schema. this gets most of the benefits of zod without having to define a new zod schema that can easily go out of sync.
@@ -686,17 +690,17 @@ when you need to create a complex type that comes from a prisma table, do not cr
 you MUST use the built in zod v4 toJSONSchema and not the npm package `zod-to-json-schema` which is outdated and does not support zod v4.
 
 ```ts
-import { toJSONSchema } from "zod";
+import { toJSONSchema } from 'zod'
 
 const mySchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(3).max(100),
   age: z.number().min(0).optional(),
-});
+})
 
 const jsonSchema = toJSONSchema(mySchema, {
-  removeAdditionalStrategy: "strict",
-});
+  removeAdditionalStrategy: 'strict',
+})
 ```
 
 github.md

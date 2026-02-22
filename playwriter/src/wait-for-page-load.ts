@@ -66,7 +66,12 @@ export async function waitForPageLoad(options: WaitForPageLoadOptions): Promise<
 
   const checkPageReady = async (): Promise<{ ready: boolean; readyState: string; pendingRequests: string[] }> => {
     const result = await page.evaluate(
-      ({ filteredDomains, filteredExtensions, stuckThreshold, slowResourceThreshold }): {
+      ({
+        filteredDomains,
+        filteredExtensions,
+        stuckThreshold,
+        slowResourceThreshold,
+      }): {
         ready: boolean
         readyState: string
         pendingRequests: string[]

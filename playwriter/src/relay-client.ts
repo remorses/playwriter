@@ -30,7 +30,9 @@ export async function getRelayServerVersion(port: number = RELAY_PORT): Promise<
   }
 }
 
-export async function getExtensionStatus(port: number = RELAY_PORT): Promise<{ connected: boolean; activeTargets: number; playwriterVersion: string | null } | null> {
+export async function getExtensionStatus(
+  port: number = RELAY_PORT,
+): Promise<{ connected: boolean; activeTargets: number; playwriterVersion: string | null } | null> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/extension/status`, {
       signal: AbortSignal.timeout(500),
@@ -38,7 +40,7 @@ export async function getExtensionStatus(port: number = RELAY_PORT): Promise<{ c
     if (!response.ok) {
       return null
     }
-    return await response.json() as { connected: boolean; activeTargets: number; playwriterVersion: string | null }
+    return (await response.json()) as { connected: boolean; activeTargets: number; playwriterVersion: string | null }
   } catch {
     return null
   }
@@ -48,11 +50,13 @@ export async function getExtensionStatus(port: number = RELAY_PORT): Promise<{ c
  * Wait for the extension to connect to the relay server.
  * Returns true if connected within timeout, false otherwise.
  */
-export async function waitForExtension(options: {
-  port?: number
-  timeoutMs?: number
-  logger?: { log: (...args: any[]) => void }
-} = {}): Promise<boolean> {
+export async function waitForExtension(
+  options: {
+    port?: number
+    timeoutMs?: number
+    logger?: { log: (...args: any[]) => void }
+  } = {},
+): Promise<boolean> {
   const { port = RELAY_PORT, timeoutMs = 5000, logger } = options
   const startTime = Date.now()
 
@@ -155,7 +159,9 @@ export async function ensureRelayServer(options: EnsureRelayServerOptions = {}):
 
   if (serverVersion !== null) {
     if (restartOnVersionMismatch) {
-      logger?.log(pc.yellow(`CDP relay server version mismatch (server: ${serverVersion}, client: ${VERSION}), restarting...`))
+      logger?.log(
+        pc.yellow(`CDP relay server version mismatch (server: ${serverVersion}, client: ${VERSION}), restarting...`),
+      )
       await killRelayServer({ port: RELAY_PORT })
     } else {
       // Server is running but different version, just use it
@@ -164,7 +170,11 @@ export async function ensureRelayServer(options: EnsureRelayServerOptions = {}):
   } else {
     const listeningPids = await getListeningPidsForPort({ port: RELAY_PORT }).catch(() => [])
     if (listeningPids.length > 0) {
-      logger?.log(pc.yellow(`Port ${RELAY_PORT} is already in use (pid(s): ${listeningPids.join(', ')}). Attempting to stop the existing process...`))
+      logger?.log(
+        pc.yellow(
+          `Port ${RELAY_PORT} is already in use (pid(s): ${listeningPids.join(', ')}). Attempting to stop the existing process...`,
+        ),
+      )
       await killRelayServer({ port: RELAY_PORT })
     }
 

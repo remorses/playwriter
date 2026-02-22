@@ -40,9 +40,7 @@ export type GhostBrowserCommandParams = {
   args: unknown[]
 }
 
-export type GhostBrowserCommandResult =
-  | { success: true; result: unknown }
-  | { success: false; error: string }
+export type GhostBrowserCommandResult = { success: true; result: unknown } | { success: false; error: string }
 
 /**
  * Function signature for sending ghost-browser commands.
@@ -52,7 +50,7 @@ export type GhostBrowserCommandResult =
 export type SendGhostBrowserCommand = (
   namespace: GhostBrowserNamespace,
   method: string,
-  args: unknown[]
+  args: unknown[],
 ) => Promise<unknown>
 
 // =============================================================================
@@ -66,7 +64,7 @@ export type SendGhostBrowserCommand = (
 function createGhostBrowserProxy(
   namespace: GhostBrowserNamespace,
   constants: Record<string, unknown>,
-  sendCommand: SendGhostBrowserCommand
+  sendCommand: SendGhostBrowserCommand,
 ) {
   return new Proxy(constants, {
     get(target, prop: string) {
@@ -108,7 +106,7 @@ export function createGhostBrowserChrome(sendCommand: SendGhostBrowserCommand) {
  */
 export async function handleGhostBrowserCommand(
   params: GhostBrowserCommandParams,
-  chromeApi: typeof chrome
+  chromeApi: typeof chrome,
 ): Promise<GhostBrowserCommandResult> {
   const { namespace, method, args } = params
 

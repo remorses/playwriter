@@ -2,115 +2,125 @@ import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { getCDPSessionForPage } from './cdp-session.js'
 import { getCdpUrl } from './utils.js'
-import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext, withTimeout, js, tryJsonParse } from './test-utils.js'
+import {
+  setupTestContext,
+  cleanupTestContext,
+  getExtensionServiceWorker,
+  type TestContext,
+  withTimeout,
+  js,
+  tryJsonParse,
+} from './test-utils.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19987
 
 describe('Relay Core Tests', () => {
-    let client: Awaited<ReturnType<typeof createMCPClient>>['client']
-    let cleanup: (() => Promise<void>) | null = null
-    let testCtx: TestContext | null = null
+  let client: Awaited<ReturnType<typeof createMCPClient>>['client']
+  let cleanup: (() => Promise<void>) | null = null
+  let testCtx: TestContext | null = null
 
-    beforeAll(async () => {
-        testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-test-', toggleExtension: true })
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: TEST_PORT, tempDirPrefix: 'pw-test-', toggleExtension: true })
 
-        const result = await createMCPClient({ port: TEST_PORT })
-        client = result.client
-        cleanup = result.cleanup
-    }, 600000)
+    const result = await createMCPClient({ port: TEST_PORT })
+    client = result.client
+    cleanup = result.cleanup
+  }, 600000)
 
-    afterAll(async () => {
-        await cleanupTestContext(testCtx, cleanup)
-        cleanup = null
-        testCtx = null
+  afterAll(async () => {
+    await cleanupTestContext(testCtx, cleanup)
+    cleanup = null
+    testCtx = null
+  })
+
+  const getBrowserContext = () => {
+    if (!testCtx?.browserContext) throw new Error('Browser not initialized')
+    return testCtx.browserContext
+  }
+
+  it('should inject script via addScriptTag through CDP relay', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await withTimeout({
+      promise: getExtensionServiceWorker(browserContext),
+      timeoutMs: 5000,
+      errorMessage: 'Timed out waiting for extension service worker for iframe test',
     })
 
-    const getBrowserContext = () => {
-        if (!testCtx?.browserContext) throw new Error('Browser not initialized')
-        return testCtx.browserContext
-    }
+    const page = await browserContext.newPage()
+    const html = '<html><body><button id="btn">Click</button></body></html>'
+    const dataUrl = `data:text/html,${encodeURIComponent(html)}`
+    await page.goto(dataUrl)
+    await page.bringToFront()
 
-    it('should inject script via addScriptTag through CDP relay', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await withTimeout({
-            promise: getExtensionServiceWorker(browserContext),
-            timeoutMs: 5000,
-            errorMessage: 'Timed out waiting for extension service worker for iframe test',
+    await withTimeout({
+      promise: serviceWorker.evaluate(async () => {
+        await globalThis.toggleExtensionForActiveTab()
+      }),
+      timeoutMs: 10000,
+      errorMessage: 'Timed out toggling extension for active tab',
+    })
+    await new Promise((r) => {
+      setTimeout(r, 100)
+    })
+
+    const cdpSession = await withTimeout({
+      promise: getCDPSessionForPage({ page }),
+      timeoutMs: 10000,
+      errorMessage: 'Timed out creating CDP session for page',
+    })
+
+    const hasGlobalBefore = await page.evaluate(() => {
+      return Boolean((globalThis as { __testGlobal?: unknown }).__testGlobal)
+    })
+    expect(hasGlobalBefore).toBe(false)
+
+    await withTimeout({
+      promise: (async () => {
+        await cdpSession.send('Page.enable')
+        await cdpSession.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: 'globalThis.__testGlobal = { foo: "bar" }',
         })
+        await page.reload({ waitUntil: 'domcontentloaded' })
+      })(),
+      timeoutMs: 10000,
+      errorMessage: 'Timed out injecting script via CDP session',
+    })
 
-        const page = await browserContext.newPage()
-        const html = '<html><body><button id="btn">Click</button></body></html>'
-        const dataUrl = `data:text/html,${encodeURIComponent(html)}`
-        await page.goto(dataUrl)
-        await page.bringToFront()
+    const hasGlobalAfter = await page.evaluate(() => {
+      return (globalThis as { __testGlobal?: unknown }).__testGlobal
+    })
+    expect(hasGlobalAfter).toEqual({ foo: 'bar' })
 
-        await withTimeout({
-            promise: serviceWorker.evaluate(async () => {
-                await globalThis.toggleExtensionForActiveTab()
-            }),
-            timeoutMs: 10000,
-            errorMessage: 'Timed out toggling extension for active tab',
-        })
-        await new Promise((r) => { setTimeout(r, 100) })
+    await cdpSession.detach()
+    await page.close()
+  }, 60000)
 
-        const cdpSession = await withTimeout({
-            promise: getCDPSessionForPage({ page }),
-            timeoutMs: 10000,
-            errorMessage: 'Timed out creating CDP session for page',
-        })
-
-        const hasGlobalBefore = await page.evaluate(() => {
-            return Boolean((globalThis as { __testGlobal?: unknown }).__testGlobal)
-        })
-        expect(hasGlobalBefore).toBe(false)
-
-        await withTimeout({
-            promise: (async () => {
-                await cdpSession.send('Page.enable')
-                await cdpSession.send('Page.addScriptToEvaluateOnNewDocument', {
-                    source: 'globalThis.__testGlobal = { foo: "bar" }',
-                })
-                await page.reload({ waitUntil: 'domcontentloaded' })
-            })(),
-            timeoutMs: 10000,
-            errorMessage: 'Timed out injecting script via CDP session',
-        })
-
-        const hasGlobalAfter = await page.evaluate(() => {
-            return (globalThis as { __testGlobal?: unknown }).__testGlobal
-        })
-        expect(hasGlobalAfter).toEqual({ foo: 'bar' })
-
-        await cdpSession.detach()
-        await page.close()
-    }, 60000)
-
-    it('should execute code and capture console output', async () => {
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+  it('should execute code and capture console output', async () => {
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const newPage = await context.newPage();
           state.page = newPage;
           if (!state.pages) state.pages = [];
           state.pages.push(newPage);
         `,
-            },
-        })
+      },
+    })
 
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.page.goto('https://example.com');
           const title = await state.page.title();
           console.log('Page title:', title);
           return { url: state.page.url(), title };
         `,
-            },
-        })
-        expect(result.content).toMatchInlineSnapshot(`
+      },
+    })
+    expect(result.content).toMatchInlineSnapshot(`
           [
             {
               "text": "Console output:
@@ -121,138 +131,134 @@ describe('Relay Core Tests', () => {
             },
           ]
         `)
-        expect(result.content).toBeDefined()
-    }, 30000)
+    expect(result.content).toBeDefined()
+  }, 30000)
 
-    it('should show extension as connected for pages created via newPage()', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should show extension as connected for pages created via newPage()', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        // Create a page via MCP (which uses context.newPage())
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Create a page via MCP (which uses context.newPage())
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const newPage = await context.newPage();
           state.testPage = newPage;
           await newPage.goto('https://example.com/mcp-test');
           return newPage.url();
         `,
-            },
-        })
+      },
+    })
 
-        // Get extension state to verify the page is marked as connected
-        const extensionState = await serviceWorker.evaluate(async () => {
-            const state = globalThis.getExtensionState()
-            const tabs = await chrome.tabs.query({})
-            const testTab = tabs.find((t: any) => t.url?.includes('mcp-test'))
-            return {
-                connected: !!testTab && !!testTab.id && state.tabs.has(testTab.id),
-                tabId: testTab?.id,
-                tabInfo: testTab?.id ? state.tabs.get(testTab.id) : null,
-                connectionState: state.connectionState
-            }
-        })
+    // Get extension state to verify the page is marked as connected
+    const extensionState = await serviceWorker.evaluate(async () => {
+      const state = globalThis.getExtensionState()
+      const tabs = await chrome.tabs.query({})
+      const testTab = tabs.find((t: any) => t.url?.includes('mcp-test'))
+      return {
+        connected: !!testTab && !!testTab.id && state.tabs.has(testTab.id),
+        tabId: testTab?.id,
+        tabInfo: testTab?.id ? state.tabs.get(testTab.id) : null,
+        connectionState: state.connectionState,
+      }
+    })
 
-        expect(extensionState.connected).toBe(true)
-        expect(extensionState.tabInfo?.state).toBe('connected')
-        expect(extensionState.connectionState).toBe('connected')
+    expect(extensionState.connected).toBe(true)
+    expect(extensionState.tabInfo?.state).toBe('connected')
+    expect(extensionState.connectionState).toBe('connected')
 
-        // Clean up
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Clean up
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           if (state.testPage) {
             await state.testPage.close();
             delete state.testPage;
           }
         `,
-            },
-        })
-    }, 30000)
+      },
+    })
+  }, 30000)
 
-    const snapshotTestCases = [
-        {
-            name: 'hacker-news',
-            url: 'https://news.ycombinator.com/item?id=1',
-            expectedContent: ['role=link', 'Hacker News'],
-        },
-        {
-            name: 'shadcn-ui',
-            url: 'https://ui.shadcn.com/',
-            expectedContent: ['shadcn'],
-        },
-    ]
+  const snapshotTestCases = [
+    {
+      name: 'hacker-news',
+      url: 'https://news.ycombinator.com/item?id=1',
+      expectedContent: ['role=link', 'Hacker News'],
+    },
+    {
+      name: 'shadcn-ui',
+      url: 'https://ui.shadcn.com/',
+      expectedContent: ['shadcn'],
+    },
+  ]
 
-    for (const testCase of snapshotTestCases) {
-        it(`should get accessibility snapshot of ${testCase.name}`, async () => {
-            await client.callTool({
-                name: 'execute',
-                arguments: {
-                    code: js`
+  for (const testCase of snapshotTestCases) {
+    it(`should get accessibility snapshot of ${testCase.name}`, async () => {
+      await client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
               const newPage = await context.newPage();
               state.page = newPage;
               if (!state.pages) state.pages = [];
               state.pages.push(newPage);
             `,
-                },
-            })
+        },
+      })
 
-            // Capture interactiveOnly=true snapshot (default)
-            const interactiveResult = await client.callTool({
-                name: 'execute',
-                arguments: {
-                    code: js`
+      // Capture interactiveOnly=true snapshot (default)
+      const interactiveResult = await client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
               await state.page.goto('${testCase.url}', { waitUntil: 'domcontentloaded' });
               const snap = await snapshot({ page: state.page, showDiffSinceLastCall: false, interactiveOnly: true });
               return snap;
             `,
-                },
-            })
+        },
+      })
 
-            const interactiveData =
-                typeof interactiveResult === 'object' && interactiveResult.content?.[0]?.text
-                    ? tryJsonParse(interactiveResult.content[0].text)
-                    : interactiveResult
-            await expect(interactiveData).toMatchFileSnapshot(
-                `snapshots/${testCase.name}-accessibility-interactive.md`,
-            )
-            expect(interactiveResult.content).toBeDefined()
-            for (const expected of testCase.expectedContent) {
-                expect(interactiveData).toContain(expected)
-            }
+      const interactiveData =
+        typeof interactiveResult === 'object' && interactiveResult.content?.[0]?.text
+          ? tryJsonParse(interactiveResult.content[0].text)
+          : interactiveResult
+      await expect(interactiveData).toMatchFileSnapshot(`snapshots/${testCase.name}-accessibility-interactive.md`)
+      expect(interactiveResult.content).toBeDefined()
+      for (const expected of testCase.expectedContent) {
+        expect(interactiveData).toContain(expected)
+      }
 
-            // Capture interactiveOnly=false snapshot (full tree)
-            const fullResult = await client.callTool({
-                name: 'execute',
-                arguments: {
-                    code: js`
+      // Capture interactiveOnly=false snapshot (full tree)
+      const fullResult = await client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
               const snap = await snapshot({ page: state.page, showDiffSinceLastCall: false, interactiveOnly: false });
               return snap;
             `,
-                },
-            })
+        },
+      })
 
-            const fullData =
-                typeof fullResult === 'object' && fullResult.content?.[0]?.text
-                    ? tryJsonParse(fullResult.content[0].text)
-                    : fullResult
-            await expect(fullData).toMatchFileSnapshot(
-                `snapshots/${testCase.name}-accessibility-full.md`,
-            )
-            expect(fullResult.content).toBeDefined()
-            for (const expected of testCase.expectedContent) {
-                expect(fullData).toContain(expected)
-            }
-        }, 60000)
-    }
+      const fullData =
+        typeof fullResult === 'object' && fullResult.content?.[0]?.text
+          ? tryJsonParse(fullResult.content[0].text)
+          : fullResult
+      await expect(fullData).toMatchFileSnapshot(`snapshots/${testCase.name}-accessibility-full.md`)
+      expect(fullResult.content).toBeDefined()
+      for (const expected of testCase.expectedContent) {
+        expect(fullData).toContain(expected)
+      }
+    }, 60000)
+  }
 
-    it('should close all created pages', async () => {
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+  it('should close all created pages', async () => {
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           if (state.pages && state.pages.length > 0) {
             for (const page of state.pages) {
               await page.close();
@@ -263,17 +269,16 @@ describe('Relay Core Tests', () => {
           }
           return { closedCount: 0 };
         `,
-            },
-        })
-
+      },
     })
+  })
 
-    it('should capture browser console logs with getLatestLogs', async () => {
-        // Ensure clean state and clear any existing logs
-        const resetResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+  it('should capture browser console logs with getLatestLogs', async () => {
+    // Ensure clean state and clear any existing logs
+    const resetResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           // Clear any existing logs from previous tests
           clearAllLogs();
           console.log('Cleared all existing logs');
@@ -284,27 +289,27 @@ describe('Relay Core Tests', () => {
 
           return { success: true, pagesCount: pages.length };
         `,
-            },
-        })
-        console.log('Cleanup result:', resetResult)
+      },
+    })
+    console.log('Cleanup result:', resetResult)
 
-        // Create a new page for this test
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Create a new page for this test
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const newPage = await context.newPage();
           state.testLogPage = newPage;
           await newPage.goto('about:blank');
         `,
-            },
-        })
+      },
+    })
 
-        // Generate some console logs in the browser
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Generate some console logs in the browser
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.testLogPage.evaluate(() => {
             console.log('Test log 12345');
             console.error('Test error 67890');
@@ -314,325 +319,327 @@ describe('Relay Core Tests', () => {
           // Wait for logs to be captured
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Test getting all logs
-        const allLogsResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test getting all logs
+    const allLogsResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs();
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const output = (allLogsResult as any).content[0].text
-        expect(output).toContain('[log] Test log 12345')
-        expect(output).toContain('[error] Test error 67890')
-        expect(output).toContain('[warning] Test warning 11111')
+    const output = (allLogsResult as any).content[0].text
+    expect(output).toContain('[log] Test log 12345')
+    expect(output).toContain('[error] Test error 67890')
+    expect(output).toContain('[warning] Test warning 11111')
 
-        // Test filtering by search string
-        const errorLogsResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test filtering by search string
+    const errorLogsResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ search: 'error' });
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const errorOutput = (errorLogsResult as any).content[0].text
-        expect(errorOutput).toContain('[error] Test error 67890')
-        // With context lines (5 above/below), nearby logs are also included
-        expect(errorOutput).toContain('[log] Test log 12345')
+    const errorOutput = (errorLogsResult as any).content[0].text
+    expect(errorOutput).toContain('[error] Test error 67890')
+    // With context lines (5 above/below), nearby logs are also included
+    expect(errorOutput).toContain('[log] Test log 12345')
 
-        // Test that logs are cleared on page reload
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test that logs are cleared on page reload
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           // First add a log before reload
           await state.testLogPage.evaluate(() => {
             console.log('Before reload 99999');
           });
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Verify the log exists
-        const beforeReloadResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Verify the log exists
+    const beforeReloadResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ page: state.testLogPage });
           console.log('Logs before reload:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const beforeReloadOutput = (beforeReloadResult as any).content[0].text
-        expect(beforeReloadOutput).toContain('[log] Before reload 99999')
+    const beforeReloadOutput = (beforeReloadResult as any).content[0].text
+    expect(beforeReloadOutput).toContain('[log] Before reload 99999')
 
-        // Reload the page
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Reload the page
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.testLogPage.reload();
           await state.testLogPage.evaluate(() => {
             console.log('After reload 88888');
           });
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Check logs after reload - old logs should be gone
-        const afterReloadResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check logs after reload - old logs should be gone
+    const afterReloadResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ page: state.testLogPage });
           console.log('Logs after reload:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const afterReloadOutput = (afterReloadResult as any).content[0].text
-        expect(afterReloadOutput).toContain('[log] After reload 88888')
-        expect(afterReloadOutput).not.toContain('[log] Before reload 99999')
+    const afterReloadOutput = (afterReloadResult as any).content[0].text
+    expect(afterReloadOutput).toContain('[log] After reload 88888')
+    expect(afterReloadOutput).not.toContain('[log] Before reload 99999')
 
-        // Clean up
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Clean up
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.testLogPage.close();
           delete state.testLogPage;
         `,
-            },
-        })
-    }, 30000)
+      },
+    })
+  }, 30000)
 
-    it('should keep logs separate between different pages', async () => {
-        // Clear any existing logs from previous tests
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+  it('should keep logs separate between different pages', async () => {
+    // Clear any existing logs from previous tests
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           clearAllLogs();
           console.log('Cleared all existing logs for second log test');
         `,
-            },
-        })
+      },
+    })
 
-        // Create two pages
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Create two pages
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           state.pageA = await context.newPage();
           state.pageB = await context.newPage();
           await state.pageA.goto('about:blank');
           await state.pageB.goto('about:blank');
         `,
-            },
-        })
+      },
+    })
 
-        // Generate logs in page A
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Generate logs in page A
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.pageA.evaluate(() => {
             console.log('PageA log 11111');
             console.error('PageA error 22222');
           });
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Generate logs in page B
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Generate logs in page B
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.pageB.evaluate(() => {
             console.log('PageB log 33333');
             console.error('PageB error 44444');
           });
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Check logs for page A - should only have page A logs
-        const pageALogsResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check logs for page A - should only have page A logs
+    const pageALogsResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ page: state.pageA });
           console.log('Page A logs:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const pageAOutput = (pageALogsResult as any).content[0].text
-        expect(pageAOutput).toContain('[log] PageA log 11111')
-        expect(pageAOutput).toContain('[error] PageA error 22222')
-        expect(pageAOutput).not.toContain('PageB')
+    const pageAOutput = (pageALogsResult as any).content[0].text
+    expect(pageAOutput).toContain('[log] PageA log 11111')
+    expect(pageAOutput).toContain('[error] PageA error 22222')
+    expect(pageAOutput).not.toContain('PageB')
 
-        // Check logs for page B - should only have page B logs
-        const pageBLogsResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check logs for page B - should only have page B logs
+    const pageBLogsResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ page: state.pageB });
           console.log('Page B logs:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const pageBOutput = (pageBLogsResult as any).content[0].text
-        expect(pageBOutput).toContain('[log] PageB log 33333')
-        expect(pageBOutput).toContain('[error] PageB error 44444')
-        expect(pageBOutput).not.toContain('PageA')
+    const pageBOutput = (pageBLogsResult as any).content[0].text
+    expect(pageBOutput).toContain('[log] PageB log 33333')
+    expect(pageBOutput).toContain('[error] PageB error 44444')
+    expect(pageBOutput).not.toContain('PageA')
 
-        // Check all logs - should have logs from both pages
-        const allLogsResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check all logs - should have logs from both pages
+    const allLogsResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs();
           console.log('All logs:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const allOutput = (allLogsResult as any).content[0].text
-        expect(allOutput).toContain('[log] PageA log 11111')
-        expect(allOutput).toContain('[log] PageB log 33333')
+    const allOutput = (allLogsResult as any).content[0].text
+    expect(allOutput).toContain('[log] PageA log 11111')
+    expect(allOutput).toContain('[log] PageB log 33333')
 
-        // Test that reloading page A clears only page A logs
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test that reloading page A clears only page A logs
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.pageA.reload();
           await state.pageA.evaluate(() => {
             console.log('PageA after reload 55555');
           });
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Check page A logs - should only have new log
-        const pageAAfterReloadResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check page A logs - should only have new log
+    const pageAAfterReloadResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ page: state.pageA });
           console.log('Page A logs after reload:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const pageAAfterReloadOutput = (pageAAfterReloadResult as any).content[0].text
-        expect(pageAAfterReloadOutput).toContain('[log] PageA after reload 55555')
-        expect(pageAAfterReloadOutput).not.toContain('[log] PageA log 11111')
+    const pageAAfterReloadOutput = (pageAAfterReloadResult as any).content[0].text
+    expect(pageAAfterReloadOutput).toContain('[log] PageA after reload 55555')
+    expect(pageAAfterReloadOutput).not.toContain('[log] PageA log 11111')
 
-        // Check page B logs - should still have original logs
-        const pageBAfterAReloadResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check page B logs - should still have original logs
+    const pageBAfterAReloadResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs({ page: state.pageB });
           console.log('Page B logs after A reload:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const pageBAfterAReloadOutput = (pageBAfterAReloadResult as any).content[0].text
-        expect(pageBAfterAReloadOutput).toContain('[log] PageB log 33333')
-        expect(pageBAfterAReloadOutput).toContain('[error] PageB error 44444')
+    const pageBAfterAReloadOutput = (pageBAfterAReloadResult as any).content[0].text
+    expect(pageBAfterAReloadOutput).toContain('[log] PageB log 33333')
+    expect(pageBAfterAReloadOutput).toContain('[error] PageB error 44444')
 
-        // Test that logs are deleted when page is closed
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test that logs are deleted when page is closed
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           // Close page A
           await state.pageA.close();
           await new Promise(resolve => setTimeout(resolve, 100));
         `,
-            },
-        })
+      },
+    })
 
-        // Check all logs - page A logs should be gone
-        const logsAfterCloseResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Check all logs - page A logs should be gone
+    const logsAfterCloseResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           const logs = await getLatestLogs();
           console.log('All logs after closing page A:', logs.length);
           logs.forEach(log => console.log(log));
         `,
-            },
-        })
+      },
+    })
 
-        const logsAfterCloseOutput = (logsAfterCloseResult as any).content[0].text
-        expect(logsAfterCloseOutput).not.toContain('PageA')
-        expect(logsAfterCloseOutput).toContain('[log] PageB log 33333')
+    const logsAfterCloseOutput = (logsAfterCloseResult as any).content[0].text
+    expect(logsAfterCloseOutput).not.toContain('PageA')
+    expect(logsAfterCloseOutput).toContain('[log] PageB log 33333')
 
-        // Clean up remaining page
-        await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Clean up remaining page
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
           await state.pageB.close();
           delete state.pageA;
           delete state.pageB;
         `,
-            },
-        })
-    }, 30000)
+      },
+    })
+  }, 30000)
 
-    // right now our extension always forces light mode because of a playwright cdp bug
-    it.todo('should preserve system color scheme instead of forcing light mode', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  // right now our extension always forces light mode because of a playwright cdp bug
+  it.todo(
+    'should preserve system color scheme instead of forcing light mode',
+    async () => {
+      const browserContext = getBrowserContext()
+      const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.goto('https://example.com')
-        await page.bringToFront()
+      const page = await browserContext.newPage()
+      await page.goto('https://example.com')
+      await page.bringToFront()
 
-        const colorSchemeBefore = await page.evaluate(() => {
-            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        })
-        console.log('Color scheme before MCP connection:', colorSchemeBefore)
+      const colorSchemeBefore = await page.evaluate(() => {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      })
+      console.log('Color scheme before MCP connection:', colorSchemeBefore)
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+      await serviceWorker.evaluate(async () => {
+        await globalThis.toggleExtensionForActiveTab()
+      })
+      await new Promise((r) => setTimeout(r, 100))
 
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+      const result = await client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
                     const pages = context.pages();
                     const urls = pages.map(p => p.url());
                     const targetPage = pages.find(p => p.url().includes('example.com'));
@@ -643,12 +650,12 @@ describe('Relay Core Tests', () => {
                     const isLight = await targetPage.evaluate(() => window.matchMedia('(prefers-color-scheme: light)').matches);
                     return { matchesDark: isDark, matchesLight: isLight };
                 `,
-            },
-        })
+        },
+      })
 
-        console.log('Color scheme after MCP connection:', result.content)
+      console.log('Color scheme after MCP connection:', result.content)
 
-        expect(result.content).toMatchInlineSnapshot(`
+      expect(result.content).toMatchInlineSnapshot(`
           [
             {
               "text": "[return value] { error: 'Page not found', urls: [ 'about:blank' ] }",
@@ -657,15 +664,17 @@ describe('Relay Core Tests', () => {
           ]
         `)
 
-        await page.close()
-    }, 60000)
+      await page.close()
+    },
+    60000,
+  )
 
-    it('should get clean HTML with getCleanHTML', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should get clean HTML with getCleanHTML', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    await page.setContent(`
             <html>
                 <head>
                     <style>.hidden { display: none; }</style>
@@ -681,18 +690,18 @@ describe('Relay Core Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 400))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 400))
 
-        // Test basic getCleanHTML
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test basic getCleanHTML
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -702,15 +711,15 @@ describe('Relay Core Tests', () => {
                     const html = await getCleanHTML({ locator: testPage.locator('body') });
                     return html;
                 `,
-                timeout: 15000,
-            },
-        })
+        timeout: 15000,
+      },
+    })
 
-        expect(result.isError).toBeFalsy()
-        const text = (result.content as any)[0]?.text || ''
+    expect(result.isError).toBeFalsy()
+    const text = (result.content as any)[0]?.text || ''
 
-        // Inline snapshot of cleaned HTML
-        expect(text).toMatchInlineSnapshot(`
+    // Inline snapshot of cleaned HTML
+    expect(text).toMatchInlineSnapshot(`
           "[return value] <div data-testid="main">
            <h1>Hello World</h1>
            <button aria-label="Click me">Submit</button>
@@ -719,16 +728,16 @@ describe('Relay Core Tests', () => {
           </div>"
         `)
 
-        // Should NOT contain script/style tags (they're removed)
-        expect(text).not.toContain('<script')
-        expect(text).not.toContain('<style')
-        expect(text).not.toContain('console.log')
+    // Should NOT contain script/style tags (they're removed)
+    expect(text).not.toContain('<script')
+    expect(text).not.toContain('<style')
+    expect(text).not.toContain('console.log')
 
-        // Test search functionality
-        const searchResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test search functionality
+    const searchResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -738,24 +747,24 @@ describe('Relay Core Tests', () => {
                     const html = await getCleanHTML({ locator: testPage, search: /button/i });
                     return html;
                 `,
-                timeout: 15000,
-            },
-        })
+        timeout: 15000,
+      },
+    })
 
-        expect(searchResult.isError).toBeFalsy()
-        const searchText = (searchResult.content as any)[0]?.text || ''
-        expect(searchText).toContain('button')
+    expect(searchResult.isError).toBeFalsy()
+    const searchText = (searchResult.content as any)[0]?.text || ''
+    expect(searchText).toContain('button')
 
-        await page.close()
-    }, 60000)
+    await page.close()
+  }, 60000)
 
-    it('should extract page content as markdown with getPageMarkdown', async () => {
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should extract page content as markdown with getPageMarkdown', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        const page = await browserContext.newPage()
-        // Create a realistic article-like page structure
-        await page.setContent(`
+    const page = await browserContext.newPage()
+    // Create a realistic article-like page structure
+    await page.setContent(`
             <html>
                 <head>
                     <title>Test Article Title</title>
@@ -782,18 +791,18 @@ describe('Relay Core Tests', () => {
                 </body>
             </html>
         `)
-        await page.bringToFront()
+    await page.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 400))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 400))
 
-        // Test basic getPageMarkdown
-        const result = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test basic getPageMarkdown
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -803,30 +812,30 @@ describe('Relay Core Tests', () => {
                     const content = await getPageMarkdown({ page: testPage });
                     console.log(content);
                 `,
-                timeout: 15000,
-            },
-        })
+        timeout: 15000,
+      },
+    })
 
-        expect(result.isError).toBeFalsy()
-        const text = (result.content as any)[0]?.text || ''
+    expect(result.isError).toBeFalsy()
+    const text = (result.content as any)[0]?.text || ''
 
-        // Snapshot the full output
-        await expect(text).toMatchFileSnapshot('./snapshots/page-markdown-output.txt')
+    // Snapshot the full output
+    await expect(text).toMatchFileSnapshot('./snapshots/page-markdown-output.txt')
 
-        // Should contain article content
-        expect(text).toContain('Test Article Title')
-        expect(text).toContain('first paragraph')
-        expect(text).toContain('second paragraph')
+    // Should contain article content
+    expect(text).toContain('Test Article Title')
+    expect(text).toContain('first paragraph')
+    expect(text).toContain('second paragraph')
 
-        // Should NOT contain script/style content
-        expect(text).not.toContain('analytics')
-        expect(text).not.toContain('background: blue')
+    // Should NOT contain script/style content
+    expect(text).not.toContain('analytics')
+    expect(text).not.toContain('background: blue')
 
-        // Test search functionality
-        const searchResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // Test search functionality
+    const searchResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     let testPage;
                     for (const p of context.pages()) {
                         const html = await p.content();
@@ -836,97 +845,97 @@ describe('Relay Core Tests', () => {
                     const content = await getPageMarkdown({ page: testPage, search: /important/i, showDiffSinceLastCall: false });
                     return content;
                 `,
-                timeout: 15000,
-            },
-        })
+        timeout: 15000,
+      },
+    })
 
-        expect(searchResult.isError).toBeFalsy()
-        const searchText = (searchResult.content as any)[0]?.text || ''
-        expect(searchText).toContain('important')
+    expect(searchResult.isError).toBeFalsy()
+    const searchText = (searchResult.content as any)[0]?.text || ''
+    expect(searchText).toContain('important')
 
-        await page.close()
-    }, 60000)
+    await page.close()
+  }, 60000)
 
-    it('should handle default page being closed and switch to another available page', async () => {
-        // This test verifies that when the default `page` in MCP scope is closed,
-        // the MCP automatically switches to another available page instead of failing
-        // with cryptic "page closed" errors.
+  it('should handle default page being closed and switch to another available page', async () => {
+    // This test verifies that when the default `page` in MCP scope is closed,
+    // the MCP automatically switches to another available page instead of failing
+    // with cryptic "page closed" errors.
 
-        const browserContext = getBrowserContext()
-        const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-        // 1. Disconnect everything to start fresh
-        await serviceWorker.evaluate(async () => {
-            await globalThis.disconnectEverything()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    // 1. Disconnect everything to start fresh
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        // 2. Create first page and enable extension
-        const page1 = await browserContext.newPage()
-        await page1.goto('https://example.com/first-page')
-        await page1.bringToFront()
+    // 2. Create first page and enable extension
+    const page1 = await browserContext.newPage()
+    await page1.goto('https://example.com/first-page')
+    await page1.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        // 3. Reset MCP to ensure page1 becomes the default page (only page available)
-        const resetResult = await client.callTool({
-            name: 'reset',
-            arguments: {},
-        })
-        expect((resetResult as any).content[0].text).toContain('Connection reset successfully')
+    // 3. Reset MCP to ensure page1 becomes the default page (only page available)
+    const resetResult = await client.callTool({
+      name: 'reset',
+      arguments: {},
+    })
+    expect((resetResult as any).content[0].text).toContain('Connection reset successfully')
 
-        // 4. Verify initial page is accessible via default `page`
-        const initialResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // 4. Verify initial page is accessible via default `page`
+    const initialResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     const url = page.url();
                     console.log('Initial page URL:', url);
                     return { url };
                 `,
-            },
-        })
-        expect((initialResult as any).content[0].text).toContain('first-page')
+      },
+    })
+    expect((initialResult as any).content[0].text).toContain('first-page')
 
-        // 5. Create second page and enable extension
-        const page2 = await browserContext.newPage()
-        await page2.goto('https://example.com/second-page')
-        await page2.bringToFront()
+    // 5. Create second page and enable extension
+    const page2 = await browserContext.newPage()
+    await page2.goto('https://example.com/second-page')
+    await page2.bringToFront()
 
-        await serviceWorker.evaluate(async () => {
-            await globalThis.toggleExtensionForActiveTab()
-        })
-        await new Promise(r => setTimeout(r, 100))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 100))
 
-        // 6. Close the first page (which is the default `page` in MCP scope)
-        await page1.close()
-        await new Promise(r => setTimeout(r, 100))
+    // 6. Close the first page (which is the default `page` in MCP scope)
+    await page1.close()
+    await new Promise((r) => setTimeout(r, 100))
 
-        // 7. Execute code via MCP - should NOT fail with "page closed" error
-        // Instead, it should automatically switch to the second page
-        const afterCloseResult = await client.callTool({
-            name: 'execute',
-            arguments: {
-                code: js`
+    // 7. Execute code via MCP - should NOT fail with "page closed" error
+    // Instead, it should automatically switch to the second page
+    const afterCloseResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     const url = page.url();
                     console.log('Page URL after close:', url);
                     const title = await page.title();
                     return { url, title };
                 `,
-            },
-        })
+      },
+    })
 
-        // Should succeed and return the second page's info
-        expect((afterCloseResult as any).isError).toBeFalsy()
-        const output = (afterCloseResult as any).content[0].text
-        expect(output).toContain('second-page')
-        expect(output).not.toContain('page closed')
-        expect(output).not.toContain('Target closed')
+    // Should succeed and return the second page's info
+    expect((afterCloseResult as any).isError).toBeFalsy()
+    const output = (afterCloseResult as any).content[0].text
+    expect(output).toContain('second-page')
+    expect(output).not.toContain('page closed')
+    expect(output).not.toContain('Target closed')
 
-        // Cleanup
-        await page2.close()
-    }, 60000)
+    // Cleanup
+    await page2.close()
+  }, 60000)
 })

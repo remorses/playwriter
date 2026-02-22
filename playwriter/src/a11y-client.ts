@@ -234,7 +234,8 @@ export function hideA11yLabels(): void {
 // Expose on globalThis for injection
 // ============================================================================
 
-;(globalThis as { __a11y?: { renderA11yLabels: (labels: A11yLabel[]) => number; hideA11yLabels: () => void } }).__a11y = {
-  renderA11yLabels,
-  hideA11yLabels,
-}
+;(globalThis as { __a11y?: { renderA11yLabels: (labels: A11yLabel[]) => number; hideA11yLabels: () => void } }).__a11y =
+  {
+    renderA11yLabels,
+    hideA11yLabels,
+  }

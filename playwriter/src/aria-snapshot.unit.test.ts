@@ -29,61 +29,85 @@ describe('aria-snapshot tree filters', () => {
     const buttonId = '8' as Protocol.Accessibility.AXNodeId
 
     const axById = new Map<Protocol.Accessibility.AXNodeId, Protocol.Accessibility.AXNode>([
-      [rootId, {
-        nodeId: rootId,
-        ignored: false,
-        role: roleValue('rootwebarea'),
-        childIds: [mainId, navId],
-      }],
-      [mainId, {
-        nodeId: mainId,
-        ignored: false,
-        role: roleValue('main'),
-        childIds: [headingId, buttonId],
-        backendDOMNodeId: 200 as Protocol.DOM.BackendNodeId,
-      }],
-      [navId, {
-        nodeId: navId,
-        ignored: false,
-        role: roleValue('navigation'),
-        childIds: [listId],
-        backendDOMNodeId: 201 as Protocol.DOM.BackendNodeId,
-      }],
-      [listId, {
-        nodeId: listId,
-        ignored: false,
-        role: roleValue('list'),
-        childIds: [listItemId],
-        backendDOMNodeId: 202 as Protocol.DOM.BackendNodeId,
-      }],
-      [listItemId, {
-        nodeId: listItemId,
-        ignored: false,
-        role: roleValue('listitem'),
-        childIds: [linkId],
-        backendDOMNodeId: 203 as Protocol.DOM.BackendNodeId,
-      }],
-      [linkId, {
-        nodeId: linkId,
-        ignored: false,
-        role: roleValue('link'),
-        name: nameValue('Docs'),
-        backendDOMNodeId: 204 as Protocol.DOM.BackendNodeId,
-      }],
-      [headingId, {
-        nodeId: headingId,
-        ignored: false,
-        role: roleValue('heading'),
-        name: nameValue('Title'),
-        backendDOMNodeId: 205 as Protocol.DOM.BackendNodeId,
-      }],
-      [buttonId, {
-        nodeId: buttonId,
-        ignored: false,
-        role: roleValue('button'),
-        name: nameValue('Submit'),
-        backendDOMNodeId: 206 as Protocol.DOM.BackendNodeId,
-      }],
+      [
+        rootId,
+        {
+          nodeId: rootId,
+          ignored: false,
+          role: roleValue('rootwebarea'),
+          childIds: [mainId, navId],
+        },
+      ],
+      [
+        mainId,
+        {
+          nodeId: mainId,
+          ignored: false,
+          role: roleValue('main'),
+          childIds: [headingId, buttonId],
+          backendDOMNodeId: 200 as Protocol.DOM.BackendNodeId,
+        },
+      ],
+      [
+        navId,
+        {
+          nodeId: navId,
+          ignored: false,
+          role: roleValue('navigation'),
+          childIds: [listId],
+          backendDOMNodeId: 201 as Protocol.DOM.BackendNodeId,
+        },
+      ],
+      [
+        listId,
+        {
+          nodeId: listId,
+          ignored: false,
+          role: roleValue('list'),
+          childIds: [listItemId],
+          backendDOMNodeId: 202 as Protocol.DOM.BackendNodeId,
+        },
+      ],
+      [
+        listItemId,
+        {
+          nodeId: listItemId,
+          ignored: false,
+          role: roleValue('listitem'),
+          childIds: [linkId],
+          backendDOMNodeId: 203 as Protocol.DOM.BackendNodeId,
+        },
+      ],
+      [
+        linkId,
+        {
+          nodeId: linkId,
+          ignored: false,
+          role: roleValue('link'),
+          name: nameValue('Docs'),
+          backendDOMNodeId: 204 as Protocol.DOM.BackendNodeId,
+        },
+      ],
+      [
+        headingId,
+        {
+          nodeId: headingId,
+          ignored: false,
+          role: roleValue('heading'),
+          name: nameValue('Title'),
+          backendDOMNodeId: 205 as Protocol.DOM.BackendNodeId,
+        },
+      ],
+      [
+        buttonId,
+        {
+          nodeId: buttonId,
+          ignored: false,
+          role: roleValue('button'),
+          name: nameValue('Submit'),
+          backendDOMNodeId: 206 as Protocol.DOM.BackendNodeId,
+        },
+      ],
     ])
 
     const allowed = new Set<Protocol.DOM.BackendNodeId>([204 as Protocol.DOM.BackendNodeId])
@@ -145,25 +169,19 @@ describe('aria-snapshot tree filters', () => {
           role: 'navigation',
           name: '',
           ignored: false,
-          children: [
-            { role: 'link', name: 'Home', backendNodeId: 2 as Protocol.DOM.BackendNodeId, children: [] },
-          ],
+          children: [{ role: 'link', name: 'Home', backendNodeId: 2 as Protocol.DOM.BackendNodeId, children: [] }],
         },
         {
           role: 'labeltext',
           name: '',
           ignored: false,
-          children: [
-            { role: 'statictext', name: 'Email', ignored: false, children: [] },
-          ],
+          children: [{ role: 'statictext', name: 'Email', ignored: false, children: [] }],
         },
         {
           role: 'generic',
           name: '',
           ignored: false,
-          children: [
-            { role: 'button', name: 'Save', backendNodeId: 1 as Protocol.DOM.BackendNodeId, children: [] },
-          ],
+          children: [{ role: 'button', name: 'Save', backendNodeId: 1 as Protocol.DOM.BackendNodeId, children: [] }],
         },
         {
           role: 'generic',
@@ -186,35 +204,51 @@ describe('aria-snapshot tree filters', () => {
       ],
     }
 
-    const domByBackendId = new Map<Protocol.DOM.BackendNodeId, {
-      nodeId: Protocol.DOM.NodeId
-      parentId?: Protocol.DOM.NodeId
-      backendNodeId: Protocol.DOM.BackendNodeId
-      nodeName: string
-      attributes: Map<string, string>
-    }>([
-      [1 as Protocol.DOM.BackendNodeId, {
-        nodeId: 10 as Protocol.DOM.NodeId,
-        backendNodeId: 1 as Protocol.DOM.BackendNodeId,
-        nodeName: 'BUTTON',
-        attributes: new Map([['id', 'save-btn']]),
-      }],
-      [2 as Protocol.DOM.BackendNodeId, {
-        nodeId: 11 as Protocol.DOM.NodeId,
-        backendNodeId: 2 as Protocol.DOM.BackendNodeId,
-        nodeName: 'A',
-        attributes: new Map([['data-testid', 'nav-home']]),
-      }],
-      [3 as Protocol.DOM.BackendNodeId, {
-        nodeId: 12 as Protocol.DOM.NodeId,
-        backendNodeId: 3 as Protocol.DOM.BackendNodeId,
-        nodeName: 'BUTTON',
-        attributes: new Map([['id', 'ignored-action']]),
-      }],
+    const domByBackendId = new Map<
+      Protocol.DOM.BackendNodeId,
+      {
+        nodeId: Protocol.DOM.NodeId
+        parentId?: Protocol.DOM.NodeId
+        backendNodeId: Protocol.DOM.BackendNodeId
+        nodeName: string
+        attributes: Map<string, string>
+      }
+    >([
+      [
+        1 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 10 as Protocol.DOM.NodeId,
+          backendNodeId: 1 as Protocol.DOM.BackendNodeId,
+          nodeName: 'BUTTON',
+          attributes: new Map([['id', 'save-btn']]),
+        },
+      ],
+      [
+        2 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 11 as Protocol.DOM.NodeId,
+          backendNodeId: 2 as Protocol.DOM.BackendNodeId,
+          nodeName: 'A',
+          attributes: new Map([['data-testid', 'nav-home']]),
+        },
+      ],
+      [
+        3 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 12 as Protocol.DOM.NodeId,
+          backendNodeId: 3 as Protocol.DOM.BackendNodeId,
+          nodeName: 'BUTTON',
+          attributes: new Map([['id', 'ignored-action']]),
+        },
+      ],
     ])
 
     let refCounter = 0
-    const createRefForNode = (options: { backendNodeId?: Protocol.DOM.BackendNodeId; role: string; name: string }): string => {
+    const createRefForNode = (options: {
+      backendNodeId?: Protocol.DOM.BackendNodeId
+      role: string
+      name: string
+    }): string => {
       refCounter += 1
       return `${options.role}-${options.name}-${refCounter}`
     }
@@ -317,31 +351,43 @@ describe('aria-snapshot tree filters', () => {
       ],
     }
 
-    const domByBackendId = new Map<Protocol.DOM.BackendNodeId, {
-      nodeId: Protocol.DOM.NodeId
-      parentId?: Protocol.DOM.NodeId
-      backendNodeId: Protocol.DOM.BackendNodeId
-      nodeName: string
-      attributes: Map<string, string>
-    }>([
-      [2 as Protocol.DOM.BackendNodeId, {
-        nodeId: 20 as Protocol.DOM.NodeId,
-        backendNodeId: 2 as Protocol.DOM.BackendNodeId,
-        nodeName: 'INPUT',
-        attributes: new Map([['data-testid', 'email-input']]),
-      }],
-      [3 as Protocol.DOM.BackendNodeId, {
-        nodeId: 21 as Protocol.DOM.NodeId,
-        backendNodeId: 3 as Protocol.DOM.BackendNodeId,
-        nodeName: 'BUTTON',
-        attributes: new Map([['id', 'save-primary']]),
-      }],
-      [4 as Protocol.DOM.BackendNodeId, {
-        nodeId: 22 as Protocol.DOM.NodeId,
-        backendNodeId: 4 as Protocol.DOM.BackendNodeId,
-        nodeName: 'BUTTON',
-        attributes: new Map([['id', 'save-secondary']]),
-      }],
+    const domByBackendId = new Map<
+      Protocol.DOM.BackendNodeId,
+      {
+        nodeId: Protocol.DOM.NodeId
+        parentId?: Protocol.DOM.NodeId
+        backendNodeId: Protocol.DOM.BackendNodeId
+        nodeName: string
+        attributes: Map<string, string>
+      }
+    >([
+      [
+        2 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 20 as Protocol.DOM.NodeId,
+          backendNodeId: 2 as Protocol.DOM.BackendNodeId,
+          nodeName: 'INPUT',
+          attributes: new Map([['data-testid', 'email-input']]),
+        },
+      ],
+      [
+        3 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 21 as Protocol.DOM.NodeId,
+          backendNodeId: 3 as Protocol.DOM.BackendNodeId,
+          nodeName: 'BUTTON',
+          attributes: new Map([['id', 'save-primary']]),
+        },
+      ],
+      [
+        4 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 22 as Protocol.DOM.NodeId,
+          backendNodeId: 4 as Protocol.DOM.BackendNodeId,
+          nodeName: 'BUTTON',
+          attributes: new Map([['id', 'save-secondary']]),
+        },
+      ],
     ])
 
     let refCounter = 0
@@ -432,13 +478,16 @@ describe('aria-snapshot tree filters', () => {
       ],
     }
 
-    const domByBackendId = new Map<Protocol.DOM.BackendNodeId, {
-      nodeId: Protocol.DOM.NodeId
-      parentId?: Protocol.DOM.NodeId
-      backendNodeId: Protocol.DOM.BackendNodeId
-      nodeName: string
-      attributes: Map<string, string>
-    }>()
+    const domByBackendId = new Map<
+      Protocol.DOM.BackendNodeId,
+      {
+        nodeId: Protocol.DOM.NodeId
+        parentId?: Protocol.DOM.NodeId
+        backendNodeId: Protocol.DOM.BackendNodeId
+        nodeName: string
+        attributes: Map<string, string>
+      }
+    >()
 
     const createRefForNode = (): string | null => {
       return null
@@ -491,25 +540,34 @@ describe('aria-snapshot tree filters', () => {
       ],
     }
 
-    const domByBackendId = new Map<Protocol.DOM.BackendNodeId, {
-      nodeId: Protocol.DOM.NodeId
-      parentId?: Protocol.DOM.NodeId
-      backendNodeId: Protocol.DOM.BackendNodeId
-      nodeName: string
-      attributes: Map<string, string>
-    }>([
-      [5 as Protocol.DOM.BackendNodeId, {
-        nodeId: 30 as Protocol.DOM.NodeId,
-        backendNodeId: 5 as Protocol.DOM.BackendNodeId,
-        nodeName: 'BUTTON',
-        attributes: new Map([['id', 'delete']]),
-      }],
-      [6 as Protocol.DOM.BackendNodeId, {
-        nodeId: 31 as Protocol.DOM.NodeId,
-        backendNodeId: 6 as Protocol.DOM.BackendNodeId,
-        nodeName: 'BUTTON',
-        attributes: new Map([['id', 'save']]),
-      }],
+    const domByBackendId = new Map<
+      Protocol.DOM.BackendNodeId,
+      {
+        nodeId: Protocol.DOM.NodeId
+        parentId?: Protocol.DOM.NodeId
+        backendNodeId: Protocol.DOM.BackendNodeId
+        nodeName: string
+        attributes: Map<string, string>
+      }
+    >([
+      [
+        5 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 30 as Protocol.DOM.NodeId,
+          backendNodeId: 5 as Protocol.DOM.BackendNodeId,
+          nodeName: 'BUTTON',
+          attributes: new Map([['id', 'delete']]),
+        },
+      ],
+      [
+        6 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 31 as Protocol.DOM.NodeId,
+          backendNodeId: 6 as Protocol.DOM.BackendNodeId,
+          nodeName: 'BUTTON',
+          attributes: new Map([['id', 'save']]),
+        },
+      ],
     ])
 
     let refCounter = 0

@@ -93,7 +93,6 @@ type ExtensionConnection = {
   pingInterval: ReturnType<typeof setInterval> | null
 }
 
-
 export type RelayServer = {
   close(): void
   on<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
@@ -129,7 +128,7 @@ export async function startPlayWriterCDPRelayServer({
 
   const getExtensionConnection = (
     extensionId?: string | null,
-    options: { allowFallback?: boolean } = {}
+    options: { allowFallback?: boolean } = {},
   ): ExtensionConnection | null => {
     if (extensionId) {
       const direct = extensionConnections.get(extensionId)
@@ -177,7 +176,7 @@ export async function startPlayWriterCDPRelayServer({
 
   const getPageTargetForFrameId = ({
     connection,
-    frameId
+    frameId,
   }: {
     connection: ExtensionConnection
     frameId: string
@@ -216,7 +215,7 @@ export async function startPlayWriterCDPRelayServer({
     sessionId,
     params,
     id,
-    source
+    source,
   }: {
     direction: 'to-playwright' | 'from-playwright' | 'from-extension'
     clientId?: string
@@ -232,7 +231,7 @@ export async function startPlayWriterCDPRelayServer({
       'Network.responseReceivedExtraInfo',
       'Network.dataReceived',
       'Network.requestWillBeSent',
-      'Network.loadingFinished'
+      'Network.loadingFinished',
     ]
 
     if (noisyEvents.includes(method)) {
@@ -287,9 +286,7 @@ export async function startPlayWriterCDPRelayServer({
     source?: 'extension' | 'server'
     extensionId?: string | null
   }) {
-    const messageToSend = source === 'server' && 'method' in message
-      ? { ...message, __serverGenerated: true }
-      : message
+    const messageToSend = source === 'server' && 'method' in message ? { ...message, __serverGenerated: true } : message
 
     logCdpJson({
       timestamp: new Date().toISOString(),
@@ -306,7 +303,7 @@ export async function startPlayWriterCDPRelayServer({
         method: message.method,
         sessionId: 'sessionId' in message ? message.sessionId : undefined,
         params: 'params' in message ? message.params : undefined,
-        source
+        source,
       })
     }
 
@@ -409,7 +406,7 @@ export async function startPlayWriterCDPRelayServer({
         reject: (error) => {
           clearTimeout(timeoutId)
           reject(error)
-        }
+        },
       })
     })
   }
@@ -429,7 +426,7 @@ export async function startPlayWriterCDPRelayServer({
           (params) => sendToExtension({ extensionId: connection.id, ...params }),
           () => extensionConnections.has(connection.id),
           logger,
-        )
+        ),
       )
     }
     return recordingRelays.get(connection.id) || null
@@ -451,7 +448,7 @@ export async function startPlayWriterCDPRelayServer({
 
     try {
       logger?.log(pc.blue('Auto-creating initial tab for Playwright client'))
-      const result = await sendToExtension({ extensionId, method: 'createInitialTab', timeout: 10000 }) as {
+      const result = (await sendToExtension({ extensionId, method: 'createInitialTab', timeout: 10000 })) as {
         success: boolean
         tabId: number
         sessionId: string
@@ -462,9 +459,13 @@ export async function startPlayWriterCDPRelayServer({
           sessionId: result.sessionId,
           targetId: result.targetInfo.targetId,
           targetInfo: result.targetInfo,
-          frameIds: new Set()
+          frameIds: new Set(),
         })
-        logger?.log(pc.blue(`Auto-created tab, now have ${connection.connectedTargets.size} targets, url: ${result.targetInfo.url}`))
+        logger?.log(
+          pc.blue(
+            `Auto-created tab, now have ${connection.connectedTargets.size} targets, url: ${result.targetInfo.url}`,
+          ),
+        )
       }
     } catch (e) {
       logger?.error('Failed to auto-create initial tab:', e)
@@ -493,7 +494,7 @@ export async function startPlayWriterCDPRelayServer({
           product: 'Chrome/Extension-Bridge',
           revision: '1.0.0',
           userAgent: 'CDP-Bridge-Server/1.0.0',
-          jsVersion: 'V8'
+          jsVersion: 'V8',
         } satisfies Protocol.Browser.GetVersionResponse
       }
 
@@ -516,7 +517,7 @@ export async function startPlayWriterCDPRelayServer({
         await sendToExtension({
           extensionId: extension?.id || extensionId,
           method: 'forwardCDPCommand',
-          params: { method, params, source }
+          params: { method, params, source },
         })
         return {}
       }
@@ -568,8 +569,8 @@ export async function startPlayWriterCDPRelayServer({
             .filter((t) => !isRestrictedTarget(t.targetInfo))
             .map((t) => ({
               ...t.targetInfo,
-              attached: true
-            }))
+              attached: true,
+            })),
         }
       }
 
@@ -577,7 +578,7 @@ export async function startPlayWriterCDPRelayServer({
         return await sendToExtension({
           extensionId: extension?.id || extensionId,
           method: 'forwardCDPCommand',
-          params: { method, params, source }
+          params: { method, params, source },
         })
       }
 
@@ -585,7 +586,7 @@ export async function startPlayWriterCDPRelayServer({
         return await sendToExtension({
           extensionId: extension?.id || extensionId,
           method: 'forwardCDPCommand',
-          params: { method, params, source }
+          params: { method, params, source },
         })
       }
 
@@ -594,7 +595,7 @@ export async function startPlayWriterCDPRelayServer({
         return await sendToExtension({
           extensionId: extension?.id || extensionId,
           method: 'ghost-browser',
-          params
+          params,
         })
       }
 
@@ -616,7 +617,11 @@ export async function startPlayWriterCDPRelayServer({
           }
           const timeout = setTimeout(() => {
             emitter.off('cdp:event', handler)
-            logger?.log(pc.yellow(`IMPORTANT: Runtime.enable timed out waiting for main frame executionContextCreated (sessionId: ${sessionId}). This may cause pages to not be visible immediately.`))
+            logger?.log(
+              pc.yellow(
+                `IMPORTANT: Runtime.enable timed out waiting for main frame executionContextCreated (sessionId: ${sessionId}). This may cause pages to not be visible immediately.`,
+              ),
+            )
             resolve()
           }, 3000)
           emitter.on('cdp:event', handler)
@@ -625,7 +630,7 @@ export async function startPlayWriterCDPRelayServer({
         const result = await sendToExtension({
           extensionId: extension?.id || extensionId,
           method: 'forwardCDPCommand',
-          params: { sessionId, method, params, source }
+          params: { sessionId, method, params, source },
         })
 
         await contextCreatedPromise
@@ -637,7 +642,7 @@ export async function startPlayWriterCDPRelayServer({
     return await sendToExtension({
       extensionId: extension?.id || extensionId,
       method: 'forwardCDPCommand',
-      params: { sessionId, method, params, source }
+      params: { sessionId, method, params, source },
     })
   }
 
@@ -645,19 +650,22 @@ export async function startPlayWriterCDPRelayServer({
   // CORS middleware for HTTP endpoints - only allows our specific extension IDs.
   // This prevents other extensions from reading responses via fetch/XHR.
   // WebSocket connections have their own separate origin validation.
-  app.use('*', cors({
-    origin: (origin) => {
-      if (!origin.startsWith('chrome-extension://')) {
-        return null
-      }
-      const extensionId = origin.replace('chrome-extension://', '')
-      if (!EXTENSION_IDS.includes(extensionId)) {
-        return null
-      }
-      return origin
-    },
-    allowMethods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
-  }))
+  app.use(
+    '*',
+    cors({
+      origin: (origin) => {
+        if (!origin.startsWith('chrome-extension://')) {
+          return null
+        }
+        const extensionId = origin.replace('chrome-extension://', '')
+        if (!EXTENSION_IDS.includes(extensionId)) {
+          return null
+        }
+        return origin
+      },
+      allowMethods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
+    }),
+  )
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
 
   const getCdpWsUrl = (c: { req: { header: (name: string) => string | undefined } }) => {
@@ -709,76 +717,76 @@ export async function startPlayWriterCDPRelayServer({
   app
     .on(['GET', 'PUT'], '/json/version', (c) => {
       return c.json({
-        'Browser': `Playwriter/${VERSION}`,
+        Browser: `Playwriter/${VERSION}`,
         'Protocol-Version': '1.3',
-        'webSocketDebuggerUrl': getCdpWsUrl(c)
+        webSocketDebuggerUrl: getCdpWsUrl(c),
       })
     })
     .on(['GET', 'PUT'], '/json/version/', (c) => {
       return c.json({
-        'Browser': `Playwriter/${VERSION}`,
+        Browser: `Playwriter/${VERSION}`,
         'Protocol-Version': '1.3',
-        'webSocketDebuggerUrl': getCdpWsUrl(c)
+        webSocketDebuggerUrl: getCdpWsUrl(c),
       })
     })
     .on(['GET', 'PUT'], '/json/list', (c) => {
       const wsUrl = getCdpWsUrl(c)
       const defaultTargets = getExtensionConnection(null, { allowFallback: true })?.connectedTargets || new Map()
       return c.json(
-        Array.from(defaultTargets.values()).map(t => ({
+        Array.from(defaultTargets.values()).map((t) => ({
           id: t.targetId,
           type: t.targetInfo.type,
           title: t.targetInfo.title,
           description: t.targetInfo.title,
           url: t.targetInfo.url,
           webSocketDebuggerUrl: wsUrl,
-          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
-        }))
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`,
+        })),
       )
     })
     .on(['GET', 'PUT'], '/json/list/', (c) => {
       const wsUrl = getCdpWsUrl(c)
       const defaultTargets = getExtensionConnection(null, { allowFallback: true })?.connectedTargets || new Map()
       return c.json(
-        Array.from(defaultTargets.values()).map(t => ({
+        Array.from(defaultTargets.values()).map((t) => ({
           id: t.targetId,
           type: t.targetInfo.type,
           title: t.targetInfo.title,
           description: t.targetInfo.title,
           url: t.targetInfo.url,
           webSocketDebuggerUrl: wsUrl,
-          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
-        }))
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`,
+        })),
       )
     })
     .on(['GET', 'PUT'], '/json', (c) => {
       const wsUrl = getCdpWsUrl(c)
       const defaultTargets = getExtensionConnection(null, { allowFallback: true })?.connectedTargets || new Map()
       return c.json(
-        Array.from(defaultTargets.values()).map(t => ({
+        Array.from(defaultTargets.values()).map((t) => ({
           id: t.targetId,
           type: t.targetInfo.type,
           title: t.targetInfo.title,
           description: t.targetInfo.title,
           url: t.targetInfo.url,
           webSocketDebuggerUrl: wsUrl,
-          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
-        }))
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`,
+        })),
       )
     })
     .on(['GET', 'PUT'], '/json/', (c) => {
       const wsUrl = getCdpWsUrl(c)
       const defaultTargets = getExtensionConnection(null, { allowFallback: true })?.connectedTargets || new Map()
       return c.json(
-        Array.from(defaultTargets.values()).map(t => ({
+        Array.from(defaultTargets.values()).map((t) => ({
           id: t.targetId,
           type: t.targetInfo.type,
           title: t.targetInfo.title,
           description: t.targetInfo.title,
           url: t.targetInfo.url,
           webSocketDebuggerUrl: wsUrl,
-          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`
-        }))
+          devtoolsFrontendUrl: `/devtools/inspector.html?ws=${wsUrl.replace('ws://', '')}`,
+        })),
       )
     })
 
@@ -798,216 +806,250 @@ export async function startPlayWriterCDPRelayServer({
   // Browsers always send Origin header for WebSocket connections, but Node.js clients don't.
   // We only allow our specific extension IDs to prevent malicious websites or extensions
   // from connecting to the local WebSocket server.
-  app.get('/cdp/:clientId?', (c, next) => {
-    const origin = c.req.header('origin')
+  app.get(
+    '/cdp/:clientId?',
+    (c, next) => {
+      const origin = c.req.header('origin')
 
-    // Validate Origin header if present (Node.js clients don't send it)
-    if (origin) {
-      if (origin.startsWith('chrome-extension://')) {
-        const extensionId = origin.replace('chrome-extension://', '')
-        if (!EXTENSION_IDS.includes(extensionId)) {
-          logger?.log(pc.red(`Rejecting /cdp WebSocket from unknown extension: ${extensionId}`))
+      // Validate Origin header if present (Node.js clients don't send it)
+      if (origin) {
+        if (origin.startsWith('chrome-extension://')) {
+          const extensionId = origin.replace('chrome-extension://', '')
+          if (!EXTENSION_IDS.includes(extensionId)) {
+            logger?.log(pc.red(`Rejecting /cdp WebSocket from unknown extension: ${extensionId}`))
+            return c.text('Forbidden', 403)
+          }
+        } else {
+          logger?.log(pc.red(`Rejecting /cdp WebSocket from origin: ${origin}`))
           return c.text('Forbidden', 403)
         }
-      } else {
-        logger?.log(pc.red(`Rejecting /cdp WebSocket from origin: ${origin}`))
-        return c.text('Forbidden', 403)
       }
-    }
 
-    if (token) {
+      if (token) {
+        const url = new URL(c.req.url, 'http://localhost')
+        const providedToken = url.searchParams.get('token')
+        if (providedToken !== token) {
+          return c.text('Unauthorized', 401)
+        }
+      }
+      return next()
+    },
+    upgradeWebSocket((c) => {
+      const clientId = c.req.param('clientId') || 'default'
       const url = new URL(c.req.url, 'http://localhost')
-      const providedToken = url.searchParams.get('token')
-      if (providedToken !== token) {
-        return c.text('Unauthorized', 401)
-      }
-    }
-    return next()
-  }, upgradeWebSocket((c) => {
-    const clientId = c.req.param('clientId') || 'default'
-    const url = new URL(c.req.url, 'http://localhost')
-    const requestedExtensionId = url.searchParams.get('extensionId')
-    const resolvedExtension = getExtensionConnection(requestedExtensionId)
-    const allowDefault = !requestedExtensionId && extensionConnections.size === 1
-    const defaultExtension = allowDefault ? getExtensionConnection(null, { allowFallback: true }) : null
-    const clientExtensionId = resolvedExtension?.id || defaultExtension?.id || null
+      const requestedExtensionId = url.searchParams.get('extensionId')
+      const resolvedExtension = getExtensionConnection(requestedExtensionId)
+      const allowDefault = !requestedExtensionId && extensionConnections.size === 1
+      const defaultExtension = allowDefault ? getExtensionConnection(null, { allowFallback: true }) : null
+      const clientExtensionId = resolvedExtension?.id || defaultExtension?.id || null
 
-    return {
-      async onOpen(_event, ws) {
-        if (playwrightClients.has(clientId)) {
-          logger?.log(pc.yellow(`Rejecting duplicate Playwright clientId: ${clientId}`))
-          ws.close(4004, 'Duplicate Playwright clientId')
-          return
-        }
+      return {
+        async onOpen(_event, ws) {
+          if (playwrightClients.has(clientId)) {
+            logger?.log(pc.yellow(`Rejecting duplicate Playwright clientId: ${clientId}`))
+            ws.close(4004, 'Duplicate Playwright clientId')
+            return
+          }
 
-        if (!clientExtensionId) {
-          const reason = requestedExtensionId
-            ? `Unknown extensionId: ${requestedExtensionId}`
-            : 'Multiple extensions connected. Specify extensionId.'
-          logger?.log(pc.yellow(`Rejecting Playwright client ${clientId}: ${reason}`))
-          ws.close(4003, reason)
-          return
-        }
+          if (!clientExtensionId) {
+            const reason = requestedExtensionId
+              ? `Unknown extensionId: ${requestedExtensionId}`
+              : 'Multiple extensions connected. Specify extensionId.'
+            logger?.log(pc.yellow(`Rejecting Playwright client ${clientId}: ${reason}`))
+            ws.close(4003, reason)
+            return
+          }
 
-        // Add client first so it can receive Target.attachedToTarget events
-        playwrightClients.set(clientId, { id: clientId, ws, extensionId: clientExtensionId })
-        const extensionConnection = getExtensionConnection(clientExtensionId)
-        const targetCount = extensionConnection?.connectedTargets.size || 0
-        logger?.log(pc.green(`Playwright client connected: ${clientId} (${playwrightClients.size} total) (extension? ${!!extensionConnection}) (${targetCount} pages)`))
-      },
+          // Add client first so it can receive Target.attachedToTarget events
+          playwrightClients.set(clientId, { id: clientId, ws, extensionId: clientExtensionId })
+          const extensionConnection = getExtensionConnection(clientExtensionId)
+          const targetCount = extensionConnection?.connectedTargets.size || 0
+          logger?.log(
+            pc.green(
+              `Playwright client connected: ${clientId} (${playwrightClients.size} total) (extension? ${!!extensionConnection}) (${targetCount} pages)`,
+            ),
+          )
+        },
 
-      async onMessage(event, ws) {
-        let message: CDPCommand
+        async onMessage(event, ws) {
+          let message: CDPCommand
 
-        try {
-          message = JSON.parse(event.data.toString())
-        } catch {
-          return
-        }
+          try {
+            message = JSON.parse(event.data.toString())
+          } catch {
+            return
+          }
 
-        const { id, sessionId, method, params, source } = message
+          const { id, sessionId, method, params, source } = message
 
-        logCdpJson({
-          timestamp: new Date().toISOString(),
-          direction: 'from-playwright',
-          clientId,
-          message,
-        })
+          logCdpJson({
+            timestamp: new Date().toISOString(),
+            direction: 'from-playwright',
+            clientId,
+            message,
+          })
 
-        logCdpMessage({
-          direction: 'from-playwright',
-          clientId,
-          method,
-          sessionId,
-          id
-        })
+          logCdpMessage({
+            direction: 'from-playwright',
+            clientId,
+            method,
+            sessionId,
+            id,
+          })
 
-        emitter.emit('cdp:command', { clientId, command: message })
+          emitter.emit('cdp:command', { clientId, command: message })
 
-        const extensionConnection = getExtensionConnection(clientExtensionId)
-        if (!extensionConnection) {
-          sendToPlaywright({
-            message: {
+          const extensionConnection = getExtensionConnection(clientExtensionId)
+          if (!extensionConnection) {
+            sendToPlaywright({
+              message: {
+                id,
+                sessionId,
+                error: { message: 'Extension not connected' },
+              },
+              clientId,
+            })
+            return
+          }
+
+          try {
+            const result: any = await routeCdpCommand({
+              extensionId: extensionConnection.id,
+              method,
+              params,
+              sessionId,
+              source,
+            })
+
+            if (method === 'Target.setAutoAttach' && !sessionId) {
+              for (const target of extensionConnection.connectedTargets.values()) {
+                // Skip restricted targets (extensions, chrome:// URLs, non-page types)
+                if (isRestrictedTarget(target.targetInfo)) {
+                  continue
+                }
+                const attachedPayload = {
+                  method: 'Target.attachedToTarget',
+                  params: {
+                    sessionId: target.sessionId,
+                    targetInfo: {
+                      ...target.targetInfo,
+                      attached: true,
+                    },
+                    waitingForDebugger: false,
+                  },
+                } satisfies CDPEventFor<'Target.attachedToTarget'>
+                if (!target.targetInfo.url) {
+                  logger?.error(
+                    pc.red('[Server] WARNING: Target.attachedToTarget sent with empty URL!'),
+                    JSON.stringify(attachedPayload),
+                  )
+                }
+                logger?.log(
+                  pc.magenta('[Server] Target.attachedToTarget full payload:'),
+                  JSON.stringify(attachedPayload),
+                )
+                sendToPlaywright({
+                  message: attachedPayload,
+                  clientId,
+                  source: 'server',
+                })
+              }
+            }
+
+            if (method === 'Target.setDiscoverTargets' && (params as any)?.discover) {
+              for (const target of extensionConnection.connectedTargets.values()) {
+                // Skip restricted targets (extensions, chrome:// URLs, non-page types)
+                if (isRestrictedTarget(target.targetInfo)) {
+                  continue
+                }
+                const targetCreatedPayload = {
+                  method: 'Target.targetCreated',
+                  params: {
+                    targetInfo: {
+                      ...target.targetInfo,
+                      attached: true,
+                    },
+                  },
+                } satisfies CDPEventFor<'Target.targetCreated'>
+                if (!target.targetInfo.url) {
+                  logger?.error(
+                    pc.red('[Server] WARNING: Target.targetCreated sent with empty URL!'),
+                    JSON.stringify(targetCreatedPayload),
+                  )
+                }
+                logger?.log(
+                  pc.magenta('[Server] Target.targetCreated full payload:'),
+                  JSON.stringify(targetCreatedPayload),
+                )
+                sendToPlaywright({
+                  message: targetCreatedPayload,
+                  clientId,
+                  source: 'server',
+                })
+              }
+            }
+
+            if (method === 'Target.attachToTarget' && result?.sessionId) {
+              const targetId = params?.targetId
+              const target = Array.from(extensionConnection.connectedTargets.values()).find(
+                (t) => t.targetId === targetId,
+              )
+              if (target) {
+                const attachedPayload = {
+                  method: 'Target.attachedToTarget',
+                  params: {
+                    sessionId: result.sessionId,
+                    targetInfo: {
+                      ...target.targetInfo,
+                      attached: true,
+                    },
+                    waitingForDebugger: false,
+                  },
+                } satisfies CDPEventFor<'Target.attachedToTarget'>
+                if (!target.targetInfo.url) {
+                  logger?.error(
+                    pc.red('[Server] WARNING: Target.attachedToTarget (from attachToTarget) sent with empty URL!'),
+                    JSON.stringify(attachedPayload),
+                  )
+                }
+                logger?.log(
+                  pc.magenta('[Server] Target.attachedToTarget (from attachToTarget) payload:'),
+                  JSON.stringify(attachedPayload),
+                )
+                sendToPlaywright({
+                  message: attachedPayload,
+                  clientId,
+                  source: 'server',
+                })
+              }
+            }
+
+            const response: CDPResponseBase = { id, sessionId, result }
+            sendToPlaywright({ message: response, clientId })
+            emitter.emit('cdp:response', { clientId, response, command: message })
+          } catch (e) {
+            logger?.error('Error handling CDP command:', method, params, e)
+            const errorResponse: CDPResponseBase = {
               id,
               sessionId,
-              error: { message: 'Extension not connected' }
-            },
-            clientId
-          })
-          return
-        }
-
-        try {
-          const result: any = await routeCdpCommand({ extensionId: extensionConnection.id, method, params, sessionId, source })
-
-          if (method === 'Target.setAutoAttach' && !sessionId) {
-            for (const target of extensionConnection.connectedTargets.values()) {
-              // Skip restricted targets (extensions, chrome:// URLs, non-page types)
-              if (isRestrictedTarget(target.targetInfo)) {
-                continue
-              }
-              const attachedPayload = {
-                method: 'Target.attachedToTarget',
-                params: {
-                  sessionId: target.sessionId,
-                  targetInfo: {
-                    ...target.targetInfo,
-                    attached: true
-                  },
-                  waitingForDebugger: false
-                }
-              } satisfies CDPEventFor<'Target.attachedToTarget'>
-              if (!target.targetInfo.url) {
-                logger?.error(pc.red('[Server] WARNING: Target.attachedToTarget sent with empty URL!'), JSON.stringify(attachedPayload))
-              }
-              logger?.log(pc.magenta('[Server] Target.attachedToTarget full payload:'), JSON.stringify(attachedPayload))
-              sendToPlaywright({
-                message: attachedPayload,
-                clientId,
-                source: 'server'
-              })
+              error: { message: (e as Error).message },
             }
+            sendToPlaywright({ message: errorResponse, clientId })
+            emitter.emit('cdp:response', { clientId, response: errorResponse, command: message })
           }
+        },
 
-          if (method === 'Target.setDiscoverTargets' && (params as any)?.discover) {
-            for (const target of extensionConnection.connectedTargets.values()) {
-              // Skip restricted targets (extensions, chrome:// URLs, non-page types)
-              if (isRestrictedTarget(target.targetInfo)) {
-                continue
-              }
-              const targetCreatedPayload = {
-                method: 'Target.targetCreated',
-                params: {
-                  targetInfo: {
-                    ...target.targetInfo,
-                    attached: true
-                  }
-                }
-              } satisfies CDPEventFor<'Target.targetCreated'>
-              if (!target.targetInfo.url) {
-                logger?.error(pc.red('[Server] WARNING: Target.targetCreated sent with empty URL!'), JSON.stringify(targetCreatedPayload))
-              }
-              logger?.log(pc.magenta('[Server] Target.targetCreated full payload:'), JSON.stringify(targetCreatedPayload))
-              sendToPlaywright({
-                message: targetCreatedPayload,
-                clientId,
-                source: 'server'
-              })
-            }
-          }
+        onClose() {
+          playwrightClients.delete(clientId)
+          logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${playwrightClients.size} remaining)`))
+        },
 
-          if (method === 'Target.attachToTarget' && result?.sessionId) {
-            const targetId = params?.targetId
-            const target = Array.from(extensionConnection.connectedTargets.values()).find(t => t.targetId === targetId)
-            if (target) {
-              const attachedPayload = {
-                method: 'Target.attachedToTarget',
-                params: {
-                  sessionId: result.sessionId,
-                  targetInfo: {
-                    ...target.targetInfo,
-                    attached: true
-                  },
-                  waitingForDebugger: false
-                }
-              } satisfies CDPEventFor<'Target.attachedToTarget'>
-              if (!target.targetInfo.url) {
-                logger?.error(pc.red('[Server] WARNING: Target.attachedToTarget (from attachToTarget) sent with empty URL!'), JSON.stringify(attachedPayload))
-              }
-              logger?.log(pc.magenta('[Server] Target.attachedToTarget (from attachToTarget) payload:'), JSON.stringify(attachedPayload))
-              sendToPlaywright({
-                message: attachedPayload,
-                clientId,
-                source: 'server'
-              })
-            }
-          }
-
-          const response: CDPResponseBase = { id, sessionId, result }
-          sendToPlaywright({ message: response, clientId })
-          emitter.emit('cdp:response', { clientId, response, command: message })
-        } catch (e) {
-          logger?.error('Error handling CDP command:', method, params, e)
-          const errorResponse: CDPResponseBase = {
-            id,
-            sessionId,
-            error: { message: (e as Error).message }
-          }
-          sendToPlaywright({ message: errorResponse, clientId })
-          emitter.emit('cdp:response', { clientId, response: errorResponse, command: message })
-        }
-      },
-
-      onClose() {
-        playwrightClients.delete(clientId)
-        logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${playwrightClients.size} remaining)`))
-      },
-
-      onError(event) {
-        logger?.error(`Playwright WebSocket error [${clientId}]:`, event)
+        onError(event) {
+          logger?.error(`Playwright WebSocket error [${clientId}]:`, event)
+        },
       }
-    }
-  }))
+    }),
+  )
 
   const getExtensionInfoFromRequest = (c: { req: { query: (name: string) => string | undefined } }): ExtensionInfo => {
     const browser = c.req.query('browser')
@@ -1022,402 +1064,425 @@ export async function startPlayWriterCDPRelayServer({
     }
   }
 
-  app.get('/extension', (c, next) => {
-    // 1. Host Validation: The extension endpoint must ONLY be accessed from localhost.
-    // This prevents attackers on the network from hijacking the browser session
-    // even if the server is exposed via 0.0.0.0.
-    const info = getConnInfo(c)
-    const remoteAddress = info.remote.address
-    const isLocalhost = remoteAddress === '127.0.0.1' || remoteAddress === '::1'
+  app.get(
+    '/extension',
+    (c, next) => {
+      // 1. Host Validation: The extension endpoint must ONLY be accessed from localhost.
+      // This prevents attackers on the network from hijacking the browser session
+      // even if the server is exposed via 0.0.0.0.
+      const info = getConnInfo(c)
+      const remoteAddress = info.remote.address
+      const isLocalhost = remoteAddress === '127.0.0.1' || remoteAddress === '::1'
 
-    if (!isLocalhost) {
-      logger?.log(pc.red(`Rejecting /extension WebSocket from remote IP: ${remoteAddress}`))
-      return c.text('Forbidden - Extension must be local', 403)
-    }
+      if (!isLocalhost) {
+        logger?.log(pc.red(`Rejecting /extension WebSocket from remote IP: ${remoteAddress}`))
+        return c.text('Forbidden - Extension must be local', 403)
+      }
 
-    // 2. Origin Validation: Prevent browser-based attacks (CSRF).
-    // Browsers cannot spoof the Origin header, so this ensures the connection
-    // is coming from our specific Chrome Extension, not a malicious website.
-    const origin = c.req.header('origin')
-    if (!origin || !origin.startsWith('chrome-extension://')) {
-      logger?.log(pc.red(`Rejecting /extension WebSocket: origin must be chrome-extension://, got: ${origin || 'none'}`))
-      return c.text('Forbidden', 403)
-    }
+      // 2. Origin Validation: Prevent browser-based attacks (CSRF).
+      // Browsers cannot spoof the Origin header, so this ensures the connection
+      // is coming from our specific Chrome Extension, not a malicious website.
+      const origin = c.req.header('origin')
+      if (!origin || !origin.startsWith('chrome-extension://')) {
+        logger?.log(
+          pc.red(`Rejecting /extension WebSocket: origin must be chrome-extension://, got: ${origin || 'none'}`),
+        )
+        return c.text('Forbidden', 403)
+      }
 
-    const extensionId = origin.replace('chrome-extension://', '')
-    if (!EXTENSION_IDS.includes(extensionId)) {
-      logger?.log(pc.red(`Rejecting /extension WebSocket from unknown extension: ${extensionId}`))
-      return c.text('Forbidden', 403)
-    }
+      const extensionId = origin.replace('chrome-extension://', '')
+      if (!EXTENSION_IDS.includes(extensionId)) {
+        logger?.log(pc.red(`Rejecting /extension WebSocket from unknown extension: ${extensionId}`))
+        return c.text('Forbidden', 403)
+      }
 
-    return next()
-  }, upgradeWebSocket((c) => {
-    const incomingExtensionInfo = getExtensionInfoFromRequest(c)
-    const connectionId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-    return {
-      onOpen(_event, ws) {
-        const stableKey = buildStableExtensionKey(incomingExtensionInfo, connectionId)
-        const existingId = extensionKeyIndex.get(stableKey)
-        if (existingId && existingId !== connectionId) {
-          logger?.log(pc.yellow(`Replacing extension connection for ${stableKey} (${existingId} -> ${connectionId})`))
-          const existingConnection = extensionConnections.get(existingId)
-          if (existingConnection) {
-            existingConnection.ws.close(4001, 'Extension Replaced')
+      return next()
+    },
+    upgradeWebSocket((c) => {
+      const incomingExtensionInfo = getExtensionInfoFromRequest(c)
+      const connectionId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      return {
+        onOpen(_event, ws) {
+          const stableKey = buildStableExtensionKey(incomingExtensionInfo, connectionId)
+          const existingId = extensionKeyIndex.get(stableKey)
+          if (existingId && existingId !== connectionId) {
+            logger?.log(pc.yellow(`Replacing extension connection for ${stableKey} (${existingId} -> ${connectionId})`))
+            const existingConnection = extensionConnections.get(existingId)
+            if (existingConnection) {
+              existingConnection.ws.close(4001, 'Extension Replaced')
+            }
           }
-        }
 
-        const connection: ExtensionConnection = {
-          id: connectionId,
-          ws,
-          info: incomingExtensionInfo,
-          stableKey,
-          connectedTargets: new Map(),
-          pendingRequests: new Map(),
-          messageId: 0,
-          pingInterval: null,
-        }
-        extensionConnections.set(connectionId, connection)
-        extensionKeyIndex.set(stableKey, connectionId)
-        startExtensionPing(connectionId)
-        logger?.log(`Extension connected (${connectionId})`)
-      },
-
-      async onMessage(event, ws) {
-        const connection = extensionConnections.get(connectionId)
-        if (!connection) {
-          ws.close(1000, 'Extension not registered')
-          return
-        }
-        // Handle binary data (recording chunks)
-        if (event.data instanceof ArrayBuffer || Buffer.isBuffer(event.data)) {
-          const buffer = Buffer.isBuffer(event.data) ? event.data : Buffer.from(event.data)
-          const relay = getRecordingRelay(connectionId)
-          if (relay) {
-            relay.handleBinaryData(buffer)
+          const connection: ExtensionConnection = {
+            id: connectionId,
+            ws,
+            info: incomingExtensionInfo,
+            stableKey,
+            connectedTargets: new Map(),
+            pendingRequests: new Map(),
+            messageId: 0,
+            pingInterval: null,
           }
-          return
-        }
+          extensionConnections.set(connectionId, connection)
+          extensionKeyIndex.set(stableKey, connectionId)
+          startExtensionPing(connectionId)
+          logger?.log(`Extension connected (${connectionId})`)
+        },
 
-        let message: ExtensionMessage
-
-        try {
-          message = JSON.parse(event.data.toString())
-        } catch {
-          ws.close(1000, 'Invalid JSON')
-          return
-        }
-
-        if (message.id !== undefined) {
-          const pending = connection.pendingRequests.get(message.id)
-          if (!pending) {
-            logger?.log('Unexpected response with id:', message.id)
+        async onMessage(event, ws) {
+          const connection = extensionConnections.get(connectionId)
+          if (!connection) {
+            ws.close(1000, 'Extension not registered')
+            return
+          }
+          // Handle binary data (recording chunks)
+          if (event.data instanceof ArrayBuffer || Buffer.isBuffer(event.data)) {
+            const buffer = Buffer.isBuffer(event.data) ? event.data : Buffer.from(event.data)
+            const relay = getRecordingRelay(connectionId)
+            if (relay) {
+              relay.handleBinaryData(buffer)
+            }
             return
           }
 
-          connection.pendingRequests.delete(message.id)
+          let message: ExtensionMessage
 
-          if (message.error) {
-            pending.reject(new Error(message.error))
-          } else {
-            pending.resolve(message.result)
-          }
-        } else if (message.method === 'pong') {
-          // Keep-alive response, nothing to do
-        } else if (message.method === 'log') {
-          const { level, args } = message.params
-          const logFn = (logger as Record<string, unknown>)?.[level] as ((...args: unknown[]) => void) | undefined
-          const logFunc = logFn || logger?.log
-          const prefix = pc.yellow(`[Extension] [${level.toUpperCase()}]`)
-          logFunc?.(prefix, ...args)
-        } else if (message.method === 'recordingData') {
-          const relay = getRecordingRelay(connectionId)
-          if (relay) {
-            relay.handleRecordingData(message as RecordingDataMessage)
-          }
-        } else if (message.method === 'recordingCancelled') {
-          const relay = getRecordingRelay(connectionId)
-          if (relay) {
-            relay.handleRecordingCancelled(message as RecordingCancelledMessage)
-          }
-        } else {
-          const extensionEvent = message as ExtensionEventMessage
-
-          if (extensionEvent.method !== 'forwardCDPEvent') {
+          try {
+            message = JSON.parse(event.data.toString())
+          } catch {
+            ws.close(1000, 'Invalid JSON')
             return
           }
 
-          const { method, params, sessionId } = extensionEvent.params
-
-           logCdpJson({
-             timestamp: new Date().toISOString(),
-             direction: 'from-extension',
-             message: { method, params, sessionId },
-           })
-
-          logCdpMessage({
-            direction: 'from-extension',
-            method,
-            sessionId,
-            params
-          })
-
-          const cdpEvent: CDPEventBase = { method, sessionId, params }
-          emitter.emit('cdp:event', { event: cdpEvent, sessionId })
-
-          if (method === 'Target.attachedToTarget') {
-            const targetParams = params as Protocol.Target.AttachedToTargetEvent
-            const incomingSessionId = sessionId
-            const iframeParentFrameId = targetParams.targetInfo.parentFrameId
-            const iframeOwnerSessionId = targetParams.targetInfo.type === 'iframe' && iframeParentFrameId
-              ? getPageTargetForFrameId({ connection, frameId: iframeParentFrameId })?.sessionId
-              : undefined
-
-            // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
-            if (isRestrictedTarget(targetParams.targetInfo)) {
-              if (targetParams.waitingForDebugger && targetParams.sessionId) {
-                void sendToExtension({
-                  extensionId: connectionId,
-                  method: 'forwardCDPCommand',
-                  params: {
-                    sessionId: targetParams.sessionId,
-                    method: 'Runtime.runIfWaitingForDebugger',
-                    params: {},
-                    source: 'server',
-                  },
-                }).catch((error) => {
-                  const message = error instanceof Error ? error.message : String(error)
-                  logger?.log(pc.yellow('[Server] Failed to resume restricted target:'), message)
-                })
-              }
-              logger?.log(pc.gray(`[Server] Ignoring restricted target: ${targetParams.targetInfo.type} (${targetParams.targetInfo.url})`))
+          if (message.id !== undefined) {
+            const pending = connection.pendingRequests.get(message.id)
+            if (!pending) {
+              logger?.log('Unexpected response with id:', message.id)
               return
             }
 
-            if (!targetParams.targetInfo.url) {
-              logger?.error(pc.red('[Extension] WARNING: Target.attachedToTarget received with empty URL!'), JSON.stringify({ method, params: targetParams, sessionId }))
+            connection.pendingRequests.delete(message.id)
+
+            if (message.error) {
+              pending.reject(new Error(message.error))
+            } else {
+              pending.resolve(message.result)
             }
-            logger?.log(pc.yellow('[Extension] Target.attachedToTarget full payload:'), JSON.stringify({ method, params: targetParams, sessionId }))
+          } else if (message.method === 'pong') {
+            // Keep-alive response, nothing to do
+          } else if (message.method === 'log') {
+            const { level, args } = message.params
+            const logFn = (logger as Record<string, unknown>)?.[level] as ((...args: unknown[]) => void) | undefined
+            const logFunc = logFn || logger?.log
+            const prefix = pc.yellow(`[Extension] [${level.toUpperCase()}]`)
+            logFunc?.(prefix, ...args)
+          } else if (message.method === 'recordingData') {
+            const relay = getRecordingRelay(connectionId)
+            if (relay) {
+              relay.handleRecordingData(message as RecordingDataMessage)
+            }
+          } else if (message.method === 'recordingCancelled') {
+            const relay = getRecordingRelay(connectionId)
+            if (relay) {
+              relay.handleRecordingCancelled(message as RecordingCancelledMessage)
+            }
+          } else {
+            const extensionEvent = message as ExtensionEventMessage
 
-            // Check if we already sent this target to clients (e.g., from Target.setAutoAttach response)
-            const alreadyConnected = connection.connectedTargets.has(targetParams.sessionId)
-            const existingTarget = connection.connectedTargets.get(targetParams.sessionId)
+            if (extensionEvent.method !== 'forwardCDPEvent') {
+              return
+            }
 
-            // Always update our local state with latest target info
-            connection.connectedTargets.set(targetParams.sessionId, {
-              sessionId: targetParams.sessionId,
-              targetId: targetParams.targetInfo.targetId,
-              targetInfo: targetParams.targetInfo,
-              frameIds: existingTarget?.frameIds ?? new Set()
+            const { method, params, sessionId } = extensionEvent.params
+
+            logCdpJson({
+              timestamp: new Date().toISOString(),
+              direction: 'from-extension',
+              message: { method, params, sessionId },
             })
 
-            // Only forward to Playwright if this is a new target to avoid duplicates
-            if (!alreadyConnected) {
+            logCdpMessage({
+              direction: 'from-extension',
+              method,
+              sessionId,
+              params,
+            })
+
+            const cdpEvent: CDPEventBase = { method, sessionId, params }
+            emitter.emit('cdp:event', { event: cdpEvent, sessionId })
+
+            if (method === 'Target.attachedToTarget') {
+              const targetParams = params as Protocol.Target.AttachedToTargetEvent
+              const incomingSessionId = sessionId
+              const iframeParentFrameId = targetParams.targetInfo.parentFrameId
+              const iframeOwnerSessionId =
+                targetParams.targetInfo.type === 'iframe' && iframeParentFrameId
+                  ? getPageTargetForFrameId({ connection, frameId: iframeParentFrameId })?.sessionId
+                  : undefined
+
+              // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
+              if (isRestrictedTarget(targetParams.targetInfo)) {
+                if (targetParams.waitingForDebugger && targetParams.sessionId) {
+                  void sendToExtension({
+                    extensionId: connectionId,
+                    method: 'forwardCDPCommand',
+                    params: {
+                      sessionId: targetParams.sessionId,
+                      method: 'Runtime.runIfWaitingForDebugger',
+                      params: {},
+                      source: 'server',
+                    },
+                  }).catch((error) => {
+                    const message = error instanceof Error ? error.message : String(error)
+                    logger?.log(pc.yellow('[Server] Failed to resume restricted target:'), message)
+                  })
+                }
+                logger?.log(
+                  pc.gray(
+                    `[Server] Ignoring restricted target: ${targetParams.targetInfo.type} (${targetParams.targetInfo.url})`,
+                  ),
+                )
+                return
+              }
+
+              if (!targetParams.targetInfo.url) {
+                logger?.error(
+                  pc.red('[Extension] WARNING: Target.attachedToTarget received with empty URL!'),
+                  JSON.stringify({ method, params: targetParams, sessionId }),
+                )
+              }
+              logger?.log(
+                pc.yellow('[Extension] Target.attachedToTarget full payload:'),
+                JSON.stringify({ method, params: targetParams, sessionId }),
+              )
+
+              // Check if we already sent this target to clients (e.g., from Target.setAutoAttach response)
+              const alreadyConnected = connection.connectedTargets.has(targetParams.sessionId)
+              const existingTarget = connection.connectedTargets.get(targetParams.sessionId)
+
+              // Always update our local state with latest target info
+              connection.connectedTargets.set(targetParams.sessionId, {
+                sessionId: targetParams.sessionId,
+                targetId: targetParams.targetInfo.targetId,
+                targetInfo: targetParams.targetInfo,
+                frameIds: existingTarget?.frameIds ?? new Set(),
+              })
+
+              // Only forward to Playwright if this is a new target to avoid duplicates
+              if (!alreadyConnected) {
+                sendToPlaywright({
+                  message: {
+                    // Iframe targets must be routed to the parent page sessionId so Playwright attaches them under the right page.
+                    // - iframeOwnerSessionId: derived parent session via parentFrameId -> page sessionId (frameId tracking).
+                    // - incomingSessionId: extension event sessionId for the parent tab.
+                    // The frameId mapping is racy: Target.attachedToTarget can arrive before Page.frameAttached/Page.frameNavigated populate frameIds.
+                    // When iframeOwnerSessionId is missing we must fall back to incomingSessionId, otherwise Playwright receives the attach on the root
+                    // session, detaches it, and the iframe stays paused (waitingForDebugger) which can hang navigations.
+                    sessionId: iframeOwnerSessionId ?? incomingSessionId,
+                    method: 'Target.attachedToTarget',
+                    params: targetParams,
+                  } as CDPEventBase,
+                  source: 'extension',
+                  extensionId: connectionId,
+                })
+              }
+            } else if (method === 'Target.detachedFromTarget') {
+              const detachParams = params as Protocol.Target.DetachedFromTargetEvent
+              connection.connectedTargets.delete(detachParams.sessionId)
+
               sendToPlaywright({
                 message: {
-                  // Iframe targets must be routed to the parent page sessionId so Playwright attaches them under the right page.
-                  // - iframeOwnerSessionId: derived parent session via parentFrameId -> page sessionId (frameId tracking).
-                  // - incomingSessionId: extension event sessionId for the parent tab.
-                  // The frameId mapping is racy: Target.attachedToTarget can arrive before Page.frameAttached/Page.frameNavigated populate frameIds.
-                  // When iframeOwnerSessionId is missing we must fall back to incomingSessionId, otherwise Playwright receives the attach on the root
-                  // session, detaches it, and the iframe stays paused (waitingForDebugger) which can hang navigations.
-                  sessionId: iframeOwnerSessionId ?? incomingSessionId,
-                  method: 'Target.attachedToTarget',
-                  params: targetParams
+                  method: 'Target.detachedFromTarget',
+                  params: detachParams,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else if (method === 'Target.targetCrashed') {
+              const crashParams = params as Protocol.Target.TargetCrashedEvent
+              for (const [sid, target] of connection.connectedTargets.entries()) {
+                if (target.targetId === crashParams.targetId) {
+                  connection.connectedTargets.delete(sid)
+                  logger?.log(pc.red('[Server] Target crashed, removing:'), crashParams.targetId)
+                  break
+                }
+              }
+
+              sendToPlaywright({
+                message: {
+                  method: 'Target.targetCrashed',
+                  params: crashParams,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else if (method === 'Target.targetInfoChanged') {
+              const infoParams = params as Protocol.Target.TargetInfoChangedEvent
+              for (const target of connection.connectedTargets.values()) {
+                if (target.targetId === infoParams.targetInfo.targetId) {
+                  target.targetInfo = infoParams.targetInfo
+                  break
+                }
+              }
+
+              sendToPlaywright({
+                message: {
+                  method: 'Target.targetInfoChanged',
+                  params: infoParams,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else if (method === 'Page.frameAttached') {
+              const frameParams = params as Protocol.Page.FrameAttachedEvent
+              if (sessionId) {
+                const target = connection.connectedTargets.get(sessionId)
+                if (target) {
+                  target.frameIds.add(frameParams.frameId)
+                }
+              }
+
+              sendToPlaywright({
+                message: {
+                  sessionId,
+                  method,
+                  params,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else if (method === 'Page.frameDetached') {
+              const frameParams = params as Protocol.Page.FrameDetachedEvent
+              const ownerTarget = getPageTargetForFrameId({ connection, frameId: frameParams.frameId })
+              if (ownerTarget) {
+                ownerTarget.frameIds.delete(frameParams.frameId)
+              }
+
+              sendToPlaywright({
+                message: {
+                  sessionId,
+                  method,
+                  params,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else if (method === 'Page.frameNavigated') {
+              const frameParams = params as Protocol.Page.FrameNavigatedEvent
+              if (sessionId) {
+                const target = connection.connectedTargets.get(sessionId)
+                if (target) {
+                  target.frameIds.add(frameParams.frame.id)
+                }
+              }
+              if (!frameParams.frame.parentId && sessionId) {
+                const target = connection.connectedTargets.get(sessionId)
+                if (target) {
+                  target.targetInfo = {
+                    ...target.targetInfo,
+                    url: frameParams.frame.url,
+                    title: frameParams.frame.name || target.targetInfo.title,
+                  }
+                  logger?.log(
+                    pc.magenta('[Server] Updated target URL from Page.frameNavigated:'),
+                    frameParams.frame.url,
+                  )
+                }
+              }
+
+              sendToPlaywright({
+                message: {
+                  sessionId,
+                  method,
+                  params,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else if (method === 'Page.navigatedWithinDocument') {
+              const navParams = params as Protocol.Page.NavigatedWithinDocumentEvent
+              if (sessionId) {
+                const target = connection.connectedTargets.get(sessionId)
+                if (target) {
+                  target.targetInfo = {
+                    ...target.targetInfo,
+                    url: navParams.url,
+                  }
+                  logger?.log(
+                    pc.magenta('[Server] Updated target URL from Page.navigatedWithinDocument:'),
+                    navParams.url,
+                  )
+                }
+              }
+
+              sendToPlaywright({
+                message: {
+                  sessionId,
+                  method,
+                  params,
+                } as CDPEventBase,
+                source: 'extension',
+                extensionId: connectionId,
+              })
+            } else {
+              sendToPlaywright({
+                message: {
+                  sessionId,
+                  method,
+                  params,
                 } as CDPEventBase,
                 source: 'extension',
                 extensionId: connectionId,
               })
             }
-          } else if (method === 'Target.detachedFromTarget') {
-            const detachParams = params as Protocol.Target.DetachedFromTargetEvent
-            connection.connectedTargets.delete(detachParams.sessionId)
+          }
+        },
 
-            sendToPlaywright({
-              message: {
-                method: 'Target.detachedFromTarget',
-                params: detachParams
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else if (method === 'Target.targetCrashed') {
-            const crashParams = params as Protocol.Target.TargetCrashedEvent
-            for (const [sid, target] of connection.connectedTargets.entries()) {
-              if (target.targetId === crashParams.targetId) {
-                connection.connectedTargets.delete(sid)
-                logger?.log(pc.red('[Server] Target crashed, removing:'), crashParams.targetId)
-                break
-              }
-            }
+        onClose(event, ws) {
+          logger?.log(`Extension disconnected: code=${event.code} reason=${event.reason || 'none'} (${connectionId})`)
+          stopExtensionPing(connectionId)
 
-            sendToPlaywright({
-              message: {
-                method: 'Target.targetCrashed',
-                params: crashParams
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else if (method === 'Target.targetInfoChanged') {
-            const infoParams = params as Protocol.Target.TargetInfoChangedEvent
-            for (const target of connection.connectedTargets.values()) {
-              if (target.targetId === infoParams.targetInfo.targetId) {
-                target.targetInfo = infoParams.targetInfo
-                break
-              }
-            }
-
-            sendToPlaywright({
-              message: {
-                method: 'Target.targetInfoChanged',
-                params: infoParams
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else if (method === 'Page.frameAttached') {
-            const frameParams = params as Protocol.Page.FrameAttachedEvent
-            if (sessionId) {
-              const target = connection.connectedTargets.get(sessionId)
-              if (target) {
-                target.frameIds.add(frameParams.frameId)
-              }
-            }
-
-            sendToPlaywright({
-              message: {
-                sessionId,
-                method,
-                params
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else if (method === 'Page.frameDetached') {
-            const frameParams = params as Protocol.Page.FrameDetachedEvent
-            const ownerTarget = getPageTargetForFrameId({ connection, frameId: frameParams.frameId })
-            if (ownerTarget) {
-              ownerTarget.frameIds.delete(frameParams.frameId)
-            }
-
-            sendToPlaywright({
-              message: {
-                sessionId,
-                method,
-                params
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else if (method === 'Page.frameNavigated') {
-            const frameParams = params as Protocol.Page.FrameNavigatedEvent
-            if (sessionId) {
-              const target = connection.connectedTargets.get(sessionId)
-              if (target) {
-                target.frameIds.add(frameParams.frame.id)
-              }
-            }
-            if (!frameParams.frame.parentId && sessionId) {
-              const target = connection.connectedTargets.get(sessionId)
-              if (target) {
-                target.targetInfo = {
-                  ...target.targetInfo,
-                  url: frameParams.frame.url,
-                  title: frameParams.frame.name || target.targetInfo.title,
-                }
-                logger?.log(pc.magenta('[Server] Updated target URL from Page.frameNavigated:'), frameParams.frame.url)
-              }
-            }
-
-            sendToPlaywright({
-              message: {
-                sessionId,
-                method,
-                params
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else if (method === 'Page.navigatedWithinDocument') {
-            const navParams = params as Protocol.Page.NavigatedWithinDocumentEvent
-            if (sessionId) {
-              const target = connection.connectedTargets.get(sessionId)
-              if (target) {
-                target.targetInfo = {
-                  ...target.targetInfo,
-                  url: navParams.url,
-                }
-                logger?.log(pc.magenta('[Server] Updated target URL from Page.navigatedWithinDocument:'), navParams.url)
-              }
-            }
-
-            sendToPlaywright({
-              message: {
-                sessionId,
-                method,
-                params
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
-            })
-          } else {
-            sendToPlaywright({
-              message: {
-                sessionId,
-                method,
-                params
-              } as CDPEventBase,
-              source: 'extension',
-              extensionId: connectionId,
+          // Cancel any active recordings BEFORE removing connection (cancelRecording checks isExtensionConnected)
+          const recordingRelay = recordingRelays.get(connectionId)
+          if (recordingRelay) {
+            recordingRelay.cancelRecording({}).catch(() => {
+              // Ignore errors during cleanup
             })
           }
-        }
-      },
+          recordingRelays.delete(connectionId)
 
-      onClose(event, ws) {
-        logger?.log(`Extension disconnected: code=${event.code} reason=${event.reason || 'none'} (${connectionId})`)
-        stopExtensionPing(connectionId)
-
-        // Cancel any active recordings BEFORE removing connection (cancelRecording checks isExtensionConnected)
-        const recordingRelay = recordingRelays.get(connectionId)
-        if (recordingRelay) {
-          recordingRelay.cancelRecording({}).catch(() => {
-            // Ignore errors during cleanup
-          })
-        }
-        recordingRelays.delete(connectionId)
-
-        const connection = extensionConnections.get(connectionId)
-        if (connection) {
-          for (const pending of connection.pendingRequests.values()) {
-            pending.reject(new Error('Extension connection closed'))
+          const connection = extensionConnections.get(connectionId)
+          if (connection) {
+            for (const pending of connection.pendingRequests.values()) {
+              pending.reject(new Error('Extension connection closed'))
+            }
+            connection.pendingRequests.clear()
+            connection.connectedTargets.clear()
           }
-          connection.pendingRequests.clear()
-          connection.connectedTargets.clear()
-        }
 
-        if (connection) {
-          const mappedId = extensionKeyIndex.get(connection.stableKey)
-          if (mappedId === connectionId) {
-            extensionKeyIndex.delete(connection.stableKey)
+          if (connection) {
+            const mappedId = extensionKeyIndex.get(connection.stableKey)
+            if (mappedId === connectionId) {
+              extensionKeyIndex.delete(connection.stableKey)
+            }
           }
-        }
-        extensionConnections.delete(connectionId)
+          extensionConnections.delete(connectionId)
 
-        for (const [clientId, client] of playwrightClients.entries()) {
-          if (client.extensionId !== connectionId) {
-            continue
+          for (const [clientId, client] of playwrightClients.entries()) {
+            if (client.extensionId !== connectionId) {
+              continue
+            }
+            client.ws.close(1000, 'Extension disconnected')
+            playwrightClients.delete(clientId)
           }
-          client.ws.close(1000, 'Extension disconnected')
-          playwrightClients.delete(clientId)
-        }
-      },
+        },
 
-      onError(event) {
-        logger?.error('Extension WebSocket error:', event)
+        onError(event) {
+          logger?.error('Extension WebSocket error:', event)
+        },
       }
-    }
-  }))
+    }),
+  )
 
   // ============================================================================
   // CLI Execute Endpoints - For stateful code execution via CLI
@@ -1457,7 +1522,10 @@ export async function startPlayWriterCDPRelayServer({
   //    preflight as a fallback, which our CORS policy already blocks.
   // 3. When token mode is enabled (remote access), require the token.
   // ============================================================================
-  const privilegedRouteMiddleware = async (c: Parameters<Parameters<typeof app.use>[1]>[0], next: () => Promise<void>) => {
+  const privilegedRouteMiddleware = async (
+    c: Parameters<Parameters<typeof app.use>[1]>[0],
+    next: () => Promise<void>,
+  ) => {
     // Block cross-origin browser requests via Sec-Fetch-Site header.
     // Browsers always set this forbidden header; it cannot be spoofed.
     // Non-browser clients (Node.js, curl, MCP) don't send it.
@@ -1497,7 +1565,7 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/execute', async (c) => {
     try {
-      const body = await c.req.json() as { sessionId: string | number; code: string; timeout?: number }
+      const body = (await c.req.json()) as { sessionId: string | number; code: string; timeout?: number }
       const sessionId = normalizeSessionId(body.sessionId)
       const { code, timeout = 10000 } = body
 
@@ -1508,7 +1576,10 @@ export async function startPlayWriterCDPRelayServer({
       const manager = await getExecutorManager()
       const existingExecutor = manager.getSession(sessionId)
       if (!existingExecutor) {
-        return c.json({ text: `Session ${sessionId} not found. Run 'playwriter session new' first.`, images: [], isError: true }, 404)
+        return c.json(
+          { text: `Session ${sessionId} not found. Run 'playwriter session new' first.`, images: [], isError: true },
+          404,
+        )
       }
       const result = await existingExecutor.execute(code, timeout)
 
@@ -1521,7 +1592,7 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/reset', async (c) => {
     try {
-      const body = await c.req.json() as { sessionId: string | number }
+      const body = (await c.req.json()) as { sessionId: string | number }
       const sessionId = normalizeSessionId(body.sessionId)
 
       if (!sessionId) {
@@ -1556,7 +1627,7 @@ export async function startPlayWriterCDPRelayServer({
   })
 
   app.post('/cli/session/new', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { extensionId?: string | null; cwd?: string }
+    const body = (await c.req.json().catch(() => ({}))) as { extensionId?: string | null; cwd?: string }
     const sessionId = String(nextSessionNumber++)
     const extensionId = body.extensionId || null
     const cwd = body.cwd
@@ -1605,7 +1676,7 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/session/delete', async (c) => {
     try {
-      const body = await c.req.json() as { sessionId: string | number }
+      const body = (await c.req.json()) as { sessionId: string | number }
       const sessionId = normalizeSessionId(body.sessionId)
 
       if (!sessionId) {
@@ -1630,7 +1701,14 @@ export async function startPlayWriterCDPRelayServer({
   // ============================================================================
 
   app.post('/recording/start', async (c) => {
-    const body = await c.req.json() as { outputPath?: string; sessionId?: string | number; frameRate?: number; audio?: boolean; videoBitsPerSecond?: number; audioBitsPerSecond?: number }
+    const body = (await c.req.json()) as {
+      outputPath?: string
+      sessionId?: string | number
+      frameRate?: number
+      audio?: boolean
+      videoBitsPerSecond?: number
+      audioBitsPerSecond?: number
+    }
     const sessionId = normalizeSessionId(body.sessionId)
     const { sessionId: _sessionId, ...recordingOptions } = body
     const manager = await getExecutorManager()
@@ -1645,12 +1723,12 @@ export async function startPlayWriterCDPRelayServer({
     }
     const recordingParams = (sessionId ? { ...recordingOptions, sessionId } : recordingOptions) as StartRecordingBody
     const result = await relay.startRecording(recordingParams)
-    const status = result.success ? 200 : (result.error?.includes('required') ? 400 : 500)
+    const status = result.success ? 200 : result.error?.includes('required') ? 400 : 500
     return c.json(result, status)
   })
 
   app.post('/recording/stop', async (c) => {
-    const body = await c.req.json() as { sessionId?: string | number }
+    const body = (await c.req.json()) as { sessionId?: string | number }
     const sessionId = normalizeSessionId(body.sessionId)
     const manager = await getExecutorManager()
     const executor = sessionId ? manager.getSession(sessionId) : null
@@ -1664,7 +1742,7 @@ export async function startPlayWriterCDPRelayServer({
     }
     const stopParams: StopRecordingParams = sessionId ? { sessionId } : {}
     const result = await relay.stopRecording(stopParams)
-    const status = result.success ? 200 : (result.error?.includes('not found') ? 404 : 500)
+    const status = result.success ? 200 : result.error?.includes('not found') ? 404 : 500
     return c.json(result, status)
   })
 
@@ -1684,7 +1762,7 @@ export async function startPlayWriterCDPRelayServer({
   })
 
   app.post('/recording/cancel', async (c) => {
-    const body = await c.req.json() as { sessionId?: string | number }
+    const body = (await c.req.json()) as { sessionId?: string | number }
     const sessionId = normalizeSessionId(body.sessionId)
     const manager = await getExecutorManager()
     const executor = sessionId ? manager.getSession(sessionId) : null
@@ -1732,6 +1810,6 @@ export async function startPlayWriterCDPRelayServer({
     },
     off<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]) {
       emitter.off(event, listener as (...args: unknown[]) => void)
-    }
+    },
   }
 }

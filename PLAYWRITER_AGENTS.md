@@ -11,7 +11,7 @@ breaking changes to the WS protocol MUST never be made. publishing the extension
 
 ## architecture
 
-- user installs the extension in chrome. we assume there is only one chrome window for now, the first opened. 
+- user installs the extension in chrome. we assume there is only one chrome window for now, the first opened.
 - extension connects to a websocket server on port 19988. if this server is not yet open, it retries connecting in a loop
 - the MCP spawns the ws server if not already listening on 19988, in background. the mcp then connects to this same server with a playwright client
 - the server exposes /cdp/client-id which is used by playwright clients to communicate with the extension
@@ -52,10 +52,10 @@ to test CLI changes without publishing:
 ```bash
  # mac/linux: kill any existing relay on 19988
  lsof -ti :19988 | xargs kill
- 
+
  # windows (powershell): kill any existing relay on 19988
  Get-NetTCPConnection -LocalPort 19988 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
- 
+
  tsx playwriter/src/cli.ts -s 1 -e "await page.goto('https://example.com')"
  tsx playwriter/src/cli.ts -s 1 -e "console.log(await snapshot({ page }))"
  tsx playwriter/src/cli.ts session new
@@ -94,10 +94,10 @@ tests use these utilities from `test-utils.ts`:
 
 ```ts
 // setup browser with extension loaded + relay server
-const testCtx = await setupTestContext({ 
-  port: 19987, 
+const testCtx = await setupTestContext({
+  port: 19987,
   tempDirPrefix: 'pw-test-',
-  toggleExtension: true  // creates initial page with extension enabled
+  toggleExtension: true, // creates initial page with extension enabled
 })
 
 // get extension service worker to call extension functions
@@ -120,7 +120,7 @@ import { createMCPClient } from './mcp-client.js'
 const { client, cleanup } = await createMCPClient({ port: 19987 })
 const result = await client.callTool({
   name: 'execute',
-  arguments: { code: 'await page.goto("https://example.com")' }
+  arguments: { code: 'await page.goto("https://example.com")' },
 })
 ```
 
@@ -169,9 +169,7 @@ when you do an any change, update relevant CHANGELOG.md files for each package.
 
 also bump package.json versions and IMPORTANTLY also the extension/manifest.json version!
 
-
 you also MUST always bump the playwright core package.json version too on any changes made there. so during publishing we know if that package needs to also be published, first, before publishing playwriter. checking if its version is already publishing in npm with `npm show @xmorse/playwright-core version`
-
 
 ## debugging playwriter mcp issues
 
@@ -207,7 +205,7 @@ cd playwright && git branch
 git checkout playwriter
 ```
 
-make sure to always bump the package json and update the 
+make sure to always bump the package json and update the
 
 ### bootstrapping the repo
 
@@ -218,6 +216,7 @@ pnpm bootstrap
 ```
 
 this does:
+
 1. `git submodule update --init` - init the playwright submodule
 2. `pnpm install` - install deps and link workspace packages
 3. `node playwright/utils/generate_injected.js` - generate browser scripts to `src/generated/`
@@ -238,16 +237,18 @@ upstream playwright bundles all dependencies into single files (zero runtime dep
 **1. dependencies in package.json** - ws, debug, pngjs, commander, etc. are regular deps
 
 **2. rewritten bundle files** - `playwright/packages/playwright-core/src/utilsBundle.ts`, `zipBundle.ts`, `mcpBundle.ts` import directly:
+
 ```ts
 // before (bundled)
-export const ws = require('./utilsBundleImpl').ws;
+export const ws = require('./utilsBundleImpl').ws
 
-// after (direct)  
-import wsLibrary from 'ws';
-export const ws = wsLibrary;
+// after (direct)
+import wsLibrary from 'ws'
+export const ws = wsLibrary
 ```
 
 **3. simple build script** (`playwright/packages/playwright-core/build.mjs`) - just esbuild transpile + copy vendored files:
+
 ```bash
 # transpile src/**/*.ts → lib/**/*.js (0.1s)
 # copy third_party/lockfile.js, third_party/extract-zip.js
@@ -255,11 +256,11 @@ export const ws = wsLibrary;
 
 **4. generated files** - `playwright/packages/playwright-core/src/generated/*.ts` are browser scripts created by `playwright/utils/generate_injected.js`. these only need regenerating if upstream changes injected scripts.
 
-| | upstream | ours |
-|---|---|---|
-| build time | ~30s | 0.1s |
+|              | upstream    | ours           |
+| ------------ | ----------- | -------------- |
+| build time   | ~30s        | 0.1s           |
 | dependencies | 0 (bundled) | ~20 (external) |
-| trace-viewer | built | skipped |
+| trace-viewer | built       | skipped        |
 
 ### key source files
 
@@ -276,7 +277,7 @@ ignore ./claude-extension. this is the source code of the Claude Chrome extensio
 
 you can find the logfile for playwriter executing `playwriter logfile`. read that then to understand issues happening and debug them
 
- `playwriter logfile` also logs a jsonl file with all CDP commands and events being sent between extension, cli, mcp and relay. the cdp log is a jsonl file (one json object per line). you can use jq to process and read it efficiently. for example, list direction + method:
+`playwriter logfile` also logs a jsonl file with all CDP commands and events being sent between extension, cli, mcp and relay. the cdp log is a jsonl file (one json object per line). you can use jq to process and read it efficiently. for example, list direction + method:
 
 ```bash
 jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c

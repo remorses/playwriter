@@ -11,11 +11,14 @@ import { Sema } from 'async-sema'
 import type { ICDPSession } from './cdp-session.js'
 import { getCDPSessionForPage } from './cdp-session.js'
 
-
 // Import sharp at module level - resolves to null if not available
 const sharpPromise = import('sharp')
-  .then((m) => { return m.default })
-  .catch(() => { return null })
+  .then((m) => {
+    return m.default
+  })
+  .catch(() => {
+    return null
+  })
 
 // ============================================================================
 // Snapshot Format Types
@@ -142,9 +145,7 @@ const INTERACTIVE_ROLES = new Set([
   'audio',
 ])
 
-const LABEL_ROLES = new Set([
-  'labeltext',
-])
+const LABEL_ROLES = new Set(['labeltext'])
 
 const MAX_LABEL_POSITION_CONCURRENCY = 24
 const BOX_MODEL_TIMEOUT_MS = 5000
@@ -165,12 +166,7 @@ const CONTEXT_ROLES = new Set([
   'cell',
 ])
 
-const SKIP_WRAPPER_ROLES = new Set([
-  'generic',
-  'group',
-  'none',
-  'presentation',
-])
+const SKIP_WRAPPER_ROLES = new Set(['generic', 'group', 'none', 'presentation'])
 
 const TEST_ID_ATTRS = [
   'data-testid',
@@ -231,7 +227,15 @@ function buildLocatorFromStable(stable: { value: string; attr: string }): string
   return `[${stable.attr}="${escaped}"]`
 }
 
-function buildBaseLocator({ role, name, stable }: { role: string; name: string; stable: { value: string; attr: string } | null }): string {
+function buildBaseLocator({
+  role,
+  name,
+  stable,
+}: {
+  role: string
+  name: string
+  stable: { value: string; attr: string } | null
+}): string {
   if (stable) {
     return buildLocatorFromStable(stable)
   }
@@ -242,7 +246,6 @@ function buildBaseLocator({ role, name, stable }: { role: string; name: string; 
   }
   return `role=${role}`
 }
-
 
 function getAxValueString(value?: Protocol.Accessibility.AXValue): string {
   if (!value) {
@@ -283,7 +286,13 @@ export type SnapshotNode = {
   children: SnapshotNode[]
 }
 
-function buildSnapshotLine({ role, name, baseLocator, indent, hasChildren }: {
+function buildSnapshotLine({
+  role,
+  name,
+  baseLocator,
+  indent,
+  hasChildren,
+}: {
   role: string
   name: string
   baseLocator?: string
@@ -308,15 +317,16 @@ function buildTextLine(text: string, indent: number): SnapshotLine {
 export function buildSnapshotLines(nodes: SnapshotNode[], indent = 0): SnapshotLine[] {
   return nodes.flatMap((node) => {
     const nodeIndent = indent + (node.indentOffset ?? 0)
-    const line = node.role === 'text'
-      ? buildTextLine(node.name, nodeIndent)
-      : buildSnapshotLine({
-        role: node.role,
-        name: node.name,
-        baseLocator: node.baseLocator,
-        indent: nodeIndent,
-        hasChildren: node.children.length > 0,
-      })
+    const line =
+      node.role === 'text'
+        ? buildTextLine(node.name, nodeIndent)
+        : buildSnapshotLine({
+            role: node.role,
+            name: node.name,
+            baseLocator: node.baseLocator,
+            indent: nodeIndent,
+            hasChildren: node.children.length > 0,
+          })
     return [line, ...buildSnapshotLines(node.children, nodeIndent + 1)]
   })
 }
@@ -339,13 +349,15 @@ export function buildRawSnapshotTree(options: {
 
   const role = getAxRole(node)
   const name = getAxValueString(node.name).trim()
-  const children = (node.childIds ?? []).map((childId) => {
-    return buildRawSnapshotTree({
-      nodeId: childId,
-      axById: options.axById,
-      isNodeInScope: options.isNodeInScope,
+  const children = (node.childIds ?? [])
+    .map((childId) => {
+      return buildRawSnapshotTree({
+        nodeId: childId,
+        axById: options.axById,
+        isNodeInScope: options.isNodeInScope,
+      })
     })
-  }).filter(isTruthy)
+    .filter(isTruthy)
 
   const inScope = options.isNodeInScope(node) || children.length > 0
   if (!inScope) {
@@ -367,7 +379,11 @@ export function filterInteractiveSnapshotTree(options: {
   labelContext: boolean
   refFilter?: (entry: { role: string; name: string }) => boolean
   domByBackendId: Map<Protocol.DOM.BackendNodeId, DomNodeInfo>
-  createRefForNode: (options: { backendNodeId?: Protocol.DOM.BackendNodeId; role: string; name: string }) => string | null
+  createRefForNode: (options: {
+    backendNodeId?: Protocol.DOM.BackendNodeId
+    role: string
+    name: string
+  }) => string | null
 }): { nodes: SnapshotNode[]; names: Set<string> } {
   const role = options.node.role
   const name = options.node.name
@@ -476,7 +492,11 @@ export function filterFullSnapshotTree(options: {
   ancestorNames: string[]
   refFilter?: (entry: { role: string; name: string }) => boolean
   domByBackendId: Map<Protocol.DOM.BackendNodeId, DomNodeInfo>
-  createRefForNode: (options: { backendNodeId?: Protocol.DOM.BackendNodeId; role: string; name: string }) => string | null
+  createRefForNode: (options: {
+    backendNodeId?: Protocol.DOM.BackendNodeId
+    role: string
+    name: string
+  }) => string | null
 }): { nodes: SnapshotNode[]; names: Set<string> } {
   const role = options.node.role
   const name = options.node.name
@@ -613,18 +633,20 @@ export function finalizeSnapshotOutput(
   }, [])
 
   let lineLocatorIndex = 0
-  const snapshot = lines.map((line) => {
-    let text = line.text
-    if (line.baseLocator) {
-      const locator = locatorSequence[lineLocatorIndex]
-      lineLocatorIndex += 1
-      text = buildLocatorLineText({ line, locator })
-    }
-    if (line.hasChildren) {
-      text += ':'
-    }
-    return text
-  }).join('\n')
+  const snapshot = lines
+    .map((line) => {
+      let text = line.text
+      if (line.baseLocator) {
+        const locator = locatorSequence[lineLocatorIndex]
+        lineLocatorIndex += 1
+        text = buildLocatorLineText({ line, locator })
+      }
+      if (line.hasChildren) {
+        text += ':'
+      }
+      return text
+    })
+    .join('\n')
 
   let nodeLocatorIndex = 0
   const applyLocators = (items: SnapshotNode[]): AriaSnapshotNode[] => {
@@ -676,7 +698,11 @@ function buildDomIndex(nodes: Protocol.DOM.Node[]): {
   return { domById, domByBackendId, childrenByParent }
 }
 
-function findScopeRootNodeId(nodes: Protocol.DOM.Node[], attrName: string, attrValue: string): Protocol.DOM.NodeId | null {
+function findScopeRootNodeId(
+  nodes: Protocol.DOM.Node[],
+  attrName: string,
+  attrValue: string,
+): Protocol.DOM.NodeId | null {
   for (const node of nodes) {
     if (!node.attributes) {
       continue
@@ -692,7 +718,11 @@ function findScopeRootNodeId(nodes: Protocol.DOM.Node[], attrName: string, attrV
   return null
 }
 
-function buildBackendIdSet(rootNodeId: Protocol.DOM.NodeId, childrenByParent: Map<Protocol.DOM.NodeId, Protocol.DOM.NodeId[]>, domById: Map<Protocol.DOM.NodeId, DomNodeInfo>): Set<Protocol.DOM.BackendNodeId> {
+function buildBackendIdSet(
+  rootNodeId: Protocol.DOM.NodeId,
+  childrenByParent: Map<Protocol.DOM.NodeId, Protocol.DOM.NodeId[]>,
+  domById: Map<Protocol.DOM.NodeId, DomNodeInfo>,
+): Set<Protocol.DOM.BackendNodeId> {
   const result = new Set<Protocol.DOM.BackendNodeId>()
   const stack: Protocol.DOM.NodeId[] = [rootNodeId]
   while (stack.length > 0) {
@@ -786,7 +816,14 @@ async function resolveFrame({ frame, page }: { frame?: Frame | FrameLocator; pag
  * await page.locator(selector).click()
  * ```
  */
-export async function getAriaSnapshot({ page, frame, locator, refFilter, interactiveOnly = false, cdp }: {
+export async function getAriaSnapshot({
+  page,
+  frame,
+  locator,
+  refFilter,
+  interactiveOnly = false,
+  cdp,
+}: {
   page: Page
   frame?: Frame | FrameLocator
   locator?: Locator
@@ -794,29 +831,29 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
   interactiveOnly?: boolean
   cdp?: ICDPSession
 }): Promise<AriaSnapshotResult> {
-  const session = cdp || await getCDPSessionForPage({ page })
+  const session = cdp || (await getCDPSessionForPage({ page }))
 
   // Resolve FrameLocator to an actual Frame. FrameLocator (from locator.contentFrame())
   // is a scoping helper without CDP access. We need the real Frame from page.frames()
   // which has frameId() for OOPIF session attachment.
   const resolvedFrame = await resolveFrame({ frame, page })
-  
+
   // For cross-origin iframes (OOPIFs), we need to attach to the iframe's target
   // to get a separate CDP session. Same-origin iframes can use frameId directly.
   let oopifSessionId: string | null = null
   const frameId = resolvedFrame?.frameId() ?? null
-  
+
   if (frameId) {
-    const { targetInfos } = await session.send('Target.getTargets') as Protocol.Target.GetTargetsResponse
+    const { targetInfos } = (await session.send('Target.getTargets')) as Protocol.Target.GetTargetsResponse
     const frameUrl = resolvedFrame!.url()
     const iframeTarget = targetInfos.find((t) => {
       return t.type === 'iframe' && t.url === frameUrl
     })
     if (iframeTarget) {
-      const { sessionId } = await session.send('Target.attachToTarget', {
+      const { sessionId } = (await session.send('Target.attachToTarget', {
         targetId: iframeTarget.targetId,
         flatten: true,
-      }) as Protocol.Target.AttachToTargetResponse
+      })) as Protocol.Target.AttachToTargetResponse
       oopifSessionId = sessionId
       await session.send('Runtime.runIfWaitingForDebugger', undefined, oopifSessionId)
     }
@@ -831,13 +868,20 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
 
   try {
     if (scopeLocator) {
-      await scopeLocator.evaluate((element, data) => {
-        element.setAttribute(data.attr, data.value)
-      }, { attr: scopeAttr, value: scopeValue })
+      await scopeLocator.evaluate(
+        (element, data) => {
+          element.setAttribute(data.attr, data.value)
+        },
+        { attr: scopeAttr, value: scopeValue },
+      )
       scopeApplied = true
     }
 
-    const { nodes: domNodes } = await session.send('DOM.getFlattenedDocument', { depth: -1, pierce: true }, oopifSessionId) as Protocol.DOM.GetFlattenedDocumentResponse
+    const { nodes: domNodes } = (await session.send(
+      'DOM.getFlattenedDocument',
+      { depth: -1, pierce: true },
+      oopifSessionId,
+    )) as Protocol.DOM.GetFlattenedDocumentResponse
     const { domById, domByBackendId, childrenByParent } = buildDomIndex(domNodes)
 
     let scopeRootNodeId: Protocol.DOM.NodeId | null = null
@@ -852,12 +896,14 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
       }
     }
 
-    const allowedBackendIds = scopeRootNodeId
-      ? buildBackendIdSet(scopeRootNodeId, childrenByParent, domById)
-      : null
+    const allowedBackendIds = scopeRootNodeId ? buildBackendIdSet(scopeRootNodeId, childrenByParent, domById) : null
 
     const axParams = !oopifSessionId && frameId ? { frameId } : undefined
-    const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree', axParams, oopifSessionId) as Protocol.Accessibility.GetFullAXTreeResponse
+    const { nodes: axNodes } = (await session.send(
+      'Accessibility.getFullAXTree',
+      axParams,
+      oopifSessionId,
+    )) as Protocol.Accessibility.GetFullAXTreeResponse
 
     const axById = new Map<Protocol.Accessibility.AXNodeId, Protocol.Accessibility.AXNode>()
     for (const node of axNodes) {
@@ -937,16 +983,18 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
       return allowedBackendIds.has(node.backendDOMNodeId)
     }
 
-
     let snapshotNodes: SnapshotNode[] = []
     if (rootAxNodeId) {
       const rootNode = axById.get(rootAxNodeId)
       const rootRole = rootNode ? getAxRole(rootNode) : ''
-      const rawRoots = rootNode && (rootRole === 'rootwebarea' || rootRole === 'webarea') && rootNode.childIds
-        ? rootNode.childIds.map((childId) => {
-          return buildRawSnapshotTree({ nodeId: childId, axById, isNodeInScope })
-        }).filter(isTruthy)
-        : [buildRawSnapshotTree({ nodeId: rootAxNodeId, axById, isNodeInScope })].filter(isTruthy)
+      const rawRoots =
+        rootNode && (rootRole === 'rootwebarea' || rootRole === 'webarea') && rootNode.childIds
+          ? rootNode.childIds
+              .map((childId) => {
+                return buildRawSnapshotTree({ nodeId: childId, axById, isNodeInScope })
+              })
+              .filter(isTruthy)
+          : [buildRawSnapshotTree({ nodeId: rootAxNodeId, axById, isNodeInScope })].filter(isTruthy)
 
       const filtered = rawRoots.flatMap((rawNode) => {
         if (interactiveOnly) {
@@ -1027,7 +1075,7 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
           } catch {
             return null
           }
-        })
+        }),
       )
 
       const matchingRefs = await page.evaluate(
@@ -1037,7 +1085,16 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
               return null
             }
 
-            const testIdAttrs = ['data-testid', 'data-test-id', 'data-test', 'data-cy', 'data-pw', 'data-qa', 'data-e2e', 'data-automation-id']
+            const testIdAttrs = [
+              'data-testid',
+              'data-test-id',
+              'data-test',
+              'data-cy',
+              'data-pw',
+              'data-qa',
+              'data-e2e',
+              'data-automation-id',
+            ]
             for (const attr of testIdAttrs) {
               const value = target.getAttribute(attr)
               if (value) {
@@ -1066,7 +1123,7 @@ export async function getAriaSnapshot({ page, frame, locator, refFilter, interac
         {
           targets: targetHandles,
           refData: result.refs,
-        }
+        },
       )
 
       return matchingRefs.map((ref) => {
@@ -1140,7 +1197,7 @@ async function getLabelBoxesForRefs({
   cdp?: ICDPSession
 }): Promise<AriaLabel[]> {
   const log = logger?.info ?? logger?.error ?? console.error
-  const session = cdp || await getCDPSessionForPage({ page })
+  const session = cdp || (await getCDPSessionForPage({ page }))
   const sema = new Sema(maxConcurrency)
   const labelRefs = refs.filter((ref) => {
     return Boolean(ref.backendNodeId) && INTERACTIVE_ROLES.has(ref.role)
@@ -1161,14 +1218,20 @@ async function getLabelBoxesForRefs({
         await sema.acquire()
         try {
           const response = await Promise.race([
-            session.send('DOM.getBoxModel', { backendNodeId: ref.backendNodeId }) as Promise<Protocol.DOM.GetBoxModelResponse>,
+            session.send('DOM.getBoxModel', {
+              backendNodeId: ref.backendNodeId,
+            }) as Promise<Protocol.DOM.GetBoxModelResponse>,
             new Promise<null>((resolve) => {
-              setTimeout(() => { resolve(null) }, BOX_MODEL_TIMEOUT_MS)
+              setTimeout(() => {
+                resolve(null)
+              }, BOX_MODEL_TIMEOUT_MS)
             }),
           ])
           completed++
           if (completed % 50 === 0 || completed === labelRefs.length) {
-            log(`[getLabelBoxesForRefs] progress: ${completed}/${labelRefs.length} (${timedOut} timeouts, ${failed} errors) - ${Date.now() - startTime}ms`)
+            log(
+              `[getLabelBoxesForRefs] progress: ${completed}/${labelRefs.length} (${timedOut} timeouts, ${failed} errors) - ${Date.now() - startTime}ms`,
+            )
           }
           if (!response) {
             timedOut++
@@ -1186,9 +1249,11 @@ async function getLabelBoxesForRefs({
         } finally {
           sema.release()
         }
-      })
+      }),
     )
-    log(`[getLabelBoxesForRefs] done: ${completed} completed, ${timedOut} timeouts, ${failed} errors - ${Date.now() - startTime}ms`)
+    log(
+      `[getLabelBoxesForRefs] done: ${completed} completed, ${timedOut} timeouts, ${failed} errors - ${Date.now() - startTime}ms`,
+    )
     return labels.filter(isTruthy)
   } finally {
     if (!cdp) {
@@ -1217,7 +1282,12 @@ async function getLabelBoxesForRefs({
  * await page.locator('[data-testid="submit-btn"]').click()
  * ```
  */
-export async function showAriaRefLabels({ page, locator, interactiveOnly = true, logger }: {
+export async function showAriaRefLabels({
+  page,
+  locator,
+  interactiveOnly = true,
+  logger,
+}: {
   page: Page
   locator?: Locator
   interactiveOnly?: boolean
@@ -1240,11 +1310,15 @@ export async function showAriaRefLabels({ page, locator, interactiveOnly = true,
   try {
     const snapshotStart = Date.now()
     const { snapshot, refs } = await getAriaSnapshot({ page, locator, interactiveOnly, cdp })
-    const shortRefMap = new Map(refs.map((entry) => {
-      return [entry.ref, entry.shortRef]
-    }))
+    const shortRefMap = new Map(
+      refs.map((entry) => {
+        return [entry.ref, entry.shortRef]
+      }),
+    )
     const interactiveRefs = refs.filter((ref) => Boolean(ref.backendNodeId) && INTERACTIVE_ROLES.has(ref.role))
-    log(`[showAriaRefLabels] getAriaSnapshot: ${Date.now() - snapshotStart}ms (${refs.length} refs, ${interactiveRefs.length} interactive)`)
+    log(
+      `[showAriaRefLabels] getAriaSnapshot: ${Date.now() - snapshotStart}ms (${refs.length} refs, ${interactiveRefs.length} interactive)`,
+    )
 
     const rootHandle = locator ? await locator.elementHandle() : null
 
@@ -1259,22 +1333,30 @@ export async function showAriaRefLabels({ page, locator, interactiveOnly = true,
     log(`[showAriaRefLabels] getLabelBoxesForRefs: ${Date.now() - labelsStart}ms (${labels.length} boxes)`)
 
     const renderStart = Date.now()
-    const labelCount = await page.evaluate(({ entries, root, interactiveOnly: intOnly }) => {
-      const a11y = (globalThis as {
-        __a11y?: {
-          renderA11yLabels?: (labels: typeof entries) => number
-          computeA11ySnapshot?: (options: { root: unknown; interactiveOnly: boolean; renderLabels: boolean }) => { labelCount: number }
+    const labelCount = await page.evaluate(
+      ({ entries, root, interactiveOnly: intOnly }) => {
+        const a11y = (
+          globalThis as {
+            __a11y?: {
+              renderA11yLabels?: (labels: typeof entries) => number
+              computeA11ySnapshot?: (options: { root: unknown; interactiveOnly: boolean; renderLabels: boolean }) => {
+                labelCount: number
+              }
+            }
+          }
+        ).__a11y
+        if (a11y?.renderA11yLabels) {
+          return a11y.renderA11yLabels(entries)
         }
-      }).__a11y
-      if (a11y?.renderA11yLabels) {
-        return a11y.renderA11yLabels(entries)
-      }
-      if (a11y?.computeA11ySnapshot) {
-        const rootElement = root || document.body
-        return a11y.computeA11ySnapshot({ root: rootElement, interactiveOnly: intOnly, renderLabels: true }).labelCount
-      }
-      throw new Error('a11y client not loaded')
-    }, { entries: shortLabels, root: rootHandle, interactiveOnly })
+        if (a11y?.computeA11ySnapshot) {
+          const rootElement = root || document.body
+          return a11y.computeA11ySnapshot({ root: rootElement, interactiveOnly: intOnly, renderLabels: true })
+            .labelCount
+        }
+        throw new Error('a11y client not loaded')
+      },
+      { entries: shortLabels, root: rootHandle, interactiveOnly },
+    )
 
     log(`[showAriaRefLabels] renderA11yLabels: ${Date.now() - renderStart}ms (${labelCount} labels)`)
     log(`[showAriaRefLabels] total: ${Date.now() - startTime}ms`)
@@ -1324,7 +1406,13 @@ export async function hideAriaRefLabels({ page }: { page: Page }): Promise<void>
  * await page.locator('[data-testid="submit-btn"]').click()
  * ```
  */
-export async function screenshotWithAccessibilityLabels({ page, locator, interactiveOnly = true, collector, logger }: {
+export async function screenshotWithAccessibilityLabels({
+  page,
+  locator,
+  interactiveOnly = true,
+  collector,
+  logger,
+}: {
   page: Page
   locator?: Locator
   interactiveOnly?: boolean
@@ -1351,7 +1439,10 @@ export async function screenshotWithAccessibilityLabels({ page, locator, interac
   const screenshotPath = path.join(tmpDir, filename)
 
   // Get viewport size to clip screenshot to visible area
-  const viewport = await page.evaluate('({ width: window.innerWidth, height: window.innerHeight })') as { width: number; height: number }
+  const viewport = (await page.evaluate('({ width: window.innerWidth, height: window.innerHeight })')) as {
+    width: number
+    height: number
+  }
 
   // Max 1568px on any edge (larger gets auto-resized by Claude, adding latency)
   // Token formula: tokens = (width * height) / 750

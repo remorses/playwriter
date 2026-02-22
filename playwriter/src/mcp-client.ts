@@ -17,7 +17,7 @@ export async function createTransport({ args = [], port }: { args?: string[]; po
   stderr: Stream | null
 }> {
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...(process.env as Record<string, string>),
     DEBUG: 'playwriter:mcp:test',
     DEBUG_COLORS: '0',
     DEBUG_HIDE_DATE: '1',

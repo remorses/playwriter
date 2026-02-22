@@ -14,9 +14,15 @@ export interface ICDPSession {
     sessionId?: string | null,
   ): Promise<ProtocolMapping.Commands[K]['returnType']>
 
-  on<K extends keyof ProtocolMapping.Events>(event: K, callback: (params: ProtocolMapping.Events[K][0]) => void): unknown
+  on<K extends keyof ProtocolMapping.Events>(
+    event: K,
+    callback: (params: ProtocolMapping.Events[K][0]) => void,
+  ): unknown
 
-  off<K extends keyof ProtocolMapping.Events>(event: K, callback: (params: ProtocolMapping.Events[K][0]) => void): unknown
+  off<K extends keyof ProtocolMapping.Events>(
+    event: K,
+    callback: (params: ProtocolMapping.Events[K][0]) => void,
+  ): unknown
 
   detach(): Promise<void>
   getSessionId?(): string | null
@@ -46,7 +52,10 @@ export class PlaywrightCDPSessionAdapter implements ICDPSession {
     return this
   }
 
-  off<K extends keyof ProtocolMapping.Events>(event: K, callback: (params: ProtocolMapping.Events[K][0]) => void): this {
+  off<K extends keyof ProtocolMapping.Events>(
+    event: K,
+    callback: (params: ProtocolMapping.Events[K][0]) => void,
+  ): this {
     this._playwrightSession.off(event as never, callback as never)
     return this
   }

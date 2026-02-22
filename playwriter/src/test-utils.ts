@@ -21,10 +21,15 @@ async function buildExtension({ port, distDir }: { port: number; distDir: string
     })
     .then(async () => {
       // Build into a per-port dist to avoid parallel test runs overwriting each other.
-      await execAsync(`TESTING=1 PLAYWRITER_PORT=${port} PLAYWRITER_EXTENSION_DIST=${distDir} pnpm build`, { cwd: '../extension' })
+      await execAsync(`TESTING=1 PLAYWRITER_PORT=${port} PLAYWRITER_EXTENSION_DIST=${distDir} pnpm build`, {
+        cwd: '../extension',
+      })
     })
 
-  extensionBuildQueues.set(distDir, buildPromise.finally(() => {}))
+  extensionBuildQueues.set(
+    distDir,
+    buildPromise.finally(() => {}),
+  )
   await buildPromise
 }
 
@@ -103,7 +108,10 @@ export async function setupTestContext({
   return { browserContext, userDataDir, relayServer }
 }
 
-export async function cleanupTestContext(ctx: TestContext | null, cleanup?: (() => Promise<void>) | null): Promise<void> {
+export async function cleanupTestContext(
+  ctx: TestContext | null,
+  cleanup?: (() => Promise<void>) | null,
+): Promise<void> {
   if (ctx?.browserContext) {
     await ctx.browserContext.close()
   }
@@ -188,7 +196,7 @@ export async function createSseServer(): Promise<SseServer> {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
+        Connection: 'keep-alive',
       })
       res.write('retry: 1000\n\n')
       res.write('data: hello\n\n')
@@ -265,129 +273,134 @@ export async function createSseServer(): Promise<SseServer> {
           resolve()
         })
       })
-    }
+    },
   }
 }
 
-export async function withTimeout<T>({ promise, timeoutMs, errorMessage }: { promise: Promise<T>; timeoutMs: number; errorMessage: string }): Promise<T> {
-    return await new Promise<T>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-            reject(new Error(errorMessage))
-        }, timeoutMs)
+export async function withTimeout<T>({
+  promise,
+  timeoutMs,
+  errorMessage,
+}: {
+  promise: Promise<T>
+  timeoutMs: number
+  errorMessage: string
+}): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(errorMessage))
+    }, timeoutMs)
 
-        promise
-            .then((value) => {
-                clearTimeout(timeoutId)
-                resolve(value)
-            })
-            .catch((error) => {
-                clearTimeout(timeoutId)
-                reject(error)
-            })
-    })
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId)
+        reject(error)
+      })
+  })
 }
 
 /** Tagged template for inline JS code strings used in MCP execute calls */
 export function js(strings: TemplateStringsArray, ...values: unknown[]): string {
-    return strings.reduce(
-        (result, str, i) => result + str + (values[i] || ''),
-        '',
-    )
+  return strings.reduce((result, str, i) => result + str + (values[i] || ''), '')
 }
 
 export function tryJsonParse(str: string) {
-    try {
-        return JSON.parse(str)
-    } catch {
-        return str
-    }
+  try {
+    return JSON.parse(str)
+  } catch {
+    return str
+  }
 }
 
 /**
  * Safely close a browser connected via connectOverCDP.
- * 
+ *
  * Playwright's CRConnection uses async message handling (messageWrap) that can cause
  * a race condition where _onClose() runs before all pending _onMessage() handlers complete.
  * This results in "Assertion error" from crConnection.js when a CDP response arrives
  * after callbacks were cleared by dispose().
- * 
+ *
  * This helper waits for the message queue to drain before closing, avoiding the race.
- * 
+ *
  * @param browser - Browser instance from chromium.connectOverCDP()
  * @param drainDelayMs - Time to wait for pending messages to be processed (default: 50ms)
  */
 export async function safeCloseCDPBrowser(
-    browser: Awaited<ReturnType<typeof import('@xmorse/playwright-core').chromium.connectOverCDP>>,
-    drainDelayMs = 50
+  browser: Awaited<ReturnType<typeof import('@xmorse/playwright-core').chromium.connectOverCDP>>,
+  drainDelayMs = 50,
 ): Promise<void> {
-    // Wait for any queued message handlers to run
-    // This gives Playwright's messageWrap time to process pending CDP responses
-    await new Promise(r => setTimeout(r, drainDelayMs))
-    await browser.close()
+  // Wait for any queued message handlers to run
+  // This gives Playwright's messageWrap time to process pending CDP responses
+  await new Promise((r) => setTimeout(r, drainDelayMs))
+  await browser.close()
 }
 
 export type SimpleServer = {
-    baseUrl: string
-    close: () => Promise<void>
+  baseUrl: string
+  close: () => Promise<void>
 }
 
 /** Minimal local HTTP server for tests that need cross-origin iframes or custom routes */
 export async function createSimpleServer({ routes }: { routes: Record<string, string> }): Promise<SimpleServer> {
-    const openSockets: Set<net.Socket> = new Set()
-    const server = http.createServer((req, res) => {
-        const url = req.url || '/'
-        const body = routes[url]
-        if (!body) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' })
-            res.end('not found')
-            return
+  const openSockets: Set<net.Socket> = new Set()
+  const server = http.createServer((req, res) => {
+    const url = req.url || '/'
+    const body = routes[url]
+    if (!body) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('not found')
+      return
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(body)
+  })
+
+  server.on('connection', (socket) => {
+    openSockets.add(socket)
+    socket.on('close', () => {
+      openSockets.delete(socket)
+    })
+  })
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve()
+    })
+  })
+
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
         }
-        res.writeHead(200, { 'Content-Type': 'text/html' })
-        res.end(body)
+        resolve()
+      })
     })
+    throw new Error('Failed to start test server')
+  }
 
-    server.on('connection', (socket) => {
-        openSockets.add(socket)
-        socket.on('close', () => {
-            openSockets.delete(socket)
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: async () => {
+      for (const socket of openSockets) {
+        socket.destroy()
+      }
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
         })
-    })
-
-    await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => {
-            resolve()
-        })
-    })
-
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-        await new Promise<void>((resolve, reject) => {
-            server.close((error) => {
-                if (error) {
-                    reject(error)
-                    return
-                }
-                resolve()
-            })
-        })
-        throw new Error('Failed to start test server')
-    }
-
-    return {
-        baseUrl: `http://127.0.0.1:${address.port}`,
-        close: async () => {
-            for (const socket of openSockets) {
-                socket.destroy()
-            }
-            await new Promise<void>((resolve, reject) => {
-                server.close((error) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve()
-                })
-            })
-        },
-    }
+      })
+    },
+  }
 }

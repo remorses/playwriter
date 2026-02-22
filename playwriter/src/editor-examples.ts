@@ -145,4 +145,14 @@ async function searchStyles() {
   console.log(matches)
 }
 
-export { listScripts, readScript, editScript, searchScripts, writeScript, editInlineScript, readStylesheet, editStylesheet, searchStyles }
+export {
+  listScripts,
+  readScript,
+  editScript,
+  searchScripts,
+  writeScript,
+  editInlineScript,
+  readStylesheet,
+  editStylesheet,
+  searchStyles,
+}
