@@ -132,7 +132,7 @@ pre[class*='language-'] {
 
 /* Diagram language: neutral box-drawing, colored text labels */
 code.language-diagram {
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .language-diagram .token.box-drawing {
