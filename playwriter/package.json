@@ -46,7 +46,7 @@
     "@hono/node-ws": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@xmorse/cac": "^6.0.7",
-    "@xmorse/playwright-core": "workspace:*",
+    "@xmorse/playwright-core": "workspace:^",
     "acorn": "^8.15.0",
     "async-sema": "^3.1.1",
     "diff": "^8.0.2",

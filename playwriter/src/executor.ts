@@ -288,16 +288,6 @@ export class PlaywrightExecutor {
     options.deviceScaleFactor = 2
   }
 
-  private async preserveSystemColorScheme(context: BrowserContext): Promise<void> {
-    const options = (context as any)._options
-    if (!options) {
-      return
-    }
-    options.colorScheme = 'no-override'
-    options.reducedMotion = 'no-override'
-    options.forcedColors = 'no-override'
-  }
-
   private clearUserState() {
     Object.keys(this.userState).forEach((key) => delete this.userState[key])
   }
@@ -578,7 +568,6 @@ export class PlaywrightExecutor {
     context.pages().forEach((p) => this.setupPageListeners(p))
     const page = await this.ensurePageForContext({ context, timeout: 10000 })
 
-    await this.preserveSystemColorScheme(context)
     await this.setDeviceScaleFactorForMacOS(context)
 
     this.browser = browser
@@ -656,7 +645,6 @@ export class PlaywrightExecutor {
     context.pages().forEach((p) => this.setupPageListeners(p))
     const page = await this.ensurePageForContext({ context, timeout: 10000 })
 
-    await this.preserveSystemColorScheme(context)
     await this.setDeviceScaleFactorForMacOS(context)
 
     this.browser = browser

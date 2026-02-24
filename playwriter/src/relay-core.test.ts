@@ -691,8 +691,7 @@ describe('Relay Core Tests', () => {
     }
   }, 60000)
 
-  // right now our extension always forces light mode because of a playwright cdp bug
-  it.todo(
+  it(
     'should preserve system color scheme instead of forcing light mode',
     async () => {
       const browserContext = getBrowserContext()
@@ -702,15 +701,17 @@ describe('Relay Core Tests', () => {
       await page.goto('https://example.com')
       await page.bringToFront()
 
+      // test-utils launches with colorScheme: 'dark', so before MCP connection
+      // the browser should report dark mode
       const colorSchemeBefore = await page.evaluate(() => {
         return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
       })
-      console.log('Color scheme before MCP connection:', colorSchemeBefore)
+      expect(colorSchemeBefore).toBe('dark')
 
       await serviceWorker.evaluate(async () => {
         await globalThis.toggleExtensionForActiveTab()
       })
-      await new Promise((r) => setTimeout(r, 100))
+      await new Promise((r) => setTimeout(r, 500))
 
       const result = await client.callTool({
         name: 'execute',
@@ -731,14 +732,17 @@ describe('Relay Core Tests', () => {
 
       console.log('Color scheme after MCP connection:', result.content)
 
+      // After MCP connection, color scheme should NOT be forced to light.
+      // The page.ts default is now 'no-override', so the browser's actual
+      // color scheme (dark, from test-utils launch config) should be preserved.
       expect(result.content).toMatchInlineSnapshot(`
-          [
-            {
-              "text": "[return value] { error: 'Page not found', urls: [ 'about:blank' ] }",
-              "type": "text",
-            },
-          ]
-        `)
+        [
+          {
+            "text": "[return value] { matchesDark: true, matchesLight: false }",
+            "type": "text",
+          },
+        ]
+      `)
 
       await page.close()
     },
