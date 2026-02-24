@@ -131,17 +131,20 @@ pre[class*='language-'] {
 }
 
 /* Diagram language: neutral box-drawing, colored text labels */
+code.language-diagram {
+  font-weight: 500;
+}
+
 .language-diagram .token.box-drawing {
-  color: #c0c0c0;
+  color: #999;
 }
 
 .language-diagram .token.line-char {
-  color: #c0c0c0;
+  color: #999;
 }
 
 .language-diagram .token.label {
-  color: #0550ae;
-  font-weight: 600;
+  color: #0d7a5f;
 }
 
 /* No text shadow on any token */
@@ -173,8 +176,8 @@ pre[class*='language-'] {
     --prism-spread: #ff7b72;
     --prism-regex: #a5d6ff;
     --prism-bash-fn: #79c0ff;
-    --prism-diagram-structure: #555;
-    --prism-diagram-label: #79bbff;
+    --prism-diagram-structure: #666;
+    --prism-diagram-label: #6ee7b7;
   }
 }
 
