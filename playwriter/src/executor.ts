@@ -1050,7 +1050,9 @@ export class PlaywrightExecutor {
         } finally {
           // Record timestamp even on error — the execution still occupied real time
           // that should not be sped up in the demo video.
-          if (recordingStartSnapshot !== null && execStartSec >= 0 && this.recordingStartedAt !== null) {
+          // Compare against snapshot to avoid cross-session contamination if
+          // recording was stopped and restarted inside the same execute() call.
+          if (recordingStartSnapshot !== null && execStartSec >= 0 && this.recordingStartedAt === recordingStartSnapshot) {
             const execEndSec = (Date.now() - recordingStartSnapshot) / 1000
             this.executionTimestamps.push({ start: execStartSec, end: execEndSec })
           }
