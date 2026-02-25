@@ -13,6 +13,8 @@
 
 Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly flagged by bot detectors, double the memory. Playwriter connects to **your running browser** instead. One Chrome extension, full Playwright API, everything you're already logged into.
 
+> **Note:** Playwriter video recording is **100x more efficient than Playwright video recording**, which sends **base64 images for every frame**.
+
 |               | Playwright MCP    | Playwriter                        |
 | ------------- | ----------------- | --------------------------------- |
 | Browser       | Spawns new Chrome | **Uses your Chrome**              |
