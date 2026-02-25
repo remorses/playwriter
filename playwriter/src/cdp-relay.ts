@@ -1729,9 +1729,15 @@ export async function startPlayWriterCDPRelayServer({
     }
     const sessionId = normalizeSessionId(body.sessionId)
     const { sessionId: _sessionId, ...recordingOptions } = body
+
+    // sessionId serves two purposes here:
+    // 1. CDP session ID (pw-tab-*) — routes to the correct tab in the extension
+    // 2. Executor session ID (numeric) — used to find which extension to route to
+    // Only look up the executor when sessionId is NOT a CDP session ID.
+    const isCdpSessionId = sessionId?.startsWith('pw-tab-')
     const manager = await getExecutorManager()
-    const executor = sessionId ? manager.getSession(sessionId) : null
-    if (sessionId && !executor) {
+    const executor = sessionId && !isCdpSessionId ? manager.getSession(sessionId) : null
+    if (sessionId && !isCdpSessionId && !executor) {
       return c.json({ success: false, error: `Session ${sessionId} not found` }, 404)
     }
     const extensionId = executor?.getSessionMetadata().extensionId || null
@@ -1748,9 +1754,10 @@ export async function startPlayWriterCDPRelayServer({
   app.post('/recording/stop', async (c) => {
     const body = (await c.req.json()) as { sessionId?: string | number }
     const sessionId = normalizeSessionId(body.sessionId)
+    const isCdpSessionId = sessionId?.startsWith('pw-tab-')
     const manager = await getExecutorManager()
-    const executor = sessionId ? manager.getSession(sessionId) : null
-    if (sessionId && !executor) {
+    const executor = sessionId && !isCdpSessionId ? manager.getSession(sessionId) : null
+    if (sessionId && !isCdpSessionId && !executor) {
       return c.json({ success: false, error: `Session ${sessionId} not found` }, 404)
     }
     const extensionId = executor?.getSessionMetadata().extensionId || null
@@ -1767,8 +1774,9 @@ export async function startPlayWriterCDPRelayServer({
   app.get('/recording/status', async (c) => {
     const sessionId = normalizeSessionId(c.req.query('sessionId'))
     const normalizedSessionId = sessionId || undefined
+    const isCdpSessionId = normalizedSessionId?.startsWith('pw-tab-')
     const manager = await getExecutorManager()
-    const executor = normalizedSessionId ? manager.getSession(normalizedSessionId) : null
+    const executor = normalizedSessionId && !isCdpSessionId ? manager.getSession(normalizedSessionId) : null
     const extensionId = executor?.getSessionMetadata().extensionId || null
     const relay = getRecordingRelay(extensionId)
     if (!relay) {
@@ -1782,9 +1790,10 @@ export async function startPlayWriterCDPRelayServer({
   app.post('/recording/cancel', async (c) => {
     const body = (await c.req.json()) as { sessionId?: string | number }
     const sessionId = normalizeSessionId(body.sessionId)
+    const isCdpSessionId = sessionId?.startsWith('pw-tab-')
     const manager = await getExecutorManager()
-    const executor = sessionId ? manager.getSession(sessionId) : null
-    if (sessionId && !executor) {
+    const executor = sessionId && !isCdpSessionId ? manager.getSession(sessionId) : null
+    if (sessionId && !isCdpSessionId && !executor) {
       return c.json({ success: false, error: `Session ${sessionId} not found` }, 404)
     }
     const extensionId = executor?.getSessionMetadata().extensionId || null

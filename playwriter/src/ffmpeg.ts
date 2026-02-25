@@ -420,13 +420,13 @@ export interface ExecutionTimestamp {
 export function computeIdleSections({
     executionTimestamps,
     totalDurationMs,
-    speed = 4,
+    speed = 5,
     bufferSeconds = INTERACTION_BUFFER_SECONDS,
 }: {
     executionTimestamps: ExecutionTimestamp[]
     /** Total recording duration in milliseconds (from stopRecording result) */
     totalDurationMs: number
-    /** Speed multiplier for idle sections (default 4) */
+    /** Speed multiplier for idle sections (default 5) */
     speed?: number
     /** Override the default buffer around each execution (seconds) */
     bufferSeconds?: number
@@ -497,7 +497,7 @@ export interface CreateDemoVideoOptions {
     durationMs: number
     /** Execution timestamps (from stopRecording result) */
     executionTimestamps: ExecutionTimestamp[]
-    /** Speed multiplier for idle sections (default 4) */
+    /** Speed multiplier for idle sections (default 5) */
     speed?: number
     /** Output file path (defaults to recordingPath with `-demo` suffix) */
     outputFile?: string
@@ -522,7 +522,7 @@ export async function createDemoVideo(
         recordingPath,
         durationMs,
         executionTimestamps,
-        speed = 4,
+        speed = 5,
         signal,
     } = options
 

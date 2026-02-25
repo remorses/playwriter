@@ -924,7 +924,7 @@ const demoPath = await createDemoVideo({
   recordingPath: recording.path,
   durationMs: recording.duration,
   executionTimestamps: recording.executionTimestamps,
-  speed: 4, // optional, default 4x for idle sections
+  speed: 5, // optional, default 5x for idle sections
   // outputFile: './demo.mp4', // optional, defaults to recording-demo.mp4
 })
 console.log('Demo video:', demoPath)
