@@ -66,6 +66,15 @@ async function detectBrowserName(): Promise<string> {
 }
 
 let identityPromise: Promise<ExtensionIdentity> | null = null
+const tabSessionScope = (() => {
+  const values = new Uint32Array(2)
+  crypto.getRandomValues(values)
+  return Array.from(values)
+    .map((value) => {
+      return value.toString(36)
+    })
+    .join('')
+})()
 
 async function getExtensionIdentity(): Promise<ExtensionIdentity> {
   if (identityPromise) {
@@ -1070,7 +1079,7 @@ async function attachTab(
     }
 
     const attachOrder = nextSessionId
-    const sessionId = `pw-tab-${nextSessionId++}`
+    const sessionId = `pw-tab-${tabSessionScope}-${nextSessionId++}`
 
     store.setState((state) => {
       const newTabs = new Map(state.tabs)

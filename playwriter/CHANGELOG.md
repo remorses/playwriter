@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.69
+
+### Bug Fixes
+
+- **Scope CDP tab session IDs by extension runtime**: Switched root tab IDs to `pw-tab-<scope>-<n>` so concurrent extension connections do not reuse the same `pw-tab-1`, `pw-tab-2`, etc. The scope is generated once per extension runtime to avoid cross-profile collisions and ambiguous recording-route resolution.
+- **Standardize recording routes on CDP `sessionId`**: Recording HTTP routes now treat `sessionId` as a CDP tab session ID (`pw-tab-*`) only, removing executor-target branching from the recording path.
+
 ## 0.0.68
 
 ### Tests

@@ -954,7 +954,7 @@ export class PlaywrightExecutor {
       ) => {
         return async (options: T = {} as T) => {
           const targetPage = options.page || page
-          // Use Playwright's exposed sessionId directly
+          // Use Playwright's exposed tab session ID directly.
           const sessionId = options.sessionId || targetPage.sessionId() || undefined
           return fn({ page: targetPage, sessionId, relayPort, ...options })
         }

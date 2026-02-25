@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.72
+
+### Bug Fixes
+
+- **Use runtime-scoped root CDP tab session IDs**: Root tab sessions now use `pw-tab-<scope>-<n>` instead of `pw-tab-<n>`, where scope is a random value generated once per extension runtime. This prevents session ID collisions across multiple connected Chrome profiles.
+
 ## 0.0.71
 
 ### Bug Fixes

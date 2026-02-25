@@ -86,6 +86,7 @@ export type ExtensionMessage =
 
 // Recording command messages (MCP -> Extension via relay)
 export type StartRecordingParams = {
+  /** CDP tab session ID (pw-tab-*) to identify which tab to record. */
   sessionId?: string
   frameRate?: number
   audio?: boolean
@@ -99,14 +100,17 @@ export type StartRecordingBody = StartRecordingParams & {
 }
 
 export type StopRecordingParams = {
+  /** CDP tab session ID (pw-tab-*) to identify which tab to stop recording. */
   sessionId?: string
 }
 
 export type IsRecordingParams = {
+  /** CDP tab session ID (pw-tab-*) to identify which tab to check. */
   sessionId?: string
 }
 
 export type CancelRecordingParams = {
+  /** CDP tab session ID (pw-tab-*) to identify which tab to cancel. */
   sessionId?: string
 }
 

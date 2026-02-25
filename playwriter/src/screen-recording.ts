@@ -3,13 +3,18 @@
  * Recording happens in the extension context, so it survives page navigation.
  *
  * This module communicates with the relay server which forwards commands to the extension.
- * SessionId (pw-tab-X format) is used to identify which tab to record.
+ * sessionId (pw-tab-* format) is used to identify which tab to record.
  */
 
 import os from 'node:os'
 import path from 'node:path'
 import type { Page } from '@xmorse/playwright-core'
-import type { StartRecordingResult, StopRecordingResult, IsRecordingResult, CancelRecordingResult } from './protocol.js'
+import type {
+  StartRecordingResult,
+  StopRecordingResult,
+  IsRecordingResult,
+  CancelRecordingResult,
+} from './protocol.js'
 import { EXTENSION_IDS } from './utils.js'
 
 /**
@@ -49,7 +54,7 @@ function isActiveTabPermissionError(error: string): boolean {
 export interface StartRecordingOptions {
   /** Target page to record */
   page: Page
-  /** Session ID (pw-tab-X format) to identify which tab to record */
+  /** CDP tab session ID (pw-tab-* format) to identify which tab to record */
   sessionId?: string
   /** Frame rate (default: 30) */
   frameRate?: number
@@ -68,7 +73,7 @@ export interface StartRecordingOptions {
 export interface StopRecordingOptions {
   /** Target page that is being recorded */
   page: Page
-  /** Session ID (pw-tab-X format) to identify which tab to stop recording */
+  /** CDP tab session ID (pw-tab-* format) to identify which tab to stop recording */
   sessionId?: string
   /** Relay server port (default: 19988) */
   relayPort?: number
@@ -173,10 +178,11 @@ export async function isRecording(options: {
 }): Promise<RecordingState> {
   const { sessionId, relayPort = 19988 } = options
 
-  const url = sessionId
-    ? `http://127.0.0.1:${relayPort}/recording/status?sessionId=${encodeURIComponent(sessionId)}`
-    : `http://127.0.0.1:${relayPort}/recording/status`
-  const response = await fetch(url)
+  const url = new URL(`http://127.0.0.1:${relayPort}/recording/status`)
+  if (sessionId) {
+    url.searchParams.set('sessionId', sessionId)
+  }
+  const response = await fetch(url.toString())
   const result = (await response.json()) as IsRecordingResult
 
   return { isRecording: result.isRecording, startedAt: result.startedAt, tabId: result.tabId }
@@ -185,7 +191,11 @@ export async function isRecording(options: {
 /**
  * Cancel recording without saving.
  */
-export async function cancelRecording(options: { page: Page; sessionId?: string; relayPort?: number }): Promise<void> {
+export async function cancelRecording(options: {
+  page: Page
+  sessionId?: string
+  relayPort?: number
+}): Promise<void> {
   const { sessionId, relayPort = 19988 } = options
 
   const response = await fetch(`http://127.0.0.1:${relayPort}/recording/cancel`, {
