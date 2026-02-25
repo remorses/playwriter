@@ -126,29 +126,29 @@ Control user's Chrome browser via playwright code snippets. Prefer single-line c
 
 ```bash
 # macOS
-open -a "Google Chrome"
+open -a "Google Chrome" --args --profile-directory=Default
 
 # Linux
-google-chrome &
+google-chrome --profile-directory=Default &
 
 # Windows (cmd)
-start chrome.exe
+start chrome.exe --profile-directory=Default
 
 # Windows (PowerShell)
-Start-Process chrome.exe
+Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
 ```
 
 To also enable automatic tab capture for screen recording (no manual extension click needed), add the `--allowlisted-extension-id` and `--auto-accept-this-tab-capture` flags:
 
 ```bash
 # macOS
-open -a "Google Chrome" --args --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture
+open -a "Google Chrome" --args --profile-directory=Default --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture
 
 # Linux
-google-chrome --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture &
+google-chrome --profile-directory=Default --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture &
 
 # Windows
-start chrome.exe --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture
+start chrome.exe --profile-directory=Default --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture
 ```
 
 You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs.

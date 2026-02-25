@@ -27,8 +27,9 @@ import { EXTENSION_IDS } from './utils.js'
  */
 export function getChromeRestartCommand(): string {
   const platform = os.platform()
-  const flags =
-    EXTENSION_IDS.map((id) => `--allowlisted-extension-id=${id}`).join(' ') + ' --auto-accept-this-tab-capture'
+  const extensionFlags = EXTENSION_IDS.map((id) => `--allowlisted-extension-id=${id}`).join(' ')
+  // --profile-directory=Default skips the profile picker on startup, preventing Chrome from hanging
+  const flags = `${extensionFlags} --auto-accept-this-tab-capture --profile-directory=Default`
 
   if (platform === 'darwin') {
     return `osascript -e 'quit app "Google Chrome"' && sleep 1 && open -a "Google Chrome" --args ${flags}`
