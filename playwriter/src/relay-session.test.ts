@@ -153,9 +153,17 @@ describe('CDP Session Tests', () => {
     const browserContext = getBrowserContext()
     const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-    // Use a page with actual script URLs (not just inline scripts)
+    // Use setContent with external script URLs so Debugger.listScripts returns them
     const page = await browserContext.newPage()
-    await page.goto('https://news.ycombinator.com/')
+    await page.setContent(`
+      <html>
+        <head>
+          <script src="data:text/javascript,function hello() { return 1; }"></script>
+          <script src="data:text/javascript,function world() { return 2; }"></script>
+        </head>
+        <body><h1>Script test</h1></body>
+      </html>
+    `)
     await page.bringToFront()
 
     await serviceWorker.evaluate(async () => {
@@ -167,7 +175,7 @@ describe('CDP Session Tests', () => {
     const cdpPage = browser
       .contexts()[0]
       .pages()
-      .find((p) => p.url().includes('news.ycombinator'))
+      .find((p) => p.url().startsWith('about:'))
     expect(cdpPage).toBeDefined()
 
     const wsUrl = getCdpUrl({ port: TEST_PORT })
