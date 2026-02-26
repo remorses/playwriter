@@ -913,18 +913,13 @@ await screenshotWithAccessibilityLabels({ page: state.page })
 
 Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs.
 
-**resizeImage** - shrink an image so it consumes fewer tokens when read back into context. Overwrites the input file by default. Fits within 1568×1568px (Claude-optimal). Always outputs JPEG.
-
-```js
-// Shrink screenshot in-place for LLM ingestion
-await resizeImage({ input: './screenshot.png' })
-```
-
-Also supports explicit dimensions: `width`, `height`, `maxDimension`, `fit` ('inside' | 'cover' | 'contain' | 'fill'), `quality` (1-100, default 80), `output` (defaults to overwriting input).
+**resizeImage** - shrink an image in-place so it consumes fewer tokens when read back into context. `await resizeImage({ input: './screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `output`.
 
 **recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` in the extension context, so **recording survives page navigation**. Video is saved as mp4.
 
 While recording is active, Playwriter automatically overlays a smooth ghost cursor that follows automated mouse actions (`page.mouse.*`, `locator.click()`, hover flows) using `page.onMouseAction` from the Playwright fork.
+
+For demos where cursor movement should be visible and human-like, drive the page with interaction methods (`locator.click()`, `page.click()`, `page.mouse.move()`, `press`, typing). Avoid skipping interactions with direct state jumps (for example, `goto(itemUrl)` instead of clicking the link) when your goal is to show realistic pointer motion in the recording.
 
 **Note**: Recording requires the user to have clicked the Playwriter extension icon on the tab. This grants `activeTab` permission needed for `chrome.tabCapture`. Recording works on tabs where the icon was clicked - if you need to record a new tab, ask the user to click the icon on it first.
 
