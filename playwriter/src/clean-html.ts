@@ -36,7 +36,7 @@ export async function getCleanHTML(options: GetCleanHTMLOptions): Promise<string
   const {
     locator,
     search,
-    showDiffSinceLastCall = true,
+    showDiffSinceLastCall = !search,
     includeStyles = false,
     maxAttrLen = 200,
     maxContentLen = 500,
@@ -76,8 +76,8 @@ export async function getCleanHTML(options: GetCleanHTMLOptions): Promise<string
   const previousSnapshot = pageSnapshots.get(snapshotKey)
   pageSnapshots.set(snapshotKey, htmlStr)
 
-  // Never diff when agent is searching — search should always filter the full content
-  if (showDiffSinceLastCall && previousSnapshot && !search) {
+  // Diff defaults off when search is provided, but agent can explicitly enable both
+  if (showDiffSinceLastCall && previousSnapshot) {
     const diffResult = createSmartDiff({
       oldContent: previousSnapshot,
       newContent: htmlStr,

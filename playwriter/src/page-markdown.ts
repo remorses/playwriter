@@ -70,7 +70,7 @@ function isRegExp(value: unknown): value is RegExp {
  * the main content. Returns plain text content (no HTML).
  */
 export async function getPageMarkdown(options: GetPageMarkdownOptions): Promise<string> {
-  const { page, search, showDiffSinceLastCall = true } = options
+  const { page, search, showDiffSinceLastCall = !search } = options
 
   // Check if readability is already injected
   const hasReadability = await page.evaluate(() => !!(globalThis as any).__readability)
@@ -172,8 +172,8 @@ export async function getPageMarkdown(options: GetPageMarkdownOptions): Promise<
   const previousSnapshot = lastMarkdownSnapshots.get(page)
   lastMarkdownSnapshots.set(page, markdown)
 
-  // Never diff when agent is searching — search should always filter the full content
-  if (showDiffSinceLastCall && previousSnapshot && !search) {
+  // Diff defaults off when search is provided, but agent can explicitly enable both
+  if (showDiffSinceLastCall && previousSnapshot) {
     const diffResult = createSmartDiff({
       oldContent: previousSnapshot,
       newContent: markdown,

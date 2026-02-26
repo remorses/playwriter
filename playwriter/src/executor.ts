@@ -736,7 +736,7 @@ export class PlaywrightExecutor {
           frame,
           locator,
           search,
-          showDiffSinceLastCall = true,
+          showDiffSinceLastCall = !search,
           interactiveOnly = false,
         } = options
         const resolvedPage = targetPage || page
@@ -772,8 +772,8 @@ export class PlaywrightExecutor {
           this.lastSnapshots.set(resolvedPage, snapshotStr)
         }
 
-        // Never diff when agent is searching — search should always filter the full snapshot
-        if (showDiffSinceLastCall && previousSnapshot && shouldCacheSnapshot && !search) {
+        // Diff defaults off when search is provided, but agent can explicitly enable both
+        if (showDiffSinceLastCall && previousSnapshot && shouldCacheSnapshot) {
           const diffResult = createSmartDiff({
             oldContent: previousSnapshot,
             newContent: snapshotStr,

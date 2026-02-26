@@ -453,9 +453,9 @@ await snapshot({ page: state.page, search?, showDiffSinceLastCall? })
 `accessibilitySnapshot` is still available as an alias for backward compatibility.
 
 - `search` - string/regex to filter results (returns first 10 matching lines)
-- `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`). Pass `false` to get full snapshot.
+- `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`, but `false` when `search` is provided). Pass `false` to get full snapshot.
 
-Snapshots return full content on first call, then diffs on subsequent calls. Diff is only returned when shorter than full content. If nothing changed, returns "No changes since last snapshot" message. Use `showDiffSinceLastCall: false` to always get full content. This diffing behavior also applies to `getCleanHTML` and `getPageMarkdown`.
+Snapshots return full content on first call, then diffs on subsequent calls. Diff is only returned when shorter than full content. If nothing changed, returns "No changes since last snapshot" message. Use `showDiffSinceLastCall: false` to always get full content. When `search` is provided, diffing is disabled by default so the search filters the full content — pass `showDiffSinceLastCall: true` explicitly to combine both. This diffing behavior also applies to `getCleanHTML` and `getPageMarkdown`.
 
 Example output:
 
@@ -764,7 +764,7 @@ const fullHtml = await getCleanHTML({ locator: state.page, showDiffSinceLastCall
 
 - `locator` - Playwright Locator or Page to get HTML from
 - `search` - string/regex to filter results (returns first 10 matching lines with 5 lines context)
-- `showDiffSinceLastCall` - returns diff since last call (default: `true`). Pass `false` to get full HTML.
+- `showDiffSinceLastCall` - returns diff since last call (default: `true`, but `false` when `search` is provided). Pass `false` to get full HTML.
 - `includeStyles` - keep style and class attributes (default: false)
 
 **HTML processing:**
@@ -806,7 +806,7 @@ The main article content as plain text, with paragraphs preserved...
 
 - `page` - Playwright Page to extract content from
 - `search` - string/regex to filter content (returns first 10 matching lines with 5 lines context)
-- `showDiffSinceLastCall` - returns diff since last call (default: `true`). Pass `false` to get full content.
+- `showDiffSinceLastCall` - returns diff since last call (default: `true`, but `false` when `search` is provided). Pass `false` to get full content.
 
 **Use cases:**
 
