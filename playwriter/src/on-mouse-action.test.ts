@@ -145,7 +145,7 @@ describe('onMouseAction callback', () => {
       })
 
       expect(cursorState.exists).toBe(true)
-      const translateMatch = cursorState.transform.match(/translate3d\(([-\d.]+)px, ([-\d.]+)px, 0px\)/)
+      const translateMatch = cursorState.transform.match(/translate3d\(([-\d.]+)px, ([-\d.]+)px, 0(?:px)?\)/)
       expect(translateMatch).toBeTruthy()
       const translateX = Number(translateMatch![1])
       const translateY = Number(translateMatch![2])

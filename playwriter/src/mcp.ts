@@ -229,8 +229,10 @@ server.tool(
         ? ''
         : '\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call the `reset` tool to reconnect. Do NOT reset for other non-connection non-internal errors.]'
 
+      // timeout stacks are internal noise (Promise.race / setTimeout); only show the message
+      const errorText = isTimeoutError ? error.message : errorStack
       return {
-        content: [{ type: 'text', text: `Error executing code: ${error.message}\n${errorStack}${resetHint}` }],
+        content: [{ type: 'text', text: `Error executing code: ${errorText}${resetHint}` }],
         isError: true,
       }
     }

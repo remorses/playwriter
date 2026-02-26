@@ -1148,8 +1148,10 @@ export class PlaywrightExecutor {
         ? ''
         : '\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call reset to reconnect.]'
 
+      // timeout stacks are internal noise (Promise.race / setTimeout); only show the message
+      const errorText = isTimeoutError ? error.message : errorStack
       return {
-        text: `${logsText}${warningText}\nError executing code: ${error.message}\n${errorStack}${resetHint}`,
+        text: `${logsText}${warningText}\nError executing code: ${errorText}${resetHint}`,
         images: [],
         isError: true,
       }

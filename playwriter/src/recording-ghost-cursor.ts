@@ -17,6 +17,7 @@ interface RecordingTargetOptions {
 
 export class RecordingGhostCursorController {
   private readonly previousMouseActionByPage = new WeakMap<Page, Page['onMouseAction']>()
+  private readonly cursorApplyQueueByPage = new WeakMap<Page, Promise<void>>()
   private readonly logger: RecordingGhostCursorLogger
 
   constructor(options: { logger: RecordingGhostCursorLogger }) {
@@ -58,9 +59,15 @@ export class RecordingGhostCursorController {
 
       const previousMouseAction = this.previousMouseActionByPage.get(page)
       page.onMouseAction = async (event) => {
-        void applyGhostCursorMouseAction({ page, event }).catch((error) => {
-          this.logger.error('[playwriter] Failed to apply ghost cursor action', error)
-        })
+        const pendingCursorApply = this.cursorApplyQueueByPage.get(page) || Promise.resolve()
+        const nextCursorApply = pendingCursorApply
+          .then(async () => {
+            await applyGhostCursorMouseAction({ page, event })
+          })
+          .catch((error) => {
+            this.logger.error('[playwriter] Failed to apply ghost cursor action', error)
+          })
+        this.cursorApplyQueueByPage.set(page, nextCursorApply)
 
         if (!previousMouseAction) {
           return
@@ -79,6 +86,7 @@ export class RecordingGhostCursorController {
     const { page } = options
     page.onMouseAction = this.previousMouseActionByPage.get(page) ?? null
     this.previousMouseActionByPage.delete(page)
+    this.cursorApplyQueueByPage.delete(page)
 
     try {
       await disableGhostCursor({ page })

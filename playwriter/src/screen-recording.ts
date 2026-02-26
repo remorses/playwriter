@@ -186,23 +186,18 @@ export function createRecordingApi(options: CreateRecordingApiOptions): {
     opts?: StopRecordingWithDefaultsOptions,
   ): Promise<{ path: string; duration: number; size: number; executionTimestamps: ExecutionTimestamp[] }> => {
     const targetPage = resolveRecordingTargetPage({ context, defaultPage, ghostCursorController, target: opts })
-    try {
-      const result = await stopWithDefaults(opts)
-      return { ...result, executionTimestamps: [...getExecutionTimestamps()] }
-    } finally {
-      onFinish()
-      await ghostCursorController.disableForRecording({ page: targetPage })
-    }
+    const result = await stopWithDefaults(opts)
+    const executionTimestamps = [...getExecutionTimestamps()]
+    onFinish()
+    await ghostCursorController.disableForRecording({ page: targetPage })
+    return { ...result, executionTimestamps }
   }
 
   const cancel = async (opts?: CancelRecordingWithDefaultsOptions): Promise<void> => {
     const targetPage = resolveRecordingTargetPage({ context, defaultPage, ghostCursorController, target: opts })
-    try {
-      await cancelWithDefaults(opts)
-    } finally {
-      onFinish()
-      await ghostCursorController.disableForRecording({ page: targetPage })
-    }
+    await cancelWithDefaults(opts)
+    onFinish()
+    await ghostCursorController.disableForRecording({ page: targetPage })
   }
 
   return {

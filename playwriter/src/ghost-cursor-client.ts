@@ -316,8 +316,9 @@ function enable(options?: GhostCursorClientOptions): void {
     runtime.y = Math.round(window.innerHeight / 2)
     runtime.scale = 1
     runtime.hasPosition = true
-    applyTransform()
   }
+
+  applyTransform()
 }
 
 function disable(): void {

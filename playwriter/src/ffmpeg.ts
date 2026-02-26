@@ -61,6 +61,24 @@ export interface VideoInfo {
     frameRate: number
 }
 
+function parseFrameRate(value: string | undefined): number | null {
+    if (!value) {
+        return null
+    }
+
+    const [numRaw, denRaw] = value.split('/').map(Number)
+    if (!Number.isFinite(numRaw) || !Number.isFinite(denRaw) || denRaw === 0) {
+        return null
+    }
+
+    const frameRate = numRaw / denRaw
+    if (!Number.isFinite(frameRate) || frameRate <= 0) {
+        return null
+    }
+
+    return frameRate
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -72,7 +90,7 @@ export async function probeVideo(filePath: string): Promise<VideoInfo> {
         args: [
             '-v', 'error',
             '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height,r_frame_rate',
+            '-show_entries', 'stream=width,height,r_frame_rate,avg_frame_rate',
             '-of', 'json',
             filePath,
         ],
@@ -84,13 +102,31 @@ export async function probeVideo(filePath: string): Promise<VideoInfo> {
         throw new Error(`No video stream found in ${filePath}`)
     }
 
-    // r_frame_rate is a fraction like "30/1" or "30000/1001"
-    const [num, den] = (stream.r_frame_rate as string).split('/').map(Number)
+    // Prefer avg_frame_rate for VFR recordings. r_frame_rate can report
+    // high timebase-like values (e.g. 30000/1) that are not usable output FPS.
+    const avgFrameRate = parseFrameRate(stream.avg_frame_rate as string | undefined)
+    const rawFrameRate = parseFrameRate(stream.r_frame_rate as string | undefined)
+    const selectedFrameRate = (() => {
+        if (avgFrameRate && avgFrameRate <= 120) {
+            return avgFrameRate
+        }
+        if (rawFrameRate && rawFrameRate <= 120) {
+            return rawFrameRate
+        }
+        if (avgFrameRate) {
+            return avgFrameRate
+        }
+        if (rawFrameRate) {
+            return rawFrameRate
+        }
+        return 30
+    })()
+    const normalizedFrameRate = Math.min(120, Math.max(1, Math.round(selectedFrameRate)))
 
     return {
         width: stream.width as number,
         height: stream.height as number,
-        frameRate: Math.round(num / den),
+        frameRate: normalizedFrameRate,
     }
 }
 
@@ -239,7 +275,11 @@ function buildSegmentFilter({
             ? 'setpts=PTS-STARTPTS'
             : `setpts=(PTS-STARTPTS)/${segment.speed}`
 
-    return `[0:v]${trim},${setpts},fps=${frameRate},scale=${width}:${height}[v${index}]`
+    // Cap output FPS to the probed source FPS. This prevents sped-up sections
+    // from producing excessive frame rates when timestamps are compressed.
+    const fps = `fps=fps=${frameRate}:round=down`
+
+    return `[0:v]${trim},${setpts},${fps},scale=${width}:${height}[v${index}]`
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +413,13 @@ export async function speedUpSections(
     )
 
     const filterComplex = filterParts.join('; ')
-    const args = ['-i', inputFile, '-filter_complex', filterComplex, '-map', '[v_out]', outputFile]
+    const args = [
+        '-i', inputFile,
+        '-filter_complex', filterComplex,
+        '-map', '[v_out]',
+        '-r', String(frameRate),
+        outputFile,
+    ]
 
     console.log('Running FFmpeg speedup:', args.join(' '))
 
@@ -434,11 +480,10 @@ export function computeIdleSections({
     const totalDuration = totalDurationMs / 1000
 
     if (executionTimestamps.length === 0) {
-        // Entire video is idle
-        if (totalDuration <= 0) {
-            return []
-        }
-        return [{ start: 0, end: totalDuration, speed }]
+        // No execute() boundaries were captured. This commonly happens when
+        // recording starts and stops inside a single execute() call.
+        // In this case we cannot infer idle gaps safely, so keep original speed.
+        return []
     }
 
     // Apply buffer: expand each execution range by bufferSeconds on each side,
