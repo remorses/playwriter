@@ -913,23 +913,14 @@ await screenshotWithAccessibilityLabels({ page: state.page })
 
 Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs.
 
-**resizeImage** - resize an image to consume fewer tokens when read back into context. Useful when you take a `page.screenshot()` and need to ingest the image later. By default fits within 1568×1568px (Claude-optimal, avoids server-side re-encoding). Token cost formula: `(width × height) / 750`. Always outputs JPEG.
+**resizeImage** - shrink an image so it consumes fewer tokens when read back into context. Overwrites the input file by default. Fits within 1568×1568px (Claude-optimal). Always outputs JPEG.
 
 ```js
-// Shrink a screenshot for LLM ingestion (default: max 1568px, JPEG q80)
-await resizeImage({ input: './screenshot.png', output: './small.jpg' })
-
-// Resize to a specific width (aspect ratio preserved)
-await resizeImage({ input: './large.png', width: 800, output: './resized.jpg' })
-
-// Resize to fit inside exact dimensions
-await resizeImage({ input: './photo.png', width: 1024, height: 768, output: './fit.jpg' })
-
-// Custom max dimension and quality
-await resizeImage({ input: './shot.png', maxDimension: 1024, quality: 60, output: './out.jpg' })
+// Shrink screenshot in-place for LLM ingestion
+await resizeImage({ input: './screenshot.png' })
 ```
 
-Options: `input` (path or Buffer), `output` (path, optional), `maxDimension` (default 1568, ignored if width/height set), `width`, `height`, `fit` ('inside' | 'cover' | 'contain' | 'fill', default 'inside'), `quality` (1-100, default 80). Returns `{ buffer, mimeType, path? }`.
+Also supports explicit dimensions: `width`, `height`, `maxDimension`, `fit` ('inside' | 'cover' | 'contain' | 'fill'), `quality` (1-100, default 80), `output` (defaults to overwriting input).
 
 **recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` in the extension context, so **recording survives page navigation**. Video is saved as mp4.
 
@@ -1034,10 +1025,10 @@ Always use `scale: 'css'` to avoid 2-4x larger images on high-DPI displays:
 await state.page.screenshot({ path: 'shot.png', scale: 'css' })
 ```
 
-If you want to read back the image file into context, resize it first with `resizeImage` so it consumes fewer tokens:
+If you want to read back the image file into context, resize it first so it consumes fewer tokens:
 
 ```js
-await resizeImage({ input: './shot.png', output: './small.jpg' })
+await resizeImage({ input: './shot.png' })
 ```
 
 ## page.evaluate

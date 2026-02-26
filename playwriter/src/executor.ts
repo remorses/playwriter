@@ -26,6 +26,7 @@ import { ScopedFS } from './scoped-fs.js'
 import {
   screenshotWithAccessibilityLabels,
   getAriaSnapshot,
+  resizeImage,
   type ScreenshotResult,
   type SnapshotFormat,
 } from './aria-snapshot.js'
@@ -1029,6 +1030,7 @@ export class PlaywrightExecutor {
         formatStylesAsText,
         getReactSource: getReactSourceFn,
         screenshotWithAccessibilityLabels: screenshotWithAccessibilityLabelsFn,
+        resizeImage,
         ghostCursor: {
           show: showGhostCursor,
           hide: hideGhostCursor,

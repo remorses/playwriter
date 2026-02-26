@@ -84,6 +84,113 @@ export interface ScreenshotResult {
   labelCount: number
 }
 
+// ============================================================================
+// Image Resize Utility
+// ============================================================================
+
+/**
+ * LLM-optimal max dimension. Claude auto-resizes images larger than 1568px
+ * on any edge, adding latency. Token cost: (width * height) / 750.
+ */
+export const LLM_MAX_DIMENSION = 1568
+
+export interface ResizeImageOptions {
+  /** Input: file path or Buffer */
+  input: string | Buffer
+  /** Max pixels on longest edge. Default 1568 (Claude-optimal).
+   *  Ignored if explicit width/height provided. */
+  maxDimension?: number
+  /** Explicit target width in px (aspect ratio preserved unless both width+height set) */
+  width?: number
+  /** Explicit target height in px */
+  height?: number
+  /** How to fit when both width+height specified. Default 'inside' (preserve aspect ratio, no crop) */
+  fit?: 'inside' | 'cover' | 'contain' | 'fill'
+  /** JPEG quality 1-100. Default 80 */
+  quality?: number
+  /** Output file path. Defaults to overwriting the input file (when input is a path) */
+  output?: string
+}
+
+export interface ResizeImageResult {
+  buffer: Buffer
+  mimeType: 'image/jpeg'
+  /** Only set if output path was provided */
+  path?: string
+}
+
+/**
+ * Resize an image using sharp. Useful for shrinking screenshots before reading
+ * them back into context so they consume fewer tokens.
+ *
+ * Default behavior (no width/height): fits within 1568×1568px, preserving
+ * aspect ratio, never upscales. This is optimal for Claude vision.
+ *
+ * Explicit width/height: resizes to those dimensions using the fit strategy.
+ */
+export async function resizeImage(options: ResizeImageOptions): Promise<ResizeImageResult> {
+  const sharp = await sharpPromise
+  if (!sharp) {
+    throw new Error('sharp is not installed — install it with: pnpm add sharp')
+  }
+
+  const inputBuffer = (() => {
+    if (Buffer.isBuffer(options.input)) {
+      return options.input
+    }
+    return fs.readFileSync(options.input)
+  })()
+
+  const quality = options.quality ?? 80
+  const hasExplicitDimensions = options.width !== undefined || options.height !== undefined
+
+  const fit = options.fit ?? 'inside'
+  const resizeOpts = (() => {
+    if (hasExplicitDimensions) {
+      return {
+        width: options.width,
+        height: options.height,
+        fit,
+        withoutEnlargement: false,
+      }
+    }
+    const max = options.maxDimension ?? LLM_MAX_DIMENSION
+    return {
+      width: max,
+      height: max,
+      fit,
+      withoutEnlargement: true,
+    }
+  })()
+
+  const buffer = await sharp(inputBuffer)
+    .resize(resizeOpts)
+    .jpeg({ quality })
+    .toBuffer()
+
+  // Default: overwrite input file. When input is a Buffer, no file is written
+  // unless output is explicitly set.
+  const outputPath = (() => {
+    if (options.output) {
+      return options.output
+    }
+    if (typeof options.input === 'string') {
+      return options.input
+    }
+    return undefined
+  })()
+
+  if (outputPath) {
+    fs.writeFileSync(outputPath, buffer)
+  }
+
+  return {
+    buffer,
+    mimeType: 'image/jpeg',
+    ...(outputPath ? { path: outputPath } : {}),
+  }
+}
+
 export interface AriaSnapshotResult {
   snapshot: string
   tree: AriaSnapshotNode[]
@@ -1444,16 +1551,12 @@ export async function screenshotWithAccessibilityLabels({
     height: number
   }
 
-  // Max 1568px on any edge (larger gets auto-resized by Claude, adding latency)
-  // Token formula: tokens = (width * height) / 750
-  const MAX_DIMENSION = 1568
-
   // Check if sharp is available for resizing
   const sharp = await sharpPromise
 
-  // Clip dimensions: if sharp unavailable, limit capture area to MAX_DIMENSION
-  const clipWidth = sharp ? viewport.width : Math.min(viewport.width, MAX_DIMENSION)
-  const clipHeight = sharp ? viewport.height : Math.min(viewport.height, MAX_DIMENSION)
+  // Clip dimensions: if sharp unavailable, limit capture area to LLM_MAX_DIMENSION
+  const clipWidth = sharp ? viewport.width : Math.min(viewport.width, LLM_MAX_DIMENSION)
+  const clipHeight = sharp ? viewport.height : Math.min(viewport.height, LLM_MAX_DIMENSION)
 
   // Take viewport screenshot with scale: 'css' to ignore device pixel ratio
   const screenshotStart = Date.now()
@@ -1467,23 +1570,16 @@ export async function screenshotWithAccessibilityLabels({
     log(`page.screenshot: ${Date.now() - screenshotStart}ms`)
   }
 
-  // Resize with sharp if available, otherwise use clipped raw buffer
+  // Resize with resizeImage if sharp available, otherwise use clipped raw buffer
   const resizeStart = Date.now()
   const buffer = await (async () => {
     if (!sharp) {
-      logger?.error?.('[playwriter] sharp not available, using clipped screenshot (max', MAX_DIMENSION, 'px)')
+      logger?.error?.('[playwriter] sharp not available, using clipped screenshot (max', LLM_MAX_DIMENSION, 'px)')
       return rawBuffer
     }
     try {
-      return await sharp(rawBuffer)
-        .resize({
-          width: MAX_DIMENSION,
-          height: MAX_DIMENSION,
-          fit: 'inside', // Scale down to fit, preserving aspect ratio
-          withoutEnlargement: true, // Don't upscale small images
-        })
-        .jpeg({ quality: 80 })
-        .toBuffer()
+      const result = await resizeImage({ input: rawBuffer })
+      return result.buffer
     } catch (err) {
       logger?.error?.('[playwriter] sharp resize failed, using raw buffer:', err)
       return rawBuffer

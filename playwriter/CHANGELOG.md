@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.0.78
+
+### Features
+
+- **Add `resizeImage` sandbox utility**: Standalone function to resize images, useful for shrinking screenshots before reading them back into context. Default LLM-optimal mode fits within 1568×1568px; also supports explicit width/height/maxDimension. Available in execute sandbox alongside other utilities.
+
+## 0.0.77
+
+### Improvements
+
+- **Cap speed-up output to source fps in FFmpeg pipeline**: Speed-up filters now use explicit `fps=fps=<source>:round=down` and set output `-r` to the same probed frame rate, keeping accelerated sections bounded to the recording's native fps.
+
+## 0.0.76
+
+### Bug Fixes
+
+- **Fix ultra-short/slow demo generation on variable-framerate recordings**: `probeVideo()` now prefers `avg_frame_rate` and clamps output FPS to sane bounds, avoiding accidental `fps=30000` filter chains.
+- **Avoid speeding entire video when no execute timestamps exist**: `computeIdleSections()` now returns no idle sections when timestamps are empty, so `createDemoVideo()` preserves original speed instead of aggressively compressing full recordings.
+
 ## 0.0.75
 
 ### Improvements
