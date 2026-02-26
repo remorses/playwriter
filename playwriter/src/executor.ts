@@ -1138,7 +1138,8 @@ export class PlaywrightExecutor {
       return { text: finalText, images, isError: false }
     } catch (error: any) {
       const errorStack = error.stack || error.message
-      const isTimeoutError = error instanceof CodeExecutionTimeoutError || error.name === 'TimeoutError'
+      const isTimeoutError =
+        error instanceof CodeExecutionTimeoutError || error?.name === 'TimeoutError' || error?.name === 'AbortError'
 
       this.logger.error('Error in execute:', errorStack)
 

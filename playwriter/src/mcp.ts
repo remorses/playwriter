@@ -218,7 +218,8 @@ server.tool(
       return { content }
     } catch (error: any) {
       const errorStack = error.stack || error.message
-      const isTimeoutError = error instanceof CodeExecutionTimeoutError || error.name === 'TimeoutError'
+      const isTimeoutError =
+        error instanceof CodeExecutionTimeoutError || error?.name === 'TimeoutError' || error?.name === 'AbortError'
 
       console.error('Error in execute tool:', errorStack)
       if (!isTimeoutError) {
