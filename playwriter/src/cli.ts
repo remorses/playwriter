@@ -447,9 +447,12 @@ cli
   })
 
 cli
-  .command('serve', 'Start the CDP relay server for remote MCP connections')
-  .option('--host <host>', 'Host to bind to', { default: '0.0.0.0' })
-  .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
+  .command(
+    'serve',
+    `Start the relay server on this machine (must be the same host where Chrome is running). Remote clients (Docker, other machines) connect via PLAYWRITER_HOST. Use --host localhost for Docker (no token needed) — containers reach it via host.docker.internal. Use --host 0.0.0.0 for LAN/internet access (requires --token).`,
+  )
+  .option('--host <host>', 'Host to bind to (use "localhost" for Docker, "0.0.0.0" for remote access)', { default: '0.0.0.0' })
+  .option('--token <token>', 'Authentication token, required when --host is 0.0.0.0 (or use PLAYWRITER_TOKEN env var)')
   .option('--replace', 'Kill existing server if running')
   .action(async (options: { host: string; token?: string; replace?: boolean }) => {
     const token = options.token || process.env.PLAYWRITER_TOKEN
