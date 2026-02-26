@@ -772,8 +772,8 @@ export class PlaywrightExecutor {
           this.lastSnapshots.set(resolvedPage, snapshotStr)
         }
 
-        // Return diff if we have a previous snapshot and diff mode is enabled
-        if (showDiffSinceLastCall && previousSnapshot && shouldCacheSnapshot) {
+        // Never diff when agent is searching — search should always filter the full snapshot
+        if (showDiffSinceLastCall && previousSnapshot && shouldCacheSnapshot && !search) {
           const diffResult = createSmartDiff({
             oldContent: previousSnapshot,
             newContent: snapshotStr,

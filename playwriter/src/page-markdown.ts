@@ -172,8 +172,8 @@ export async function getPageMarkdown(options: GetPageMarkdownOptions): Promise<
   const previousSnapshot = lastMarkdownSnapshots.get(page)
   lastMarkdownSnapshots.set(page, markdown)
 
-  // Return diff if we have a previous snapshot and diff mode is enabled
-  if (showDiffSinceLastCall && previousSnapshot) {
+  // Never diff when agent is searching — search should always filter the full content
+  if (showDiffSinceLastCall && previousSnapshot && !search) {
     const diffResult = createSmartDiff({
       oldContent: previousSnapshot,
       newContent: markdown,

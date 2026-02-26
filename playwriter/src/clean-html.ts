@@ -76,8 +76,8 @@ export async function getCleanHTML(options: GetCleanHTMLOptions): Promise<string
   const previousSnapshot = pageSnapshots.get(snapshotKey)
   pageSnapshots.set(snapshotKey, htmlStr)
 
-  // Return diff if we have a previous snapshot and diff mode is enabled
-  if (showDiffSinceLastCall && previousSnapshot) {
+  // Never diff when agent is searching — search should always filter the full content
+  if (showDiffSinceLastCall && previousSnapshot && !search) {
     const diffResult = createSmartDiff({
       oldContent: previousSnapshot,
       newContent: htmlStr,
