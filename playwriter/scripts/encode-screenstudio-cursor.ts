@@ -6,9 +6,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url))
-const sourcePath = path.join(currentDir, '..', 'src', 'assets', 'cursors', 'screen-studio', 'pointer-macos-tahoe.svg')
-const outputPath = path.join(currentDir, '..', 'src', 'assets', 'cursors', 'screen-studio', 'pointer-macos-tahoe-data-url.ts')
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const sourcePath = path.resolve(__dirname, '../src/assets/cursors/screen-studio/pointer-macos-tahoe.svg')
+const outputPath = path.resolve(__dirname, '../src/assets/cursors/screen-studio/pointer-macos-tahoe-data-url.ts')
 
 function main() {
   const svg = fs.readFileSync(sourcePath, 'utf-8').trim()

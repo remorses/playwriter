@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.79
+
+### Improvements
+
+- **Faster ghost cursor motion defaults**: Reduced min/max movement durations and increased base movement speed so pointer travel feels snappier while preserving smooth easing.
+- **Recording docs now emphasize interaction-driven navigation**: Updated skill guidance to prefer click/type/hover flows during recordings so ghost cursor motion is visible and human-like instead of bypassed by direct `goto` jumps.
+
 ## 0.0.78
 
 ### Features

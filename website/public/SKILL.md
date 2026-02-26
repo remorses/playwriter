@@ -408,6 +408,35 @@ await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
 
+**11. Click times out or does nothing — snapshot first to find the blocking dialog**
+When a click times out or has no visible effect, the most common cause is a **modal or overlay intercepting pointer events**. Do not retry with different selectors or `{ force: true }` — snapshot immediately to find the blocker, then interact with it using its own snapshot locators:
+
+```js
+// BAD: click timed out → retry with force:true (still blocked by the overlay)
+await state.page.locator('button[name="Create Project"]').click({ force: true })
+
+// GOOD: click timed out → snapshot first
+const snap = await snapshot({ page: state.page, search: /dialog|modal/i })
+// Found: dialog > heading "Do you use a framework?" → interact with it properly
+await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
+await state.page.getByRole('button', { name: 'Configure SDK' }).click()
+// Now the button is unblocked
+await state.page.getByRole('button', { name: 'Create Project' }).click()
+```
+
+**12. `dispatchEvent` and `{ force: true }` do not work on React SPAs**
+React uses a synthetic event system. Raw DOM `dispatchEvent(new MouseEvent(...))` and Playwright's `{ force: true }` bypass actionability checks but **do not trigger React event handlers** — component state won't update. If a click appears to succeed but nothing changes, you are clicking the wrong DOM node. Use the snapshot to find the real interactive element (`role=radio`, `role=button`), not a heading or wrapper div:
+
+```js
+// BAD: H3 heading is not what React listens to — state won't update
+await state.page.evaluate(() => h3El.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+await state.page.locator('h3:has-text("Node.js")').click({ force: true })
+
+// GOOD: snapshot shows the real interactive element
+// - role=radio[name="Node.js"]  ← React's event handler is here
+await state.page.getByRole('radio', { name: 'Node.js' }).click()
+```
+
 ## checking page state
 
 After any action (click, submit, navigate), verify what happened. Always print URL first, then snapshot:
@@ -450,6 +479,29 @@ Example output:
 Each interactive line ends with a Playwright locator you can pass to `state.page.locator()`.
 If multiple elements share the same locator, a `>> nth=N` suffix is added (0-based)
 to make it unique.
+
+**Use snapshot locators directly — never invent selectors.** The locator string shown in the snapshot IS the selector. Use it immediately with `getByRole` or `locator()`. Do not guess CSS selectors, `heading >> text=...`, or `getByText` when the snapshot already gives you the exact string:
+
+```js
+// Snapshot shows: - role=radio[name="Nope, Vanilla"]
+await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
+
+// Snapshot shows: - role=button[name="Configure SDK"]
+await state.page.getByRole('button', { name: 'Configure SDK' }).click()
+
+// Snapshot shows: - role=link[name="SIGN IN"]
+await state.page.locator('role=link[name="SIGN IN"]').click()
+```
+
+**SPA CSS text-transform case mismatch**: accessibility snapshots reflect the visual text, which may be uppercase due to CSS `text-transform`. The actual DOM value (and what `getByRole` matches on) may differ. Use case-insensitive regex to be safe:
+
+```js
+// Snapshot shows heading "NODE.JS" but real DOM value is "Node.js"
+// BAD: exact string may not match
+await state.page.getByRole('heading', { name: 'NODE.JS' })
+// GOOD: case-insensitive regex always works
+await state.page.getByRole('heading', { name: /node\.js/i })
+```
 
 If a screenshot shows ref labels like `e3`, resolve them using the last snapshot:
 
@@ -861,9 +913,20 @@ await screenshotWithAccessibilityLabels({ page: state.page })
 
 Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs.
 
+**resizeImage** - shrink an image so it consumes fewer tokens when read back into context. Overwrites the input file by default. Fits within 1568×1568px (Claude-optimal). Always outputs JPEG.
+
+```js
+// Shrink screenshot in-place for LLM ingestion
+await resizeImage({ input: './screenshot.png' })
+```
+
+Also supports explicit dimensions: `width`, `height`, `maxDimension`, `fit` ('inside' | 'cover' | 'contain' | 'fill'), `quality` (1-100, default 80), `output` (defaults to overwriting input).
+
 **recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` in the extension context, so **recording survives page navigation**. Video is saved as mp4.
 
 While recording is active, Playwriter automatically overlays a smooth ghost cursor that follows automated mouse actions (`page.mouse.*`, `locator.click()`, hover flows) using `page.onMouseAction` from the Playwright fork.
+
+For demos where cursor movement should be visible and human-like, drive the page with interaction methods (`locator.click()`, `page.click()`, `page.mouse.move()`, `press`, typing). Avoid skipping interactions with direct state jumps (for example, `goto(itemUrl)` instead of clicking the link) when your goal is to show realistic pointer motion in the recording.
 
 **Note**: Recording requires the user to have clicked the Playwriter extension icon on the tab. This grants `activeTab` permission needed for `chrome.tabCapture`. Recording works on tabs where the icon was clicked - if you need to record a new tab, ask the user to click the icon on it first.
 
@@ -964,7 +1027,11 @@ Always use `scale: 'css'` to avoid 2-4x larger images on high-DPI displays:
 await state.page.screenshot({ path: 'shot.png', scale: 'css' })
 ```
 
-If you want to read back the image file into context make sure to resize it first, scaling down the image to make sure max size is 1500px. for example with `sips --resampleHeightWidthMax 1500 input.png --out output.png` on macOS.
+If you want to read back the image file into context, resize it first so it consumes fewer tokens:
+
+```js
+await resizeImage({ input: './shot.png' })
+```
 
 ## page.evaluate
 

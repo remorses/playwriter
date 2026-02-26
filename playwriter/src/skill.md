@@ -408,32 +408,23 @@ await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
 
-**11. Click times out or does nothing — snapshot first to find the blocking dialog**
-When a click times out or has no visible effect, the most common cause is a **modal or overlay intercepting pointer events**. Do not retry with different selectors or `{ force: true }` — snapshot immediately to find the blocker, then interact with it using its own snapshot locators:
+**11. Click times out or does nothing — snapshot to find the blocker**
+When a click times out, a **modal or overlay** is likely intercepting pointer events. Do not retry with different selectors or `{ force: true }` — snapshot to find the blocker:
 
 ```js
-// BAD: click timed out → retry with force:true (still blocked by the overlay)
-await state.page.locator('button[name="Create Project"]').click({ force: true })
-
-// GOOD: click timed out → snapshot first
-const snap = await snapshot({ page: state.page, search: /dialog|modal/i })
-// Found: dialog > heading "Do you use a framework?" → interact with it properly
+// click timed out → don't retry blindly, find what's blocking
+await snapshot({ page: state.page, search: /dialog|modal/i })
+// Found modal → interact with it properly (don't just close via X, it may reappear)
 await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
-await state.page.getByRole('button', { name: 'Configure SDK' }).click()
-// Now the button is unblocked
-await state.page.getByRole('button', { name: 'Create Project' }).click()
 ```
 
-**12. `dispatchEvent` and `{ force: true }` do not work on React SPAs**
-React uses a synthetic event system. Raw DOM `dispatchEvent(new MouseEvent(...))` and Playwright's `{ force: true }` bypass actionability checks but **do not trigger React event handlers** — component state won't update. If a click appears to succeed but nothing changes, you are clicking the wrong DOM node. Use the snapshot to find the real interactive element (`role=radio`, `role=button`), not a heading or wrapper div:
+**12. Never use `dispatchEvent` or `{ force: true }` to bypass blockers**
+`dispatchEvent(new MouseEvent(...))` and `{ force: true }` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. If a click "succeeds" but nothing changes, you're clicking the wrong node:
 
 ```js
-// BAD: H3 heading is not what React listens to — state won't update
-await state.page.evaluate(() => h3El.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+// BAD: heading click bypasses overlay but React ignores it
 await state.page.locator('h3:has-text("Node.js")').click({ force: true })
-
-// GOOD: snapshot shows the real interactive element
-// - role=radio[name="Node.js"]  ← React's event handler is here
+// GOOD: snapshot shows the real interactive element is a radio, not the heading
 await state.page.getByRole('radio', { name: 'Node.js' }).click()
 ```
 
@@ -480,28 +471,16 @@ Each interactive line ends with a Playwright locator you can pass to `state.page
 If multiple elements share the same locator, a `>> nth=N` suffix is added (0-based)
 to make it unique.
 
-**Use snapshot locators directly — never invent selectors.** The locator string shown in the snapshot IS the selector. Use it immediately with `getByRole` or `locator()`. Do not guess CSS selectors, `heading >> text=...`, or `getByText` when the snapshot already gives you the exact string:
+**Use snapshot locators directly — never invent selectors.** The snapshot output IS the selector. Do not guess CSS selectors or `getByText` when the snapshot already gives you the exact match:
 
 ```js
-// Snapshot shows: - role=radio[name="Nope, Vanilla"]
+// Snapshot shows: role=radio[name="Nope, Vanilla"]  →  use it directly
 await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
-
-// Snapshot shows: - role=button[name="Configure SDK"]
-await state.page.getByRole('button', { name: 'Configure SDK' }).click()
-
-// Snapshot shows: - role=link[name="SIGN IN"]
+// Snapshot shows: role=link[name="SIGN IN"]  →  or pass raw string to locator()
 await state.page.locator('role=link[name="SIGN IN"]').click()
 ```
 
-**SPA CSS text-transform case mismatch**: accessibility snapshots reflect the visual text, which may be uppercase due to CSS `text-transform`. The actual DOM value (and what `getByRole` matches on) may differ. Use case-insensitive regex to be safe:
-
-```js
-// Snapshot shows heading "NODE.JS" but real DOM value is "Node.js"
-// BAD: exact string may not match
-await state.page.getByRole('heading', { name: 'NODE.JS' })
-// GOOD: case-insensitive regex always works
-await state.page.getByRole('heading', { name: /node\.js/i })
-```
+**Beware CSS text-transform**: snapshots show visual text (`heading "NODE.JS"`) but DOM may be `"Node.js"`. Use case-insensitive regex: `getByRole('heading', { name: /node\.js/i })`.
 
 If a screenshot shows ref labels like `e3`, resolve them using the last snapshot:
 
