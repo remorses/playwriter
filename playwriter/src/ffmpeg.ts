@@ -7,6 +7,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import os from 'node:os'
 import path from 'node:path'
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,136 @@ import path from 'node:path'
 
 /** Seconds of normal-speed buffer kept before and after each execution */
 export const INTERACTION_BUFFER_SECONDS = 1
+
+// ---------------------------------------------------------------------------
+// Hardware encoder detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Preferred hardware encoders by platform, in priority order.
+ * Each is tried via `ffmpeg -f lavfi -i nullsrc -t 0.01 -c:v <encoder> -f null -`
+ * to confirm the encoder actually works (drivers present, GPU available, etc).
+ */
+const HW_ENCODER_CANDIDATES: Record<string, string[]> = {
+    darwin: ['h264_videotoolbox'],
+    win32: ['h264_nvenc', 'h264_qsv', 'h264_amf'],
+    // h264_vaapi excluded: requires -vaapi_device and format=nv12,hwupload in the
+    // filter graph, which our filter_complex pipeline doesn't set up
+    linux: ['h264_nvenc', 'h264_qsv'],
+}
+
+interface EncoderInfo {
+    /** Encoder name for `-c:v`, e.g. "h264_videotoolbox" or "libx264" */
+    codec: string
+    /** true when using a hardware encoder */
+    isHardware: boolean
+}
+
+/** Cache so we only probe once per process */
+let cachedEncoder: EncoderInfo | undefined
+
+/**
+ * Detect the best available H.264 encoder.
+ * Tries platform-specific hardware encoders first, falls back to libx264.
+ * Result is cached for the lifetime of the process.
+ */
+export async function detectEncoder(): Promise<EncoderInfo> {
+    if (cachedEncoder) {
+        return cachedEncoder
+    }
+
+    const platform = os.platform()
+    const candidates = HW_ENCODER_CANDIDATES[platform] ?? []
+
+    for (const codec of candidates) {
+        const works = await testEncoder(codec)
+        if (works) {
+            cachedEncoder = { codec, isHardware: true }
+            return cachedEncoder
+        }
+    }
+
+    cachedEncoder = { codec: 'libx264', isHardware: false }
+    return cachedEncoder
+}
+
+/**
+ * Quick probe: can this encoder produce even a single frame?
+ * Runs `ffmpeg -f lavfi -i nullsrc=s=64x64:d=0.01 -c:v <encoder> -f null -`
+ * and checks exit code. Timeout 5s to avoid hanging on broken drivers.
+ */
+function testEncoder(codec: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        const child = spawn('ffmpeg', [
+            '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'nullsrc=s=64x64:d=0.01',
+            '-c:v', codec,
+            '-f', 'null', '-',
+        ], { stdio: 'ignore' })
+
+        const timeout = setTimeout(() => {
+            child.kill()
+            resolve(false)
+        }, 5000)
+
+        child.on('close', (code) => {
+            clearTimeout(timeout)
+            resolve(code === 0)
+        })
+
+        child.on('error', () => {
+            clearTimeout(timeout)
+            resolve(false)
+        })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Encoding quality parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Build encoding args optimized for screen recordings on social media.
+ *
+ * Quality rationale (screen recordings = sharp text, flat colors, UI):
+ * - libx264 CRF 18 = near visually lossless, prevents text compression artifacts
+ * - `-preset fast` = ~4x faster than default `medium`, minimal quality loss on
+ *   screen content. NOT `ultrafast` which compresses so poorly that platforms
+ *   (X.com, YouTube) re-encode more aggressively, making it look worse.
+ * - `-x264opts deblock=-1,-1` = less deblocking preserves sharp text edges
+ * - No `-tune` flag: `animation` blurs text edges, `zerolatency` is for
+ *   real-time capture only
+ * - h264_videotoolbox `-q:v 80` ≈ CRF 18 equivalent for screen content
+ * - `-maxrate 25M` = X.com (Twitter) max bitrate cap
+ * - `-movflags +faststart` = metadata at front for web streaming
+ * - `-pix_fmt yuv420p` = universal compatibility across all platforms
+ */
+function buildEncodingArgs(encoder: EncoderInfo): string[] {
+    const common = [
+        '-pix_fmt', 'yuv420p',
+        '-maxrate', '25M',
+        '-bufsize', '50M',
+        '-movflags', '+faststart',
+    ]
+
+    if (encoder.isHardware) {
+        // Hardware encoders: use quality-based mode where supported
+        // h264_videotoolbox uses -q:v (1-100, 100=best), others use -b:v
+        const qualityArgs = encoder.codec === 'h264_videotoolbox'
+            ? ['-q:v', '80']
+            : ['-b:v', '15M'] // high bitrate for other HW encoders
+        return ['-c:v', encoder.codec, ...qualityArgs, ...common]
+    }
+
+    // Software: libx264 with screen-recording-optimized settings
+    return [
+        '-c:v', 'libx264',
+        '-crf', '18',
+        '-preset', 'fast',
+        '-x264opts', 'deblock=-1,-1',
+        ...common,
+    ]
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -247,7 +378,11 @@ function buildSegments(sections: SpeedSection[]): Segment[] {
 
 /**
  * Build the filter string for a single segment.
- * Returns `[0:v]trim=...,setpts=...,fps=...,scale=...[vN]`
+ *
+ * For sped-up segments: `[0:v]trim=...,setpts=...,fps=...,scale=...[vN]`
+ * For normal-speed segments where dimensions/fps match input: just
+ * `[0:v]trim=...,setpts=PTS-STARTPTS[vN]` — skips fps and scale filters
+ * to avoid unnecessary pixel processing and frame-rate checking.
  */
 function buildSegmentFilter({
     segment,
@@ -255,12 +390,20 @@ function buildSegmentFilter({
     frameRate,
     width,
     height,
+    inputWidth,
+    inputHeight,
+    inputFrameRate,
 }: {
     segment: Segment
     index: number
     frameRate: number
     width: number
     height: number
+    /** Original input dimensions — when they match output, scale is skipped on passthrough */
+    inputWidth?: number
+    inputHeight?: number
+    /** Original input fps — when it matches output, fps filter is skipped on passthrough */
+    inputFrameRate?: number
 }): string {
     const trimParts = [`start=${segment.start}`]
     if (segment.end !== undefined) {
@@ -274,6 +417,17 @@ function buildSegmentFilter({
         segment.speed === 1
             ? 'setpts=PTS-STARTPTS'
             : `setpts=(PTS-STARTPTS)/${segment.speed}`
+
+    // For normal-speed segments where output matches input: skip fps/scale
+    // to avoid unnecessary pixel processing and frame-rate filtering
+    const isPassthrough = segment.speed === 1
+        && inputWidth === width
+        && inputHeight === height
+        && inputFrameRate === frameRate
+
+    if (isPassthrough) {
+        return `[0:v]${trim},${setpts}[v${index}]`
+    }
 
     // Cap output FPS to the probed source FPS. This prevents sped-up sections
     // from producing excessive frame rates when timestamps are compressed.
@@ -298,6 +452,9 @@ export async function concatenateVideos(
 
     const timerId = `concat-${inputFiles.length}-videos-${path.basename(outputFile)}`
     console.time(timerId)
+
+    const encoder = await detectEncoder()
+    const encodingArgs = buildEncodingArgs(encoder)
 
     // Build argv: -i file1 -i file2 ... -filter_complex "..." -map "[v_out]" output
     const inputArgs = inputFiles.flatMap((file) => {
@@ -328,7 +485,13 @@ export async function concatenateVideos(
     )
 
     const filterComplex = filterComplexParts.join('; ')
-    const args = [...inputArgs, '-filter_complex', filterComplex, '-map', '[v_out]', outputFile]
+    const args = [
+        ...inputArgs,
+        '-filter_complex', filterComplex,
+        '-map', '[v_out]',
+        ...encodingArgs,
+        outputFile,
+    ]
 
     console.log('Running FFmpeg concat:', args.join(' '))
 
@@ -379,15 +542,17 @@ export async function speedUpSections(
 
     const outputFile = options.outputFile ?? defaultOutputPath(inputFile)
 
-    // Probe input for defaults
+    // Probe input when needed for defaults or for passthrough optimization
     const dims = options.outputDimensions
     const fps = options.frameRate
-    const needsProbe = !dims || !fps
-    const probed = needsProbe ? await probeVideo(inputFile) : undefined
+    const probed = (!dims || !fps) ? await probeVideo(inputFile) : undefined
 
     const width = dims?.width ?? probed!.width
     const height = dims?.height ?? probed!.height
     const frameRate = fps ?? probed!.frameRate
+
+    const encoder = await detectEncoder()
+    const encodingArgs = buildEncodingArgs(encoder)
 
     const timerId = `speedup-${sections.length}-sections-${path.basename(outputFile)}`
     console.time(timerId)
@@ -401,6 +566,9 @@ export async function speedUpSections(
             frameRate,
             width,
             height,
+            inputWidth: probed?.width,
+            inputHeight: probed?.height,
+            inputFrameRate: probed?.frameRate,
         })
     })
 
@@ -418,6 +586,7 @@ export async function speedUpSections(
         '-filter_complex', filterComplex,
         '-map', '[v_out]',
         '-r', String(frameRate),
+        ...encodingArgs,
         outputFile,
     ]
 
