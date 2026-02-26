@@ -156,7 +156,109 @@ for machine in machine-a machine-b machine-c; do
 done
 ```
 
-**Development from a VM or devcontainer** - Your code runs in a VM or devcontainer but Chrome runs on the host. The tunnel bridges the gap without needing host networking or port forwarding.
+**Development from a VM or devcontainer** - Your code runs in a VM or devcontainer but Chrome runs on the host. The tunnel bridges the gap without needing host networking or port forwarding. See the Docker section below for a concrete example.
+
+## Docker / devcontainer setup
+
+The relay server **must run on the same machine as Chrome**. The Chrome extension connects to the relay via localhost WebSocket, and the `/extension` endpoint only accepts connections from `127.0.0.1`. This means `playwriter serve` always runs on the  host — never inside the container.
+
+From Docker, set `PLAYWRITER_HOST` to reach the host relay.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  HOST MACHINE                                               │
+│                                                             │
+│  Chrome + Extension ◄──── local WS ────► playwriter serve   │
+│                                          :19988             │
+└──────────────────────────────────────────────▲──────────────┘
+                                               │
+                                   host.docker.internal:19988
+                                               │
+┌──────────────────────────────────────────────┴──────────────┐
+│  DOCKER CONTAINER                                           │
+│                                                             │
+│  PLAYWRITER_HOST=host.docker.internal                       │
+│                                                             │
+│  playwriter -s 1 -e "await page.goto('https://...')"       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Step 1 — Host:** start the relay server on the host machine (where Chrome is running):
+
+```bash
+playwriter serve --host localhost
+```
+
+Using `--host localhost` binds to `127.0.0.1` so no token is needed. Docker containers reach it through `host.docker.internal` which routes to the host's loopback interface. If you use `--host 0.0.0.0` (the default), a `--token` is required since it exposes the server to all network interfaces.
+
+**Step 2 — Docker:** set `PLAYWRITER_HOST` in your container to point at the host:
+
+```dockerfile
+ENV PLAYWRITER_HOST=host.docker.internal
+```
+
+Or pass it at runtime:
+
+```bash
+docker run -e PLAYWRITER_HOST=host.docker.internal myimage
+```
+
+Then use playwriter normally inside the container:
+
+```bash
+playwriter session new
+playwriter -s 1 -e "await page.goto('https://example.com')"
+```
+
+### Platform support for `host.docker.internal`
+
+| Platform             | Works out of the box? | Notes                                            |
+| -------------------- | --------------------- | ------------------------------------------------ |
+| **macOS** (Docker Desktop)  | Yes                   | Supported since Docker Desktop 18.03             |
+| **Windows** (Docker Desktop) | Yes                  | Supported since Docker Desktop 18.03             |
+| **Linux** (Docker Engine)   | No                    | Requires `--add-host` or `extra_hosts` (see below) |
+
+On Linux, `host.docker.internal` is **not provided automatically** by Docker Engine. You must add it explicitly:
+
+```bash
+docker run --add-host=host.docker.internal:host-gateway -e PLAYWRITER_HOST=host.docker.internal myimage
+```
+
+Or in Docker Compose:
+
+```yaml
+services:
+  app:
+    build: .
+    environment:
+      - PLAYWRITER_HOST=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+The `host-gateway` special value (available since Docker Engine 20.10) resolves to the host's gateway IP. On older Docker versions, replace it with the bridge gateway IP directly (typically `172.17.0.1`, find it with `ip route | grep default`).
+
+**Common mistake:** running `playwriter serve` inside the container. This won't work because the Chrome extension can only connect to the relay via localhost, and localhost inside Docker is isolated from the host. The relay must be on the same machine as Chrome.
+
+### MCP from Docker
+
+If your AI assistant or MCP client runs inside Docker:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["-y", "playwriter@latest"],
+      "env": {
+        "PLAYWRITER_HOST": "host.docker.internal"
+      }
+    }
+  }
+}
+```
+
+On Linux, make sure the container has `--add-host=host.docker.internal:host-gateway`.
 
 ## Security
 
