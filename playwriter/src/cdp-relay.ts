@@ -28,13 +28,7 @@ import { EventEmitter } from 'node:events'
 import { VERSION, EXTENSION_IDS } from './utils.js'
 import { createCdpLogger, type CdpLogEntry, type CdpLogger } from './cdp-log.js'
 import { RecordingRelay } from './recording-relay.js'
-
-type ConnectedTarget = {
-  sessionId: string
-  targetId: string
-  targetInfo: Protocol.Target.TargetInfo
-  frameIds: Set<string>
-}
+import * as relayState from './relay-state.js'
 
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
@@ -68,31 +62,6 @@ function isRestrictedTarget(targetInfo: Protocol.Target.TargetInfo): boolean {
   return blockedPrefixes.some((prefix) => url.startsWith(prefix))
 }
 
-type PlaywrightClient = {
-  id: string
-  ws: WSContext
-  extensionId: string | null
-}
-
-type ExtensionInfo = {
-  browser?: string
-  email?: string
-  id?: string
-  /** playwriter package version the extension was built with (sent as ?v= query param) */
-  version?: string
-}
-
-type ExtensionConnection = {
-  id: string
-  ws: WSContext
-  info: ExtensionInfo
-  stableKey: string
-  connectedTargets: Map<string, ConnectedTarget>
-  pendingRequests: Map<number, { resolve: (result: any) => void; reject: (error: Error) => void }>
-  messageId: number
-  pingInterval: ReturnType<typeof setInterval> | null
-}
-
 export type RelayServer = {
   close(): void
   on<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
@@ -113,31 +82,44 @@ export async function startPlayWriterCDPRelayServer({
   cdpLogger?: CdpLogger
 } = {}): Promise<RelayServer> {
   const emitter = new EventEmitter()
-  const extensionConnections = new Map<string, ExtensionConnection>()
-  const extensionKeyIndex = new Map<string, string>()
+  const store = relayState.createRelayStore()
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
     resolvedCdpLogger.log(entry)
   }
-  const playwrightClients = new Map<string, PlaywrightClient>()
 
   const getDefaultExtensionId = (): string | null => {
-    return extensionConnections.keys().next().value || null
+    return store.getState().extensions.keys().next().value || null
   }
 
+  /**
+   * Resolve an extension by ID, stableKey, or fallback.
+   * Returns the unified ExtensionEntry which includes both state and I/O.
+   */
   const getExtensionConnection = (
     extensionId?: string | null,
     options: { allowFallback?: boolean } = {},
-  ): ExtensionConnection | null => {
+  ): relayState.ExtensionEntry | null => {
+    const currentRelayState = store.getState()
+    const { extensions } = currentRelayState
+
     if (extensionId) {
-      const direct = extensionConnections.get(extensionId)
-      if (direct) {
+      const direct = extensions.get(extensionId)
+      if (direct?.ws) {
         return direct
       }
-      const mappedId = extensionKeyIndex.get(extensionId)
-      if (mappedId) {
-        return extensionConnections.get(mappedId) || null
+      // Try stableKey lookup.
+      const byKey = relayState.findExtensionByStableKey(currentRelayState, extensionId)
+      if (byKey) {
+        const candidates = Array.from(extensions.values())
+          .filter((ext) => ext.stableKey === byKey.stableKey)
+          .reverse()
+        for (const candidate of candidates) {
+          if (candidate.ws) {
+            return candidate
+          }
+        }
       }
       return null
     }
@@ -147,21 +129,24 @@ export async function startPlayWriterCDPRelayServer({
     }
 
     // Single extension — use it directly
-    if (extensionConnections.size === 1) {
+    if (extensions.size === 1) {
       const fallbackId = getDefaultExtensionId()
       if (fallbackId) {
-        return extensionConnections.get(fallbackId) || null
+        const ext = extensions.get(fallbackId)
+        if (ext?.ws) {
+          return ext
+        }
       }
     }
 
     // Multiple extensions — auto-select if exactly one has active targets.
     // This handles the common case of multiple Chrome profiles with the extension
     // installed, where only one profile has playwriter-enabled tabs. (#52)
-    if (extensionConnections.size > 1) {
-      const activeExtensions = Array.from(extensionConnections.values()).filter((ext) => {
+    if (extensions.size > 1) {
+      const activeExtensions = Array.from(extensions.values()).filter((ext) => {
         return ext.connectedTargets.size > 0
       })
-      if (activeExtensions.length === 1) {
+      if (activeExtensions.length === 1 && activeExtensions[0].ws) {
         return activeExtensions[0]
       }
     }
@@ -169,7 +154,7 @@ export async function startPlayWriterCDPRelayServer({
     return null
   }
 
-  const buildStableExtensionKey = (info: ExtensionInfo, connectionId: string): string => {
+  const buildStableExtensionKey = (info: relayState.ExtensionInfo, connectionId: string): string => {
     if (info.id) {
       return `profile:${info.id}`
     }
@@ -191,37 +176,41 @@ export async function startPlayWriterCDPRelayServer({
   }
 
   const getPageTargetForFrameId = ({
-    connection,
+    extensionState,
     frameId,
   }: {
-    connection: ExtensionConnection
+    extensionState: relayState.ExtensionEntry
     frameId: string
-  }): ConnectedTarget | undefined => {
-    return Array.from(connection.connectedTargets.values()).find((target) => {
+  }): relayState.ConnectedTarget | undefined => {
+    return Array.from(extensionState.connectedTargets.values()).find((target) => {
       return target.targetInfo.type === 'page' && target.frameIds.has(frameId)
     })
   }
 
   const startExtensionPing = (extensionId: string): void => {
-    const connection = extensionConnections.get(extensionId)
-    if (!connection) {
+    const ext = store.getState().extensions.get(extensionId)
+    if (!ext) {
       return
     }
-    if (connection.pingInterval) {
-      clearInterval(connection.pingInterval)
+    if (ext.pingInterval) {
+      clearInterval(ext.pingInterval)
     }
-    connection.pingInterval = setInterval(() => {
-      connection.ws.send(JSON.stringify({ method: 'ping' }))
+
+    const pingInterval = setInterval(() => {
+      const latestExt = store.getState().extensions.get(extensionId)
+      latestExt?.ws?.send(JSON.stringify({ method: 'ping' }))
     }, 5000)
+
+    store.setState((s) => relayState.updateExtensionIO(s, { extensionId, pingInterval }))
   }
 
   const stopExtensionPing = (extensionId: string): void => {
-    const connection = extensionConnections.get(extensionId)
-    if (!connection || !connection.pingInterval) {
+    const ext = store.getState().extensions.get(extensionId)
+    if (!ext || !ext.pingInterval) {
       return
     }
-    clearInterval(connection.pingInterval)
-    connection.pingInterval = null
+    clearInterval(ext.pingInterval)
+    store.setState((s) => relayState.updateExtensionIO(s, { extensionId, pingInterval: null }))
   }
 
   function logCdpMessage({
@@ -331,7 +320,7 @@ export async function startPlayWriterCDPRelayServer({
     // 2. We might still have messages in flight or try to send
     // This can cause "Assertion error" in Playwright's crConnection.js if a response
     // arrives after callbacks were cleared. We wrap in try-catch to handle this gracefully.
-    const safeSend = (client: PlaywrightClient) => {
+    const safeSend = (client: relayState.PlaywrightClient) => {
       try {
         client.ws.send(messageStr)
       } catch (e) {
@@ -341,13 +330,13 @@ export async function startPlayWriterCDPRelayServer({
     }
 
     if (clientId) {
-      const client = playwrightClients.get(clientId)
+      const client = store.getState().playwrightClients.get(clientId)
       if (client) {
         safeSend(client)
       }
     } else {
-      const clients = Array.from(playwrightClients.values())
-      for (const client of clients) {
+      const { playwrightClients } = store.getState()
+      for (const client of playwrightClients.values()) {
         if (extensionId && client.extensionId !== extensionId) {
           continue
         }
@@ -385,12 +374,26 @@ export async function startPlayWriterCDPRelayServer({
     params?: unknown
     timeout?: number
   }): Promise<unknown> {
-    const connection = getExtensionConnection(extensionId)
-    if (!connection) {
+    const conn = getExtensionConnection(extensionId)
+    if (!conn) {
+      throw new Error('Extension not connected')
+    }
+    const resolvedExtensionId = conn.id
+
+    let id = 0
+    store.setState((s) => {
+      const ext = s.extensions.get(resolvedExtensionId)
+      if (!ext) {
+        return s
+      }
+      id = ext.messageId + 1
+      return relayState.incrementExtensionMessageId(s, { extensionId: resolvedExtensionId })
+    })
+
+    if (!id) {
       throw new Error('Extension not connected')
     }
 
-    const id = ++connection.messageId
     const message = { id, method, params }
 
     const forwardCdpParams = method === 'forwardCDPCommand' ? getForwardCdpParams(params) : undefined
@@ -406,15 +409,18 @@ export async function startPlayWriterCDPRelayServer({
       })
     }
 
-    connection.ws.send(JSON.stringify(message))
-
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        connection.pendingRequests.delete(id)
+        store.setState((s) =>
+          relayState.removeExtensionPendingRequest(s, {
+            extensionId: resolvedExtensionId,
+            requestId: id,
+          }),
+        )
         reject(new Error(`Extension request timeout after ${timeout}ms: ${method}`))
       }, timeout)
 
-      connection.pendingRequests.set(id, {
+      const pendingRequest = {
         resolve: (result) => {
           clearTimeout(timeoutId)
           resolve(result)
@@ -423,7 +429,42 @@ export async function startPlayWriterCDPRelayServer({
           clearTimeout(timeoutId)
           reject(error)
         },
-      })
+      }
+
+      store.setState((s) =>
+        relayState.addExtensionPendingRequest(s, {
+          extensionId: resolvedExtensionId,
+          requestId: id,
+          pendingRequest,
+        }),
+      )
+
+      const latestExt = store.getState().extensions.get(resolvedExtensionId)
+      if (!latestExt?.ws) {
+        clearTimeout(timeoutId)
+        store.setState((s) =>
+          relayState.removeExtensionPendingRequest(s, {
+            extensionId: resolvedExtensionId,
+            requestId: id,
+          }),
+        )
+        reject(new Error('Extension not connected'))
+        return
+      }
+
+      try {
+        latestExt.ws.send(JSON.stringify(message))
+      } catch (error) {
+        clearTimeout(timeoutId)
+        store.setState((s) =>
+          relayState.removeExtensionPendingRequest(s, {
+            extensionId: resolvedExtensionId,
+            requestId: id,
+          }),
+        )
+        const sendError = error instanceof Error ? error : new Error(String(error))
+        reject(new Error(`Extension send failed: ${method}`, { cause: sendError }))
+      }
     })
   }
 
@@ -431,14 +472,9 @@ export async function startPlayWriterCDPRelayServer({
 
   // Find which extension connection owns a CDP tab session ID (pw-tab-*).
   // Used by recording routes where sessionId identifies the target tab.
-  // Searches all connected extensions' targets.
+  // Delegates to the pure derivation function from relay-state.ts.
   const findExtensionIdByCdpSession = (cdpSessionId: string): string | null => {
-    for (const [connectionId, connection] of extensionConnections.entries()) {
-      if (connection.connectedTargets.has(cdpSessionId)) {
-        return connectionId
-      }
-    }
-    return null
+    return relayState.findExtensionIdByCdpSession(store.getState(), cdpSessionId)
   }
 
   // Resolve recording route session ID (CDP tab session) to extension connection.
@@ -459,22 +495,23 @@ export async function startPlayWriterCDPRelayServer({
   }
 
   const getRecordingRelay = (extensionId?: string | null): RecordingRelay | null => {
-    const allowDefault = !extensionId && extensionConnections.size === 1
-    const connection = getExtensionConnection(extensionId, { allowFallback: allowDefault })
-    if (!connection) {
+    const allowDefault = !extensionId && store.getState().extensions.size === 1
+    const conn = getExtensionConnection(extensionId, { allowFallback: allowDefault })
+    if (!conn) {
       return null
     }
-    if (!recordingRelays.has(connection.id)) {
+    const connId = conn.id
+    if (!recordingRelays.has(connId)) {
       recordingRelays.set(
-        connection.id,
+        connId,
         new RecordingRelay(
-          (params) => sendToExtension({ extensionId: connection.id, ...params }),
-          () => extensionConnections.has(connection.id),
+          (params) => sendToExtension({ extensionId: connId, ...params }),
+          () => store.getState().extensions.has(connId),
           logger,
         ),
       )
     }
-    return recordingRelays.get(connection.id) || null
+    return recordingRelays.get(connId) || null
   }
 
   // Auto-create initial tab when PLAYWRITER_AUTO_ENABLE is set and no targets exist.
@@ -483,11 +520,11 @@ export async function startPlayWriterCDPRelayServer({
     if (!process.env.PLAYWRITER_AUTO_ENABLE) {
       return
     }
-    const connection = getExtensionConnection(extensionId)
-    if (!connection) {
+    const conn = getExtensionConnection(extensionId)
+    if (!conn) {
       return
     }
-    if (connection.connectedTargets.size > 0) {
+    if (conn.connectedTargets.size > 0) {
       return
     }
 
@@ -500,16 +537,17 @@ export async function startPlayWriterCDPRelayServer({
         targetInfo: Protocol.Target.TargetInfo
       }
       if (result.success && result.sessionId && result.targetInfo) {
-        connection.connectedTargets.set(result.sessionId, {
-          sessionId: result.sessionId,
-          targetId: result.targetInfo.targetId,
-          targetInfo: result.targetInfo,
-          frameIds: new Set(),
-        })
+        store.setState((s) =>
+          relayState.addTarget(s, {
+            extensionId,
+            sessionId: result.sessionId,
+            targetId: result.targetInfo.targetId,
+            targetInfo: result.targetInfo,
+          }),
+        )
+        const updatedTargets = store.getState().extensions.get(extensionId)?.connectedTargets.size || 0
         logger?.log(
-          pc.blue(
-            `Auto-created tab, now have ${connection.connectedTargets.size} targets, url: ${result.targetInfo.url}`,
-          ),
+          pc.blue(`Auto-created tab, now have ${updatedTargets} targets, url: ${result.targetInfo.url}`),
         )
       }
     } catch (e) {
@@ -525,13 +563,14 @@ export async function startPlayWriterCDPRelayServer({
     source,
   }: {
     extensionId: string | null
-    method: string
-    params: any
-    sessionId?: string
-    source?: 'playwriter'
+    method: CDPCommand['method'] | (string & {})
+    params: CDPCommand['params']
+    sessionId?: CDPCommand['sessionId']
+    source?: CDPCommand['source']
   }) {
-    const extension = getExtensionConnection(extensionId)
-    const connectedTargets = extension?.connectedTargets || new Map<string, ConnectedTarget>()
+    const conn = getExtensionConnection(extensionId)
+    const connectedTargets = conn?.connectedTargets || new Map<string, relayState.ConnectedTarget>()
+    const resolvedExtensionId = conn?.id || extensionId
     switch (method) {
       case 'Browser.getVersion': {
         return {
@@ -554,13 +593,13 @@ export async function startPlayWriterCDPRelayServer({
         if (sessionId) {
           break
         }
-        if (extension) {
-          await maybeAutoCreateInitialTab(extension.id)
+        if (conn) {
+          await maybeAutoCreateInitialTab(conn.id)
         }
         // Forward auto-attach so Chrome emits iframe Target.attachedToTarget events.
         // Playwright relies on these (with parentFrameId) when reconnecting over CDP.
         await sendToExtension({
-          extensionId: extension?.id || extensionId,
+          extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
           params: { method, params, source },
         })
@@ -572,22 +611,23 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       case 'Target.attachToTarget': {
-        const targetId = params?.targetId
-        if (!targetId) {
+        const attachParams = params as Protocol.Target.AttachToTargetRequest
+        if (!attachParams?.targetId) {
           throw new Error('targetId is required for Target.attachToTarget')
         }
 
         for (const target of connectedTargets.values()) {
-          if (target.targetId === targetId) {
+          if (target.targetId === attachParams.targetId) {
             return { sessionId: target.sessionId } satisfies Protocol.Target.AttachToTargetResponse
           }
         }
 
-        throw new Error(`Target ${targetId} not found in connected targets`)
+        throw new Error(`Target ${attachParams.targetId} not found in connected targets`)
       }
 
       case 'Target.getTargetInfo': {
-        const targetId = params?.targetId
+        const infoReqParams = params as Protocol.Target.GetTargetInfoRequest | undefined
+        const targetId = infoReqParams?.targetId
 
         if (targetId) {
           for (const target of connectedTargets.values()) {
@@ -621,7 +661,7 @@ export async function startPlayWriterCDPRelayServer({
 
       case 'Target.createTarget': {
         return await sendToExtension({
-          extensionId: extension?.id || extensionId,
+          extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
           params: { method, params, source },
         })
@@ -629,7 +669,7 @@ export async function startPlayWriterCDPRelayServer({
 
       case 'Target.closeTarget': {
         return await sendToExtension({
-          extensionId: extension?.id || extensionId,
+          extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
           params: { method, params, source },
         })
@@ -638,7 +678,7 @@ export async function startPlayWriterCDPRelayServer({
       // Ghost Browser API - forward to extension for chrome.ghostPublicAPI/ghostProxies/projects
       case 'ghost-browser': {
         return await sendToExtension({
-          extensionId: extension?.id || extensionId,
+          extensionId: resolvedExtensionId,
           method: 'ghost-browser',
           params,
         })
@@ -673,7 +713,7 @@ export async function startPlayWriterCDPRelayServer({
         })
 
         const result = await sendToExtension({
-          extensionId: extension?.id || extensionId,
+          extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
           params: { sessionId, method, params, source },
         })
@@ -685,7 +725,7 @@ export async function startPlayWriterCDPRelayServer({
     }
 
     return await sendToExtension({
-      extensionId: extension?.id || extensionId,
+      extensionId: resolvedExtensionId,
       method: 'forwardCDPCommand',
       params: { sessionId, method, params, source },
     })
@@ -728,7 +768,7 @@ export async function startPlayWriterCDPRelayServer({
 
   app.get('/extension/status', (c) => {
     const defaultExtension = getExtensionConnection(null, { allowFallback: true })
-    const connected = extensionConnections.size > 0
+    const connected = store.getState().extensions.size > 0
     const activeTargets = defaultExtension?.connectedTargets.size || 0
     const info = defaultExtension?.info
 
@@ -742,14 +782,14 @@ export async function startPlayWriterCDPRelayServer({
   })
 
   app.get('/extensions/status', (c) => {
-    const extensions = Array.from(extensionConnections.values()).map((extension) => {
+    const extensions = Array.from(store.getState().extensions.values()).map((ext) => {
       return {
-        extensionId: extension.id,
-        stableKey: extension.stableKey,
-        browser: extension.info.browser || null,
-        profile: extension.info ? { email: extension.info.email || '', id: extension.info.id || '' } : null,
-        activeTargets: extension.connectedTargets.size,
-        playwriterVersion: extension.info?.version || null,
+        extensionId: ext.id,
+        stableKey: ext.stableKey,
+        browser: ext.info.browser || null,
+        profile: ext.info ? { email: ext.info.email || '', id: ext.info.id || '' } : null,
+        activeTargets: ext.connectedTargets.size,
+        playwriterVersion: ext.info?.version || null,
       }
     })
     return c.json({ extensions })
@@ -892,7 +932,7 @@ export async function startPlayWriterCDPRelayServer({
 
       return {
         async onOpen(_event, ws) {
-          if (playwrightClients.has(clientId)) {
+          if (store.getState().playwrightClients.has(clientId)) {
             logger?.log(pc.yellow(`Rejecting duplicate Playwright clientId: ${clientId}`))
             ws.close(4004, 'Duplicate Playwright clientId')
             return
@@ -908,12 +948,14 @@ export async function startPlayWriterCDPRelayServer({
           }
 
           // Add client first so it can receive Target.attachedToTarget events
-          playwrightClients.set(clientId, { id: clientId, ws, extensionId: clientExtensionId })
+          store.setState((s) => {
+            return relayState.addPlaywrightClient(s, { id: clientId, extensionId: clientExtensionId, ws })
+          })
           const extensionConnection = getExtensionConnection(clientExtensionId)
           const targetCount = extensionConnection?.connectedTargets.size || 0
           logger?.log(
             pc.green(
-              `Playwright client connected: ${clientId} (${playwrightClients.size} total) (extension? ${!!extensionConnection}) (${targetCount} pages)`,
+              `Playwright client connected: ${clientId} (${store.getState().playwrightClients.size} total) (extension? ${!!extensionConnection}) (${targetCount} pages)`,
             ),
           )
         },
@@ -946,8 +988,8 @@ export async function startPlayWriterCDPRelayServer({
 
           emitter.emit('cdp:command', { clientId, command: message })
 
-          const extensionConnection = getExtensionConnection(clientExtensionId)
-          if (!extensionConnection) {
+          const extensionConn = getExtensionConnection(clientExtensionId)
+          if (!extensionConn) {
             sendToPlaywright({
               message: {
                 id,
@@ -960,8 +1002,8 @@ export async function startPlayWriterCDPRelayServer({
           }
 
           try {
-            const result: any = await routeCdpCommand({
-              extensionId: extensionConnection.id,
+            const result = await routeCdpCommand({
+              extensionId: extensionConn.id,
               method,
               params,
               sessionId,
@@ -969,7 +1011,10 @@ export async function startPlayWriterCDPRelayServer({
             })
 
             if (method === 'Target.setAutoAttach' && !sessionId) {
-              for (const target of extensionConnection.connectedTargets.values()) {
+              // Re-read state after async routeCdpCommand — targets may have changed
+              const freshExt = store.getState().extensions.get(extensionConn.id)
+              const freshTargets = freshExt?.connectedTargets || new Map()
+              for (const target of freshTargets.values()) {
                 // Skip restricted targets (extensions, chrome:// URLs, non-page types)
                 if (isRestrictedTarget(target.targetInfo)) {
                   continue
@@ -1003,8 +1048,10 @@ export async function startPlayWriterCDPRelayServer({
               }
             }
 
-            if (method === 'Target.setDiscoverTargets' && (params as any)?.discover) {
-              for (const target of extensionConnection.connectedTargets.values()) {
+            if (method === 'Target.setDiscoverTargets' && (params as Protocol.Target.SetDiscoverTargetsRequest)?.discover) {
+              const freshExt2 = store.getState().extensions.get(extensionConn.id)
+              const freshTargets2 = freshExt2?.connectedTargets || new Map()
+              for (const target of freshTargets2.values()) {
                 // Skip restricted targets (extensions, chrome:// URLs, non-page types)
                 if (isRestrictedTarget(target.targetInfo)) {
                   continue
@@ -1036,16 +1083,20 @@ export async function startPlayWriterCDPRelayServer({
               }
             }
 
-            if (method === 'Target.attachToTarget' && result?.sessionId) {
-              const targetId = params?.targetId
-              const target = Array.from(extensionConnection.connectedTargets.values()).find(
-                (t) => t.targetId === targetId,
+            if (method === 'Target.attachToTarget') {
+              const attachResponse = result as Protocol.Target.AttachToTargetResponse | undefined
+              const attachRequestParams = params as Protocol.Target.AttachToTargetRequest | undefined
+              if (attachResponse?.sessionId) {
+              const freshExt3 = store.getState().extensions.get(extensionConn.id)
+              const freshTargets3 = freshExt3?.connectedTargets || new Map()
+              const target = Array.from(freshTargets3.values()).find(
+                (t) => t.targetId === attachRequestParams?.targetId,
               )
               if (target) {
                 const attachedPayload = {
                   method: 'Target.attachedToTarget',
                   params: {
-                    sessionId: result.sessionId,
+                    sessionId: attachResponse.sessionId,
                     targetInfo: {
                       ...target.targetInfo,
                       attached: true,
@@ -1069,6 +1120,7 @@ export async function startPlayWriterCDPRelayServer({
                   source: 'server',
                 })
               }
+              }
             }
 
             const response: CDPResponseBase = { id, sessionId, result }
@@ -1087,8 +1139,8 @@ export async function startPlayWriterCDPRelayServer({
         },
 
         onClose() {
-          playwrightClients.delete(clientId)
-          logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${playwrightClients.size} remaining)`))
+          store.setState((s) => relayState.removePlaywrightClient(s, { clientId }))
+          logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`))
         },
 
         onError(event) {
@@ -1098,7 +1150,9 @@ export async function startPlayWriterCDPRelayServer({
     }),
   )
 
-  const getExtensionInfoFromRequest = (c: { req: { query: (name: string) => string | undefined } }): ExtensionInfo => {
+  const getExtensionInfoFromRequest = (c: {
+    req: { query: (name: string) => string | undefined }
+  }): relayState.ExtensionInfo => {
     const browser = c.req.query('browser')
     const email = c.req.query('email')
     const id = c.req.query('id')
@@ -1151,34 +1205,29 @@ export async function startPlayWriterCDPRelayServer({
       return {
         onOpen(_event, ws) {
           const stableKey = buildStableExtensionKey(incomingExtensionInfo, connectionId)
-          const existingId = extensionKeyIndex.get(stableKey)
-          if (existingId && existingId !== connectionId) {
-            logger?.log(pc.yellow(`Replacing extension connection for ${stableKey} (${existingId} -> ${connectionId})`))
-            const existingConnection = extensionConnections.get(existingId)
-            if (existingConnection) {
-              existingConnection.ws.close(4001, 'Extension Replaced')
+
+          // Check for existing connection with same stableKey and close it
+          const existingExt = relayState.findExtensionByStableKey(store.getState(), stableKey)
+          if (existingExt && existingExt.id !== connectionId) {
+            logger?.log(pc.yellow(`Replacing extension connection for ${stableKey} (${existingExt.id} -> ${connectionId})`))
+            if (existingExt.ws) {
+              existingExt.ws.close(4001, 'Extension Replaced')
             }
           }
 
-          const connection: ExtensionConnection = {
-            id: connectionId,
-            ws,
-            info: incomingExtensionInfo,
-            stableKey,
-            connectedTargets: new Map(),
-            pendingRequests: new Map(),
-            messageId: 0,
-            pingInterval: null,
-          }
-          extensionConnections.set(connectionId, connection)
-          extensionKeyIndex.set(stableKey, connectionId)
+          // State transition: add extension with ws handle included.
+          // Existing same-stableKey entry stays until old socket onClose.
+          store.setState((s) => {
+            return relayState.addExtension(s, { id: connectionId, info: incomingExtensionInfo, stableKey, ws })
+          })
+
           startExtensionPing(connectionId)
           logger?.log(`Extension connected (${connectionId})`)
         },
 
         async onMessage(event, ws) {
-          const connection = extensionConnections.get(connectionId)
-          if (!connection) {
+          const ext = store.getState().extensions.get(connectionId)
+          if (!ext) {
             ws.close(1000, 'Extension not registered')
             return
           }
@@ -1202,13 +1251,34 @@ export async function startPlayWriterCDPRelayServer({
           }
 
           if (message.id !== undefined) {
-            const pending = connection.pendingRequests.get(message.id)
+            const pending = (() => {
+              let pendingRequest: relayState.ExtensionPendingRequest | null = null
+
+              store.setState((s) => {
+                const extensionEntry = s.extensions.get(connectionId)
+                if (!extensionEntry) {
+                  return s
+                }
+
+                const nextPendingRequest = extensionEntry.pendingRequests.get(message.id)
+                if (!nextPendingRequest) {
+                  return s
+                }
+
+                pendingRequest = nextPendingRequest
+                return relayState.removeExtensionPendingRequest(s, {
+                  extensionId: connectionId,
+                  requestId: message.id,
+                })
+              })
+
+              return pendingRequest
+            })() as relayState.ExtensionPendingRequest | null
+
             if (!pending) {
               logger?.log('Unexpected response with id:', message.id)
               return
             }
-
-            connection.pendingRequests.delete(message.id)
 
             if (message.error) {
               pending.reject(new Error(message.error))
@@ -1262,9 +1332,11 @@ export async function startPlayWriterCDPRelayServer({
               const targetParams = params as Protocol.Target.AttachedToTargetEvent
               const incomingSessionId = sessionId
               const iframeParentFrameId = targetParams.targetInfo.parentFrameId
+              // Read current extension state for iframe parent lookup
+              const currentExtState = store.getState().extensions.get(connectionId)
               const iframeOwnerSessionId =
-                targetParams.targetInfo.type === 'iframe' && iframeParentFrameId
-                  ? getPageTargetForFrameId({ connection, frameId: iframeParentFrameId })?.sessionId
+                targetParams.targetInfo.type === 'iframe' && iframeParentFrameId && currentExtState
+                  ? getPageTargetForFrameId({ extensionState: currentExtState, frameId: iframeParentFrameId })?.sessionId
                   : undefined
 
               // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
@@ -1280,8 +1352,8 @@ export async function startPlayWriterCDPRelayServer({
                       source: 'server',
                     },
                   }).catch((error) => {
-                    const message = error instanceof Error ? error.message : String(error)
-                    logger?.log(pc.yellow('[Server] Failed to resume restricted target:'), message)
+                    const msg = error instanceof Error ? error.message : String(error)
+                    logger?.log(pc.yellow('[Server] Failed to resume restricted target:'), msg)
                   })
                 }
                 logger?.log(
@@ -1304,16 +1376,17 @@ export async function startPlayWriterCDPRelayServer({
               )
 
               // Check if we already sent this target to clients (e.g., from Target.setAutoAttach response)
-              const alreadyConnected = connection.connectedTargets.has(targetParams.sessionId)
-              const existingTarget = connection.connectedTargets.get(targetParams.sessionId)
+              const alreadyConnected = currentExtState?.connectedTargets.has(targetParams.sessionId) ?? false
 
-              // Always update our local state with latest target info
-              connection.connectedTargets.set(targetParams.sessionId, {
-                sessionId: targetParams.sessionId,
-                targetId: targetParams.targetInfo.targetId,
-                targetInfo: targetParams.targetInfo,
-                frameIds: existingTarget?.frameIds ?? new Set(),
-              })
+              // State transition: add/update target
+              store.setState((s) =>
+                relayState.addTarget(s, {
+                  extensionId: connectionId,
+                  sessionId: targetParams.sessionId,
+                  targetId: targetParams.targetInfo.targetId,
+                  targetInfo: targetParams.targetInfo,
+                }),
+              )
 
               // Only forward to Playwright if this is a new target to avoid duplicates
               if (!alreadyConnected) {
@@ -1335,7 +1408,9 @@ export async function startPlayWriterCDPRelayServer({
               }
             } else if (method === 'Target.detachedFromTarget') {
               const detachParams = params as Protocol.Target.DetachedFromTargetEvent
-              connection.connectedTargets.delete(detachParams.sessionId)
+              store.setState((s) =>
+                relayState.removeTarget(s, { extensionId: connectionId, sessionId: detachParams.sessionId }),
+              )
 
               sendToPlaywright({
                 message: {
@@ -1347,13 +1422,10 @@ export async function startPlayWriterCDPRelayServer({
               })
             } else if (method === 'Target.targetCrashed') {
               const crashParams = params as Protocol.Target.TargetCrashedEvent
-              for (const [sid, target] of connection.connectedTargets.entries()) {
-                if (target.targetId === crashParams.targetId) {
-                  connection.connectedTargets.delete(sid)
-                  logger?.log(pc.red('[Server] Target crashed, removing:'), crashParams.targetId)
-                  break
-                }
-              }
+              store.setState((s) =>
+                relayState.removeTargetByCrash(s, { extensionId: connectionId, targetId: crashParams.targetId }),
+              )
+              logger?.log(pc.red('[Server] Target crashed, removing:'), crashParams.targetId)
 
               sendToPlaywright({
                 message: {
@@ -1365,12 +1437,9 @@ export async function startPlayWriterCDPRelayServer({
               })
             } else if (method === 'Target.targetInfoChanged') {
               const infoParams = params as Protocol.Target.TargetInfoChangedEvent
-              for (const target of connection.connectedTargets.values()) {
-                if (target.targetId === infoParams.targetInfo.targetId) {
-                  target.targetInfo = infoParams.targetInfo
-                  break
-                }
-              }
+              store.setState((s) =>
+                relayState.updateTargetInfo(s, { extensionId: connectionId, targetInfo: infoParams.targetInfo }),
+              )
 
               sendToPlaywright({
                 message: {
@@ -1383,10 +1452,9 @@ export async function startPlayWriterCDPRelayServer({
             } else if (method === 'Page.frameAttached') {
               const frameParams = params as Protocol.Page.FrameAttachedEvent
               if (sessionId) {
-                const target = connection.connectedTargets.get(sessionId)
-                if (target) {
-                  target.frameIds.add(frameParams.frameId)
-                }
+                store.setState((s) =>
+                  relayState.addFrameId(s, { extensionId: connectionId, sessionId, frameId: frameParams.frameId }),
+                )
               }
 
               sendToPlaywright({
@@ -1400,10 +1468,9 @@ export async function startPlayWriterCDPRelayServer({
               })
             } else if (method === 'Page.frameDetached') {
               const frameParams = params as Protocol.Page.FrameDetachedEvent
-              const ownerTarget = getPageTargetForFrameId({ connection, frameId: frameParams.frameId })
-              if (ownerTarget) {
-                ownerTarget.frameIds.delete(frameParams.frameId)
-              }
+              store.setState((s) =>
+                relayState.removeFrameId(s, { extensionId: connectionId, frameId: frameParams.frameId }),
+              )
 
               sendToPlaywright({
                 message: {
@@ -1417,24 +1484,23 @@ export async function startPlayWriterCDPRelayServer({
             } else if (method === 'Page.frameNavigated') {
               const frameParams = params as Protocol.Page.FrameNavigatedEvent
               if (sessionId) {
-                const target = connection.connectedTargets.get(sessionId)
-                if (target) {
-                  target.frameIds.add(frameParams.frame.id)
-                }
+                store.setState((s) =>
+                  relayState.addFrameId(s, { extensionId: connectionId, sessionId, frameId: frameParams.frame.id }),
+                )
               }
               if (!frameParams.frame.parentId && sessionId) {
-                const target = connection.connectedTargets.get(sessionId)
-                if (target) {
-                  target.targetInfo = {
-                    ...target.targetInfo,
+                store.setState((s) =>
+                  relayState.updateTargetUrl(s, {
+                    extensionId: connectionId,
+                    sessionId,
                     url: frameParams.frame.url,
-                    title: frameParams.frame.name || target.targetInfo.title,
-                  }
-                  logger?.log(
-                    pc.magenta('[Server] Updated target URL from Page.frameNavigated:'),
-                    frameParams.frame.url,
-                  )
-                }
+                    title: frameParams.frame.name || undefined,
+                  }),
+                )
+                logger?.log(
+                  pc.magenta('[Server] Updated target URL from Page.frameNavigated:'),
+                  frameParams.frame.url,
+                )
               }
 
               sendToPlaywright({
@@ -1449,17 +1515,13 @@ export async function startPlayWriterCDPRelayServer({
             } else if (method === 'Page.navigatedWithinDocument') {
               const navParams = params as Protocol.Page.NavigatedWithinDocumentEvent
               if (sessionId) {
-                const target = connection.connectedTargets.get(sessionId)
-                if (target) {
-                  target.targetInfo = {
-                    ...target.targetInfo,
-                    url: navParams.url,
-                  }
-                  logger?.log(
-                    pc.magenta('[Server] Updated target URL from Page.navigatedWithinDocument:'),
-                    navParams.url,
-                  )
-                }
+                store.setState((s) =>
+                  relayState.updateTargetUrl(s, { extensionId: connectionId, sessionId, url: navParams.url }),
+                )
+                logger?.log(
+                  pc.magenta('[Server] Updated target URL from Page.navigatedWithinDocument:'),
+                  navParams.url,
+                )
               }
 
               sendToPlaywright({
@@ -1485,11 +1547,10 @@ export async function startPlayWriterCDPRelayServer({
           }
         },
 
-        onClose(event, ws) {
+        onClose(event) {
           logger?.log(`Extension disconnected: code=${event.code} reason=${event.reason || 'none'} (${connectionId})`)
-          stopExtensionPing(connectionId)
 
-          // Cancel any active recordings BEFORE removing connection (cancelRecording checks isExtensionConnected)
+          // Cancel recordings BEFORE removing extension state (cancelRecording checks isExtensionConnected)
           const recordingRelay = recordingRelays.get(connectionId)
           if (recordingRelay) {
             recordingRelay.cancelRecording({}).catch(() => {
@@ -1498,30 +1559,54 @@ export async function startPlayWriterCDPRelayServer({
           }
           recordingRelays.delete(connectionId)
 
-          const connection = extensionConnections.get(connectionId)
-          if (connection) {
-            for (const pending of connection.pendingRequests.values()) {
+          // Reject all pending I/O requests
+          const closingExt = store.getState().extensions.get(connectionId)
+          if (closingExt) {
+            stopExtensionPing(connectionId)
+            for (const pending of closingExt.pendingRequests.values()) {
               pending.reject(new Error('Extension connection closed'))
             }
-            connection.pendingRequests.clear()
-            connection.connectedTargets.clear()
+            store.setState((s) => relayState.clearExtensionPendingRequests(s, { extensionId: connectionId }))
           }
 
-          if (connection) {
-            const mappedId = extensionKeyIndex.get(connection.stableKey)
-            if (mappedId === connectionId) {
-              extensionKeyIndex.delete(connection.stableKey)
-            }
-          }
-          extensionConnections.delete(connectionId)
+          const currentRelayState = store.getState()
+          const closingExtension = currentRelayState.extensions.get(connectionId)
+          const successorExtension = closingExtension
+            ? Array.from(currentRelayState.extensions.values()).find((ext) => {
+                return ext.id !== connectionId && ext.stableKey === closingExtension.stableKey
+              })
+            : undefined
 
-          for (const [clientId, client] of playwrightClients.entries()) {
-            if (client.extensionId !== connectionId) {
-              continue
-            }
-            client.ws.close(1000, 'Extension disconnected')
-            playwrightClients.delete(clientId)
+          if (successorExtension) {
+            logger?.log(
+              pc.yellow(
+                `Rebinding clients from ${connectionId} to ${successorExtension.id} (stableKey: ${successorExtension.stableKey})`,
+              ),
+            )
+            store.setState((s) => {
+              return relayState.rebindClientsToExtension(s, {
+                fromExtensionId: connectionId,
+                toExtensionId: successorExtension.id,
+              })
+            })
           }
+
+          // Close playwright clients bound to this extension when no successor exists.
+          if (!successorExtension) {
+            const { playwrightClients } = store.getState()
+            for (const client of playwrightClients.values()) {
+              if (client.extensionId === connectionId) {
+                client.ws.close(1000, 'Extension disconnected')
+              }
+            }
+          }
+
+          // State transitions: remove extension + bound clients atomically
+          store.setState((s) => {
+            let next = relayState.removeExtension(s, { extensionId: connectionId })
+            next = relayState.removeClientsForExtension(next, { extensionId: connectionId })
+            return next
+          })
         },
 
         onError(event) {
@@ -1678,9 +1763,9 @@ export async function startPlayWriterCDPRelayServer({
     const sessionId = String(nextSessionNumber++)
     const extensionId = body.extensionId || null
     const cwd = body.cwd
-    const allowDefault = !extensionId && extensionConnections.size === 1
-    const extension = getExtensionConnection(extensionId, { allowFallback: allowDefault })
-    if (!extension) {
+    const allowDefault = !extensionId && store.getState().extensions.size === 1
+    const conn = getExtensionConnection(extensionId, { allowFallback: allowDefault })
+    if (!conn) {
       const error = extensionId
         ? `Extension not connected: ${extensionId}`
         : 'Multiple extensions connected. Specify extensionId.'
@@ -1691,9 +1776,9 @@ export async function startPlayWriterCDPRelayServer({
       sessionId,
       cwd,
       sessionMetadata: {
-        extensionId: extension.stableKey,
-        browser: extension.info.browser || null,
-        profile: extension.info ? { email: extension.info.email || '', id: extension.info.id || '' } : null,
+        extensionId: conn.stableKey,
+        browser: conn.info.browser || null,
+        profile: conn.info ? { email: conn.info.email || '', id: conn.info.id || '' } : null,
       },
     })
     const metadata = executor.getSessionMetadata()
@@ -1825,14 +1910,24 @@ export async function startPlayWriterCDPRelayServer({
 
   return {
     close() {
+      const { extensions, playwrightClients } = store.getState()
+
       for (const client of playwrightClients.values()) {
         client.ws.close(1000, 'Server stopped')
       }
-      playwrightClients.clear()
-      for (const extension of extensionConnections.values()) {
-        extension.ws.close(1000, 'Server stopped')
+
+      for (const ext of extensions.values()) {
+        if (ext.pingInterval) {
+          clearInterval(ext.pingInterval)
+        }
+        ext.ws?.close(1000, 'Server stopped')
       }
-      extensionConnections.clear()
+
+      // Reset store state
+      store.setState({
+        extensions: new Map(),
+        playwrightClients: new Map(),
+      })
       server.close()
       emitter.removeAllListeners()
     },

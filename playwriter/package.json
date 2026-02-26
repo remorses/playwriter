@@ -58,7 +58,8 @@
     "string-dedent": "^3.0.2",
     "strip-ansi": "^7.1.2",
     "ws": "^8.18.3",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "zustand": "^5.0.8"
   },
   "optionalDependencies": {
     "sharp": "^0.34.5"
