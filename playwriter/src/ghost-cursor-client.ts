@@ -71,10 +71,10 @@ const DEFAULT_OPTIONS: GhostCursorRuntimeOptions = {
   color: '#111827',
   size: 22,
   zIndex: 2147483647,
-  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-  minDurationMs: 40,
-  maxDurationMs: 450,
-  speedPxPerMs: 2.2,
+  easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  minDurationMs: 24,
+  maxDurationMs: 320,
+  speedPxPerMs: 4,
 }
 
 const runtime: GhostCursorRuntimeState = {
