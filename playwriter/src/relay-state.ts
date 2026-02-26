@@ -147,14 +147,26 @@ export function addExtension(
   return { ...state, extensions: newExtensions }
 }
 
-/** Remove an extension and all its targets. */
+/** Remove an extension, its targets, and any playwright clients bound to it. */
 export function removeExtension(state: RelayState, { extensionId }: { extensionId: string }): RelayState {
   if (!state.extensions.has(extensionId)) {
     return state
   }
   const newExtensions = new Map(state.extensions)
   newExtensions.delete(extensionId)
-  return { ...state, extensions: newExtensions }
+
+  // Also remove playwright clients bound to this extension
+  const clientsToRemove = Array.from(state.playwrightClients.values())
+    .filter((client) => client.extensionId === extensionId)
+  if (clientsToRemove.length === 0) {
+    return { ...state, extensions: newExtensions }
+  }
+
+  const newClients = new Map(state.playwrightClients)
+  for (const client of clientsToRemove) {
+    newClients.delete(client.id)
+  }
+  return { ...state, extensions: newExtensions, playwrightClients: newClients }
 }
 
 /** Add a playwright client (state + ws handle co-located). */
@@ -229,18 +241,6 @@ export function updateExtensionIO(
   return { ...state, extensions: newExtensions }
 }
 
-/** Increment an extension's message id counter and return updated state. */
-export function incrementExtensionMessageId(state: RelayState, { extensionId }: { extensionId: string }): RelayState {
-  const ext = state.extensions.get(extensionId)
-  if (!ext) {
-    return state
-  }
-
-  const newExtensions = new Map(state.extensions)
-  newExtensions.set(extensionId, { ...ext, messageId: ext.messageId + 1 })
-  return { ...state, extensions: newExtensions }
-}
-
 /** Add or replace one pending extension request callback pair. */
 export function addExtensionPendingRequest(
   state: RelayState,
@@ -280,21 +280,6 @@ export function removeExtensionPendingRequest(
   pendingRequests.delete(requestId)
   const newExtensions = new Map(state.extensions)
   newExtensions.set(extensionId, { ...ext, pendingRequests })
-  return { ...state, extensions: newExtensions }
-}
-
-/** Remove all pending extension request callback pairs. */
-export function clearExtensionPendingRequests(
-  state: RelayState,
-  { extensionId }: { extensionId: string },
-): RelayState {
-  const ext = state.extensions.get(extensionId)
-  if (!ext || ext.pendingRequests.size === 0) {
-    return state
-  }
-
-  const newExtensions = new Map(state.extensions)
-  newExtensions.set(extensionId, { ...ext, pendingRequests: new Map() })
   return { ...state, extensions: newExtensions }
 }
 
@@ -509,25 +494,4 @@ export function updateTargetUrl(
   return { ...state, extensions: newExtensions }
 }
 
-/** Remove all playwright clients bound to a specific extension. */
-export function removeClientsForExtension(
-  state: RelayState,
-  { extensionId }: { extensionId: string },
-): RelayState {
-  const toRemove: string[] = []
-  for (const [clientId, client] of state.playwrightClients) {
-    if (client.extensionId === extensionId) {
-      toRemove.push(clientId)
-    }
-  }
 
-  if (toRemove.length === 0) {
-    return state
-  }
-
-  const newClients = new Map(state.playwrightClients)
-  for (const clientId of toRemove) {
-    newClients.delete(clientId)
-  }
-  return { ...state, playwrightClients: newClients }
-}

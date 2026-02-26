@@ -387,7 +387,9 @@ export async function startPlayWriterCDPRelayServer({
         return s
       }
       id = ext.messageId + 1
-      return relayState.incrementExtensionMessageId(s, { extensionId: resolvedExtensionId })
+      const newExtensions = new Map(s.extensions)
+      newExtensions.set(resolvedExtensionId, { ...ext, messageId: id })
+      return { ...s, extensions: newExtensions }
     })
 
     if (!id) {
@@ -1559,14 +1561,13 @@ export async function startPlayWriterCDPRelayServer({
           }
           recordingRelays.delete(connectionId)
 
-          // Reject all pending I/O requests
+          // Reject all pending I/O requests (state cleanup happens in removeExtension below)
           const closingExt = store.getState().extensions.get(connectionId)
           if (closingExt) {
             stopExtensionPing(connectionId)
             for (const pending of closingExt.pendingRequests.values()) {
               pending.reject(new Error('Extension connection closed'))
             }
-            store.setState((s) => relayState.clearExtensionPendingRequests(s, { extensionId: connectionId }))
           }
 
           const currentRelayState = store.getState()
@@ -1601,12 +1602,8 @@ export async function startPlayWriterCDPRelayServer({
             }
           }
 
-          // State transitions: remove extension + bound clients atomically
-          store.setState((s) => {
-            let next = relayState.removeExtension(s, { extensionId: connectionId })
-            next = relayState.removeClientsForExtension(next, { extensionId: connectionId })
-            return next
-          })
+          // State transition: remove extension + its bound clients atomically
+          store.setState((s) => relayState.removeExtension(s, { extensionId: connectionId }))
         },
 
         onError(event) {

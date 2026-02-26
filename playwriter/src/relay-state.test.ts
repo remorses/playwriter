@@ -130,6 +130,19 @@ describe('removeExtension', () => {
 
     expect(after).toBe(before) // Same reference — no allocation
   })
+
+  test('also removes playwright clients bound to the extension', () => {
+    let state = stateWithExtension('ext-1')
+    state = relayState.addPlaywrightClient(state, { id: 'c1', extensionId: 'ext-1', ws: fakeWs() })
+    state = relayState.addPlaywrightClient(state, { id: 'c2', extensionId: 'ext-1', ws: fakeWs() })
+    state = relayState.addPlaywrightClient(state, { id: 'c3', extensionId: 'ext-2', ws: fakeWs() })
+
+    const after = relayState.removeExtension(state, { extensionId: 'ext-1' })
+
+    expect(after.extensions.size).toBe(0)
+    expect(after.playwrightClients.size).toBe(1)
+    expect(after.playwrightClients.has('c3')).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -168,15 +181,6 @@ describe('removePlaywrightClient', () => {
 })
 
 describe('extension I/O fields', () => {
-  test('increments extension message id without mutating old state', () => {
-    const state = stateWithExtension('ext-1')
-    expect(state.extensions.get('ext-1')?.messageId).toBe(0)
-
-    const after = relayState.incrementExtensionMessageId(state, { extensionId: 'ext-1' })
-    expect(after.extensions.get('ext-1')?.messageId).toBe(1)
-    expect(state.extensions.get('ext-1')?.messageId).toBe(0)
-  })
-
   test('adds and removes pending extension requests', () => {
     let state = stateWithExtension('ext-1')
 
@@ -198,32 +202,6 @@ describe('extension I/O fields', () => {
 
     state = relayState.removeExtensionPendingRequest(state, { extensionId: 'ext-1', requestId: 7 })
     expect(state.extensions.get('ext-1')?.pendingRequests.has(7)).toBe(false)
-  })
-
-  test('clears all pending extension requests', () => {
-    let state = emptyState()
-    state = relayState.addExtension(state, {
-      id: 'ext-1',
-      info: { browser: 'Chrome' },
-      stableKey: 'profile:chrome-1',
-      ws: fakeWs(),
-    })
-    // Manually add a pending request
-    state = relayState.addExtensionPendingRequest(state, {
-      extensionId: 'ext-1',
-      requestId: 1,
-      pendingRequest: {
-        resolve: (_result: unknown) => {
-          return
-        },
-        reject: (_error: Error) => {
-          return
-        },
-      },
-    })
-
-    state = relayState.clearExtensionPendingRequests(state, { extensionId: 'ext-1' })
-    expect(state.extensions.get('ext-1')?.pendingRequests.size).toBe(0)
   })
 
   test('updateExtensionIO updates ws and pingInterval', () => {
@@ -516,30 +494,7 @@ describe('updateTargetUrl', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// removeClientsForExtension
-// ---------------------------------------------------------------------------
 
-describe('removeClientsForExtension', () => {
-  test('removes all clients bound to extension', () => {
-    let state = stateWithExtension('ext-1')
-    state = relayState.addPlaywrightClient(state, { id: 'c1', extensionId: 'ext-1', ws: fakeWs() })
-    state = relayState.addPlaywrightClient(state, { id: 'c2', extensionId: 'ext-1', ws: fakeWs() })
-    state = relayState.addPlaywrightClient(state, { id: 'c3', extensionId: 'ext-2', ws: fakeWs() })
-
-    const after = relayState.removeClientsForExtension(state, { extensionId: 'ext-1' })
-
-    expect(after.playwrightClients.size).toBe(1)
-    expect(after.playwrightClients.has('c3')).toBe(true)
-  })
-
-  test('no-op if no clients bound', () => {
-    const before = stateWithExtension('ext-1')
-    const after = relayState.removeClientsForExtension(before, { extensionId: 'ext-1' })
-
-    expect(after).toBe(before)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // Derivation helpers
