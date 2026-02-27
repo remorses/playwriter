@@ -174,7 +174,7 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 - **CDP sessions**: use `getCDPSession({ page: state.page })` not `state.page.context().newCDPSession()` - NEVER use `newCDPSession()` method, it doesn't work through playwriter relay
 - **Wait for load**: use `state.page.waitForLoadState('domcontentloaded')` not `state.page.waitForEvent('load')` - waitForEvent times out if already loaded
 - **Minimize timeouts**: prefer proper waits (`waitForSelector`, `waitForPageLoad`) over `state.page.waitForTimeout()`. Short timeouts (1-2s) are acceptable for non-deterministic events like popups, animations, or tab opens where no specific selector is available
-- **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` or `screenshotWithAccessibilityLabels` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens
+- **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` or `screenshotWithAccessibilityLabels` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens. `snapshot()` also replaces most `page.evaluate()` DOM inspection calls — use it instead of manually querying class names, bounding boxes, or visibility flags.
 
 ## interaction feedback loop
 
@@ -419,14 +419,26 @@ await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
 ```
 
 **12. Never use `dispatchEvent` or `{ force: true }` to bypass blockers**
-`dispatchEvent(new MouseEvent(...))` and `{ force: true }` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. If a click "succeeds" but nothing changes, you're clicking the wrong node:
+`dispatchEvent(new MouseEvent(...))` and `{ force: true }` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. The same applies to `element.click()` inside `page.evaluate()`. If a click "succeeds" but nothing changes, you're either clicking the wrong node or using the wrong interaction pattern:
 
 ```js
 // BAD: heading click bypasses overlay but React ignores it
 await state.page.locator('h3:has-text("Node.js")').click({ force: true })
+// BAD: evaluate click bypasses all Playwright input simulation
+await state.page.evaluate(() => document.querySelector('button').click())
 // GOOD: snapshot shows the real interactive element is a radio, not the heading
 await state.page.getByRole('radio', { name: 'Node.js' }).click()
 ```
+
+**13. Over-investigating before trying the correct interaction pattern**
+When a widget ignores a `mouse.click()`, don't start inspecting CDP event listeners, React fibers, or canvas pixel data. First try the interaction pattern that matches the widget type:
+
+- **Drawing/annotation tools, canvas paint** → `mouse.down`, move with steps, `mouse.up` (see drag section)
+- **Keyboard-activated modes** → `keyboard.press('d')` before drawing; check docs/tooltip for shortcut
+- **Sliders, timeline scrubbers** → drag pattern
+- **Collapsed/toggled toolbars** → click the toggle first, wait for expansion, then interact
+
+Take a `snapshot()` after each attempt to see what changed. Only investigate DOM internals if the correct interaction pattern produces zero UI response after 2–3 attempts.
 
 ## checking page state
 
@@ -875,6 +887,8 @@ await editor.edit({ url: matches[0].url, oldString: 'DEBUG = false', newString: 
 
 **screenshotWithAccessibilityLabels** - take a screenshot with Vimium-style visual labels overlaid on interactive elements. Shows labels, captures screenshot, then removes labels. The image and accessibility snapshot are automatically included in the response. Can be called multiple times to capture multiple screenshots. Use a timeout of **20 seconds** for complex pages.
 
+**The image is returned directly in your context — no external image analysis Task agent needed.** Use this instead of `screenshot` + spawning an image-understanding agent whenever you need to both see the page visually and find interactive element coordinates. It is the single best tool for understanding an unfamiliar UI.
+
 Prefer this for pages with grids, image galleries, maps, or complex visual layouts where spatial position matters. For simple text-heavy pages, `snapshot` with search is faster and uses fewer tokens.
 
 ```js
@@ -956,6 +970,8 @@ While recording is active, playwriter tracks when each `execute()` call starts a
 A 1-second buffer is preserved around each interaction so viewers see context before and after each action.
 
 Requires `ffmpeg` and `ffprobe` installed on the system.
+
+**Timeout**: `createDemoVideo` runs ffmpeg on the full recording and can take 60–120+ seconds. Always pass `--timeout 120000` (or higher) to the playwriter execute call that contains it, otherwise it will silently time out before the file is written.
 
 ```js
 // Start recording
@@ -1194,6 +1210,17 @@ await state.page.mouse.move(100, 200)
 await state.page.mouse.down()
 await state.page.mouse.move(400, 500, { steps: 10 }) // steps for smooth drag
 await state.page.mouse.up()
+```
+
+**Freehand drawing, annotation widgets, and canvas tools** use this same `mouse.down → move → up` pattern. If a widget expects a drawn stroke (paint tools, annotation overlays, range sliders, timeline scrubbers), always use held-mouse motion — not `mouse.click()`:
+
+```js
+// Draw a stroke across a canvas or annotation layer
+await state.page.mouse.move(startX, startY)
+await state.page.mouse.down()
+await state.page.mouse.move(endX, endY, { steps: 15 }) // steps = smoother stroke
+await state.page.mouse.up()
+await state.page.waitForTimeout(500) // let the widget process the stroke
 ```
 
 ### key hold / release / repeat
