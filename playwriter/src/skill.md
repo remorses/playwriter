@@ -174,7 +174,8 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 - **CDP sessions**: use `getCDPSession({ page: state.page })` not `state.page.context().newCDPSession()` - NEVER use `newCDPSession()` method, it doesn't work through playwriter relay
 - **Wait for load**: use `state.page.waitForLoadState('domcontentloaded')` not `state.page.waitForEvent('load')` - waitForEvent times out if already loaded
 - **Minimize timeouts**: prefer proper waits (`waitForSelector`, `waitForPageLoad`) over `state.page.waitForTimeout()`. Short timeouts (1-2s) are acceptable for non-deterministic events like popups, animations, or tab opens where no specific selector is available
-- **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` or `screenshotWithAccessibilityLabels` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens. `snapshot()` also replaces most `page.evaluate()` DOM inspection calls — use it instead of manually querying class names, bounding boxes, or visibility flags.
+- **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens
+- **Snapshot replaces page.evaluate() for inspection**: do NOT write `page.evaluate()` calls to manually query class names, bounding boxes, child counts, or visibility flags. `snapshot()` already shows every interactive element with its text, role, and a ready-to-use locator. If you catch yourself writing `document.querySelector` or `getBoundingClientRect` inside evaluate — stop and use `snapshot()` instead. Reserve `page.evaluate()` for actions that modify page state (e.g., `localStorage.clear()`, scroll manipulation) or extract non-DOM data (e.g., `window.__CONFIG__`)
 
 ## interaction feedback loop
 
@@ -430,15 +431,17 @@ await state.page.evaluate(() => document.querySelector('button').click())
 await state.page.getByRole('radio', { name: 'Node.js' }).click()
 ```
 
-**13. Over-investigating before trying the correct interaction pattern**
-When a widget ignores a `mouse.click()`, don't start inspecting CDP event listeners, React fibers, or canvas pixel data. First try the interaction pattern that matches the widget type:
+**13. Over-investigating instead of just interacting**
+When something doesn't respond to a click, do NOT start inspecting CDP event listeners, React fibers, canvas pixel data, or writing `page.evaluate()` to read class names and bounding boxes. This wastes massive context. Instead:
 
-- **Drawing/annotation tools, canvas paint** → `mouse.down`, move with steps, `mouse.up` (see drag section)
-- **Keyboard-activated modes** → `keyboard.press('d')` before drawing; check docs/tooltip for shortcut
-- **Sliders, timeline scrubbers** → drag pattern
-- **Collapsed/toggled toolbars** → click the toggle first, wait for expansion, then interact
-
-Take a `snapshot()` after each attempt to see what changed. Only investigate DOM internals if the correct interaction pattern produces zero UI response after 2–3 attempts.
+1. Take a `snapshot()` — it shows every interactive element and what to click
+2. Try a different interaction pattern if `click()` didn't work:
+   - **Drawing/annotation tools, canvas paint** → `mouse.down`, move with steps, `mouse.up` (see drag section)
+   - **Keyboard-activated modes** → press the shortcut key (snapshot shows tooltip text like "Draw mode D")
+   - **Sliders, timeline scrubbers** → drag pattern
+   - **Collapsed/toggled toolbars** → click the toggle first, wait, then interact
+3. Take another `snapshot()` to see what changed
+4. Only investigate DOM internals if correct interaction patterns produce zero response after 2–3 attempts
 
 ## checking page state
 
@@ -886,8 +889,6 @@ await editor.edit({ url: matches[0].url, oldString: 'DEBUG = false', newString: 
 ```
 
 **screenshotWithAccessibilityLabels** - take a screenshot with Vimium-style visual labels overlaid on interactive elements. Shows labels, captures screenshot, then removes labels. The image and accessibility snapshot are automatically included in the response. Can be called multiple times to capture multiple screenshots. Use a timeout of **20 seconds** for complex pages.
-
-**The image is returned directly in your context — no external image analysis Task agent needed.** Use this instead of `screenshot` + spawning an image-understanding agent whenever you need to both see the page visually and find interactive element coordinates. It is the single best tool for understanding an unfamiliar UI.
 
 Prefer this for pages with grids, image galleries, maps, or complex visual layouts where spatial position matters. For simple text-heavy pages, `snapshot` with search is faster and uses fewer tokens.
 
