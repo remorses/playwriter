@@ -375,6 +375,21 @@ export default function IndexPage() {
         />
 
         <ComparisonTable
+          title='vs Playwright CLI'
+          headers={['', 'Playwright CLI', 'Playwriter']}
+          rows={[
+            ['Browser', 'Spawns new browser', 'Uses your Chrome'],
+            ['Login state', 'Fresh', 'Already logged in'],
+            ['Extensions', 'None', 'Your existing ones'],
+            ['Captchas', 'Always blocked', 'Bypass (disconnect extension)'],
+            ['Collaboration', 'Separate window', 'Same browser as user'],
+            ['Capabilities', 'Limited command set', 'Anything Playwright can do'],
+            ['Raw CDP access', 'No', 'Yes'],
+            ['Video recording', 'File-based tracing', 'Native tab capture (30\u201360fps)'],
+          ]}
+        />
+
+        <ComparisonTable
           title='vs BrowserMCP'
           headers={['', 'BrowserMCP', 'Playwriter']}
           rows={[

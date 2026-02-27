@@ -139,6 +139,19 @@ Color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=
 
 ## Comparison
 
+### vs Playwright CLI
+
+|                | Playwright CLI       | Playwriter                        |
+| -------------- | -------------------- | --------------------------------- |
+| Browser        | Spawns new browser   | **Uses your Chrome**              |
+| Login state    | Fresh                | Already logged in                 |
+| Extensions     | None                 | Your existing ones                |
+| Captchas       | Always blocked       | Bypass (disconnect extension)     |
+| Collaboration  | Separate window      | Same browser as user              |
+| Capabilities   | Limited command set   | Anything Playwright can do        |
+| Raw CDP access | No                   | Yes                               |
+| Video recording| File-based tracing   | Native tab capture (30–60fps)     |
+
 ### vs BrowserMCP
 
 |               | BrowserMCP          | Playwriter               |
