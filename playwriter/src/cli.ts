@@ -448,7 +448,7 @@ cli
 
 cli
   .command('serve', 'Start the CDP relay server for remote MCP connections')
-  .option('--host <host>', 'Host to bind to', { default: '0.0.0.0' })
+  .option('--host <host>', 'Host to bind to', { default: 'localhost' })
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .option('--replace', 'Kill existing server if running')
   .action(async (options: { host: string; token?: string; replace?: boolean }) => {
