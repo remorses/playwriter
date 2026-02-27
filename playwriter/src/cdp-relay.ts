@@ -932,6 +932,11 @@ export async function startPlayWriterCDPRelayServer({
         : getExtensionConnection(null, { allowFallback: true })
       const clientExtensionId = resolvedExtension?.id || null
 
+      const getBoundExtensionIdForClient = (): string | null => {
+        const client = store.getState().playwrightClients.get(clientId)
+        return client?.extensionId || null
+      }
+
       return {
         async onOpen(_event, ws) {
           if (store.getState().playwrightClients.has(clientId)) {
@@ -990,7 +995,8 @@ export async function startPlayWriterCDPRelayServer({
 
           emitter.emit('cdp:command', { clientId, command: message })
 
-          const extensionConn = getExtensionConnection(clientExtensionId)
+          const boundExtensionId = getBoundExtensionIdForClient()
+          const extensionConn = getExtensionConnection(boundExtensionId)
           if (!extensionConn) {
             sendToPlaywright({
               message: {
@@ -1089,39 +1095,39 @@ export async function startPlayWriterCDPRelayServer({
               const attachResponse = result as Protocol.Target.AttachToTargetResponse | undefined
               const attachRequestParams = params as Protocol.Target.AttachToTargetRequest | undefined
               if (attachResponse?.sessionId) {
-              const freshExt3 = store.getState().extensions.get(extensionConn.id)
-              const freshTargets3 = freshExt3?.connectedTargets || new Map()
-              const target = Array.from(freshTargets3.values()).find(
-                (t) => t.targetId === attachRequestParams?.targetId,
-              )
-              if (target) {
-                const attachedPayload = {
-                  method: 'Target.attachedToTarget',
-                  params: {
-                    sessionId: attachResponse.sessionId,
-                    targetInfo: {
-                      ...target.targetInfo,
-                      attached: true,
+                const freshExt3 = store.getState().extensions.get(extensionConn.id)
+                const freshTargets3 = freshExt3?.connectedTargets || new Map()
+                const target = Array.from(freshTargets3.values()).find((t) => {
+                  return t.targetId === attachRequestParams?.targetId
+                })
+                if (target) {
+                  const attachedPayload = {
+                    method: 'Target.attachedToTarget',
+                    params: {
+                      sessionId: attachResponse.sessionId,
+                      targetInfo: {
+                        ...target.targetInfo,
+                        attached: true,
+                      },
+                      waitingForDebugger: false,
                     },
-                    waitingForDebugger: false,
-                  },
-                } satisfies CDPEventFor<'Target.attachedToTarget'>
-                if (!target.targetInfo.url) {
-                  logger?.error(
-                    pc.red('[Server] WARNING: Target.attachedToTarget (from attachToTarget) sent with empty URL!'),
+                  } satisfies CDPEventFor<'Target.attachedToTarget'>
+                  if (!target.targetInfo.url) {
+                    logger?.error(
+                      pc.red('[Server] WARNING: Target.attachedToTarget (from attachToTarget) sent with empty URL!'),
+                      JSON.stringify(attachedPayload),
+                    )
+                  }
+                  logger?.log(
+                    pc.magenta('[Server] Target.attachedToTarget (from attachToTarget) payload:'),
                     JSON.stringify(attachedPayload),
                   )
+                  sendToPlaywright({
+                    message: attachedPayload,
+                    clientId,
+                    source: 'server',
+                  })
                 }
-                logger?.log(
-                  pc.magenta('[Server] Target.attachedToTarget (from attachToTarget) payload:'),
-                  JSON.stringify(attachedPayload),
-                )
-                sendToPlaywright({
-                  message: attachedPayload,
-                  clientId,
-                  source: 'server',
-                })
-              }
               }
             }
 
@@ -1572,10 +1578,15 @@ export async function startPlayWriterCDPRelayServer({
 
           const currentRelayState = store.getState()
           const closingExtension = currentRelayState.extensions.get(connectionId)
+          const successorCandidates = closingExtension
+            ? Array.from(currentRelayState.extensions.values())
+                .reverse()
+                .filter((ext) => {
+                  return ext.id !== connectionId && ext.stableKey === closingExtension.stableKey && Boolean(ext.ws)
+                })
+            : []
           const successorExtension = closingExtension
-            ? Array.from(currentRelayState.extensions.values()).find((ext) => {
-                return ext.id !== connectionId && ext.stableKey === closingExtension.stableKey
-              })
+            ? successorCandidates[0]
             : undefined
 
           if (successorExtension) {
