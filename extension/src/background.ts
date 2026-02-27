@@ -710,11 +710,15 @@ export function sendMessage(message: any): void {
 
 async function syncTabGroup(): Promise<void> {
   try {
-    // Tabs in 'connected' or 'connecting' state belong in the group.
-    // Including 'connecting' prevents a loop where syncTabGroup removes a tab the user
-    // just dragged in (still connecting), which triggers onUpdated → disconnect → reconnect.
+    // Include 'connecting' tabs in the group only when the relay is alive, so that
+    // tabs the user drags into the group stay visible while attaching. When the relay
+    // is dead all tabs are 'connecting' (waiting for reconnect) and the group should
+    // be cleaned up. The onUpdated handler (line ~1601) already guards against the
+    // ungroup→disconnect loop for 'connecting' tabs, so excluding them here is safe.
+    const { connectionState } = store.getState()
+    const isRelayConnected = connectionState === 'connected'
     const connectedTabIds = Array.from(store.getState().tabs.entries())
-      .filter(([_, info]) => info.state === 'connected' || info.state === 'connecting')
+      .filter(([_, info]) => info.state === 'connected' || (info.state === 'connecting' && isRelayConnected))
       .map(([tabId]) => tabId)
 
     // Always query by title - no cached ID that can go stale
