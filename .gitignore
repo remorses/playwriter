@@ -15,6 +15,10 @@ playwriter/src/assets/framer.html
 *-snapshot.txt
 claude-extension
 
+# generated skill docs (source of truth: playwriter/src/skill.md)
+website/public/SKILL.md
+website/public/.well-known/skills/playwriter/SKILL.md
+
 # opensrc - source code for packages
 opensrc/
 
