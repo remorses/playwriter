@@ -261,6 +261,35 @@ Example: summarize CDP traffic counts by direction + method:
 jq -r '.direction + "\t" + (.message.method // "response")' ~/.playwriter/cdp.jsonl | uniq -c
 ```
 
+## Development Setup
+
+To build and run Playwriter from source:
+
+**Prerequisites:** [Node.js](https://nodejs.org/), [pnpm](https://pnpm.io/), and [bun](https://bun.sh/) installed.
+
+```bash
+# 1. Clone and bootstrap (inits git submodule, installs deps, builds playwright-core)
+git clone https://github.com/remorses/playwriter.git
+cd playwriter
+pnpm run bootstrap
+
+# 2. Build playwriter and the extension
+pnpm run build
+
+# 3. Link the CLI globally for local development
+cd playwriter
+pnpm link --global
+
+# Verify
+playwriter --help
+```
+
+For development with auto-rebuild:
+
+```bash
+pnpm run watch
+```
+
 ## Support
 
 If Playwriter is useful to you, consider [sponsoring the project](https://github.com/sponsors/remorses).
