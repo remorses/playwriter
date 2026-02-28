@@ -196,9 +196,86 @@ relevant files are located in paths like playwright/packages/playwright-core/src
 
 ignore everything that is outside of playwright/packages/playwright-core in the playwright submodule, it is unused
 
-for our playwright fork notice the types.d.ts are generated from markdown files, so adding new APIs require updating those and not the actual source files unfortunately
-
 EVERY update to playwright code that changes its api or behaviour MUST be followed by a bump in version and update in playwright-core/CHANGELOG.md file. on release of the playwriter package then the playwright-core package must be released first, always using `pnpm publish` command. no need to update version in playwriter package.json because we use the :workspace version.
+
+### adding or updating @xmorse/playwright-core public APIs
+
+`types.d.ts` is **generated** — never edit it directly. the generation pipeline is:
+
+```
+playwright/docs/src/api/class-*.md          ← markdown doc entries (source of truth)
+playwright/utils/generate_types/overrides.d.ts  ← complex type overrides & standalone type exports
+         ↓
+playwright/utils/generate_types/index.js    ← generator script
+         ↓
+playwright/packages/playwright-core/types/types.d.ts   ← generated output
+playwright/packages/playwright-client/types/types.d.ts  ← generated output
+```
+
+if you add runtime code (a new method, property, or type) to the fork without updating the type generation inputs, the API will work at runtime but TypeScript consumers won't see it — `pnpm typecheck` in playwriter will fail.
+
+**full checklist for adding a new API (in order):**
+
+1. **implement the runtime code**
+   - client side: `playwright/packages/playwright-core/src/client/*.ts`
+   - server side (if needed): `playwright/packages/playwright-core/src/server/*.ts`
+   - protocol (if it crosses the channel): `playwright/packages/protocol/src/channels.d.ts` + dispatchers
+
+2. **add a doc entry in the markdown** — this is what the type generator reads
+   - methods: `playwright/docs/src/api/class-page.md`, `class-browsercontext.md`, `class-locator.md`, etc.
+   - format examples:
+     ```md
+     ## async method: BrowserContext.getExistingCDPSession
+     * since: v1.59
+     * langs: js
+     - returns: <[CDPSession]>
+
+     Description of what the method does.
+
+     ### param: BrowserContext.getExistingCDPSession.page
+     * since: v1.59
+     - `page` <[Page]|[Frame]>
+
+     Parameter description.
+     ```
+     ```md
+     ## property: Page.onMouseAction
+     * since: v1.59
+     * langs: js
+     - type: <[null]|[function]\([MouseActionEvent]\):[Promise]<[void]>>
+
+     Property description.
+     ```
+     ```md
+     ## method: Locator.selector
+     * since: v1.59
+     * langs: js
+     - returns: <[string]>
+
+     Method description.
+     ```
+   - use `* langs: js` for JS/TS-only APIs (skips Java/Python/C# generation)
+
+3. **add type overrides if needed** — `playwright/utils/generate_types/overrides.d.ts`
+   - REQUIRED for: standalone exported types (e.g. `export type MouseActionEvent = {...}`), complex generics, function overloads
+   - the generator validates that every method/property in overrides.d.ts has a matching doc entry in the markdown — if you add an override without a doc entry, generation fails with `Unknown override method`
+   - standalone type aliases (`export type Foo = {...}`) do NOT need a doc entry, only interface members do
+
+4. **regenerate types.d.ts**
+   ```bash
+   node playwright/utils/generate_types/index.js
+   ```
+
+5. **rebuild playwright-core**
+   ```bash
+   pnpm playwright:build  # 0.1s
+   ```
+
+6. **bump version** in `playwright/packages/playwright-core/package.json`
+
+7. **update CHANGELOG.md** in `playwright/packages/playwright-core/CHANGELOG.md`
+
+8. **verify** — run `pnpm typecheck` in the `playwriter/` package to confirm zero errors
 
 ### submodule setup
 
