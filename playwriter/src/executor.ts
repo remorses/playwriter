@@ -69,10 +69,11 @@ const usefulGlobals = {
 } as const
 
 /**
- * Determines if code should be auto-wrapped with `return await (...)`.
- * Returns true for single expression statements that aren't assignments.
+ * Parse code and check if it's a single expression that should be auto-returned.
+ * Returns the exact expression source (without trailing semicolon) using AST
+ * node offsets, or null if the code should not be auto-wrapped. See #58.
  */
-export function shouldAutoReturn(code: string): boolean {
+export function getAutoReturnExpression(code: string): string | null {
   try {
     const ast = acorn.parse(code, {
       ecmaVersion: 'latest',
@@ -83,19 +84,19 @@ export function shouldAutoReturn(code: string): boolean {
 
     // Must be exactly one statement
     if (ast.body.length !== 1) {
-      return false
+      return null
     }
 
     const stmt = ast.body[0]
 
     // If it's already a return statement, don't auto-wrap
     if (stmt.type === 'ReturnStatement') {
-      return false
+      return null
     }
 
     // Must be an ExpressionStatement
     if (stmt.type !== 'ExpressionStatement') {
-      return false
+      return null
     }
 
     // Don't auto-return side-effect expressions
@@ -105,22 +106,42 @@ export function shouldAutoReturn(code: string): boolean {
       expr.type === 'UpdateExpression' ||
       (expr.type === 'UnaryExpression' && (expr as acorn.UnaryExpression).operator === 'delete')
     ) {
-      return false
+      return null
     }
 
     // Don't auto-return sequence expressions that contain assignments
     if (expr.type === 'SequenceExpression') {
       const hasAssignment = expr.expressions.some((e: acorn.Expression) => e.type === 'AssignmentExpression')
       if (hasAssignment) {
-        return false
+        return null
       }
     }
 
-    return true
+    // Use the expression node's start/end offsets to extract just the expression
+    // source, excluding any trailing semicolon. This is more robust than regex.
+    return code.slice(expr.start, expr.end)
   } catch {
     // Parse failed, don't auto-return
-    return false
+    return null
   }
+}
+
+/** Backward-compatible helper: returns true if code should be auto-wrapped. */
+export function shouldAutoReturn(code: string): boolean {
+  return getAutoReturnExpression(code) !== null
+}
+
+/**
+ * Wraps user code in an async IIFE for vm execution.
+ * Uses AST node offsets to extract the expression without trailing semicolons,
+ * avoiding SyntaxError when embedding inside `return await (...)`. See #58.
+ */
+export function wrapCode(code: string): string {
+  const expr = getAutoReturnExpression(code)
+  if (expr !== null) {
+    return `(async () => { return await (${expr}) })()`
+  }
+  return `(async () => { ${code} })()`
 }
 
 const EXTENSION_NOT_CONNECTED_ERROR = `The Playwriter Chrome extension is not connected. Make sure you have:
@@ -1061,9 +1082,11 @@ export class PlaywrightExecutor {
       }
 
       const vmContext = vm.createContext(vmContextObj)
-      const autoReturn = shouldAutoReturn(code)
-      const wrappedCode = autoReturn ? `(async () => { return await (${code}) })()` : `(async () => { ${code} })()`
-      const hasExplicitReturn = autoReturn || /\breturn\b/.test(code)
+      const autoReturnExpr = getAutoReturnExpression(code)
+      const wrappedCode = autoReturnExpr !== null
+        ? `(async () => { return await (${autoReturnExpr}) })()`
+        : `(async () => { ${code} })()`
+      const hasExplicitReturn = autoReturnExpr !== null || /\breturn\b/.test(code)
 
       // Track execution timestamps relative to recording start (seconds).
       // Used to identify idle gaps that can be sped up in demo videos.

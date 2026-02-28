@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldAutoReturn } from './executor.js'
+import { shouldAutoReturn, wrapCode } from './executor.js'
 
 describe('shouldAutoReturn', () => {
   it('returns true for simple expressions', () => {
@@ -87,5 +87,51 @@ describe('shouldAutoReturn', () => {
   it('handles template literals', () => {
     expect(shouldAutoReturn('`hello`')).toBe(true)
     expect(shouldAutoReturn('`hello ${name}`')).toBe(true)
+  })
+
+  it('returns true for expressions with trailing semicolons', () => {
+    expect(shouldAutoReturn('await page.title();')).toBe(true)
+    expect(shouldAutoReturn('page.title();')).toBe(true)
+    expect(shouldAutoReturn('snapshot({ page });')).toBe(true)
+    expect(shouldAutoReturn('await screenshotWithAccessibilityLabels({ page });')).toBe(true)
+    // trailing whitespace after semicolon
+    expect(shouldAutoReturn('await foo();   ')).toBe(true)
+    // comment after semicolon
+    expect(shouldAutoReturn('await foo(); // comment')).toBe(true)
+    // double semicolons are two statements, not auto-return
+    expect(shouldAutoReturn('await foo();;')).toBe(false)
+  })
+})
+
+describe('wrapCode', () => {
+  it('wraps single expressions with return await', () => {
+    expect(wrapCode('await page.title()')).toBe(
+      '(async () => { return await (await page.title()) })()',
+    )
+  })
+
+  it('strips trailing semicolons to avoid SyntaxError (#58)', () => {
+    // The bug: trailing semicolons inside return await (...;) produce invalid JS
+    const wrapped = wrapCode('await screenshotWithAccessibilityLabels({ page });')
+    expect(wrapped).toBe(
+      '(async () => { return await (await screenshotWithAccessibilityLabels({ page })) })()',
+    )
+    // Verify it's valid JS by parsing it
+    expect(() => new Function(wrapped)).not.toThrow()
+  })
+
+  it('produces valid JS for trailing semicolons on simple calls', () => {
+    const wrapped = wrapCode('page.title();')
+    expect(wrapped).toBe('(async () => { return await (page.title()) })()')
+    expect(() => new Function(wrapped)).not.toThrow()
+  })
+
+  it('wraps multi-statement code without return', () => {
+    const wrapped = wrapCode('const x = 1; console.log(x);')
+    expect(wrapped).toBe('(async () => { const x = 1; console.log(x); })()')
+  })
+
+  it('wraps assignment expressions without return', () => {
+    expect(wrapCode('x = 5')).toBe('(async () => { x = 5 })()')
   })
 })
