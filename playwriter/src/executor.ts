@@ -592,6 +592,11 @@ export class PlaywrightExecutor {
     const contexts = browser.contexts()
     const context = contexts.length > 0 ? contexts[0] : await browser.newContext()
 
+    // Action timeout (click, fill, hover, etc.) is short for fast agent failure.
+    // Navigation timeout (goto, reload) is longer since page loads are slower.
+    context.setDefaultTimeout(2000)
+    context.setDefaultNavigationTimeout(10000)
+
     context.on('page', (page) => {
       this.setupPageListeners(page)
     })
@@ -669,6 +674,11 @@ export class PlaywrightExecutor {
     const contexts = browser.contexts()
     const context = contexts.length > 0 ? contexts[0] : await browser.newContext()
 
+    // Action timeout (click, fill, hover, etc.) is short for fast agent failure.
+    // Navigation timeout (goto, reload) is longer since page loads are slower.
+    context.setDefaultTimeout(2000)
+    context.setDefaultNavigationTimeout(10000)
+
     context.on('page', (page) => {
       this.setupPageListeners(page)
     })
@@ -717,7 +727,6 @@ export class PlaywrightExecutor {
       await this.ensureConnection()
       const page = await this.getCurrentPage(timeout)
       const context = this.context || page.context()
-      context.setDefaultTimeout(timeout)
 
       this.logger.log('Executing code:', code)
 

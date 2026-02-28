@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.80
+
+### Improvements
+
+- **Descriptive click timeout errors**: When `locator.click()` times out due to actionability failures, the error now includes the reason (e.g. "Element is not visible", "Element is not stable", "<button> intercepts pointer events") instead of just "Timeout exceeded."
+- **Faster action timeouts for agents**: Default Playwright action timeout reduced from 10s to 2s. Navigation timeout remains at 10s. Agents now get fast failure with descriptive errors instead of waiting 10 seconds for a generic timeout.
+
 ## 0.0.79
 
 ### Improvements

@@ -1018,4 +1018,93 @@ describe('Relay Core Tests', () => {
     // Cleanup
     await page2.close()
   }, 60000)
+
+  it('should show descriptive error when clicking a hidden element', async () => {
+    // Create a fresh page and set content with a collapsed details element
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          state.errorTestPage = await context.newPage();
+          await state.errorTestPage.setContent(\`
+            <details>
+              <summary>Toggle</summary>
+              <button id="hidden-btn">Hidden Button</button>
+            </details>
+          \`);
+        `,
+      },
+    })
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          await state.errorTestPage.click('#hidden-btn');
+        `,
+      },
+    })
+    expect((result as any).isError).toBe(true)
+    const text = (result as any).content[0].text
+    // Strip stack traces and call logs to only match the descriptive error line
+    const errorLine = text.split('\n').find((l: string) => l.includes('Timeout') || l.includes('not visible') || l.includes('not stable'))
+    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. Element is not visible"`)
+    // Cleanup
+    await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
+  }, 30000)
+
+  it('should show descriptive error when clicking an element covered by another', async () => {
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          state.errorTestPage = await context.newPage();
+          await state.errorTestPage.setContent(\`
+            <div style="position:relative">
+              <button id="covered-btn" style="position:absolute;top:0;left:0">Covered</button>
+              <div id="overlay" style="position:absolute;top:0;left:0;width:200px;height:200px;background:red;z-index:10">Overlay</div>
+            </div>
+          \`);
+        `,
+      },
+    })
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          await state.errorTestPage.click('#covered-btn');
+        `,
+      },
+    })
+    expect((result as any).isError).toBe(true)
+    const text = (result as any).content[0].text
+    const errorLine = text.split('\n').find((l: string) => l.includes('Timeout') || l.includes('intercepts'))
+    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. <div id="overlay">Overlay</div> intercepts pointer events"`)
+    await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
+  }, 30000)
+
+  it('should show descriptive error when clicking a display:none element', async () => {
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          state.errorTestPage = await context.newPage();
+          await state.errorTestPage.setContent('<button id="invisible" style="display:none">Invisible</button>');
+        `,
+      },
+    })
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          await state.errorTestPage.click('#invisible');
+        `,
+      },
+    })
+    expect((result as any).isError).toBe(true)
+    const text = (result as any).content[0].text
+    const errorLine = text.split('\n').find((l: string) => l.includes('Timeout') || l.includes('not visible'))
+    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. Element is not visible"`)
+    await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
+  }, 30000)
+
 })
