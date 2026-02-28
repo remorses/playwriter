@@ -25,7 +25,9 @@ This outputs the complete documentation including:
 
 ```bash
 playwriter session new
-playwriter -s 1 -e "await page.goto('https://example.com')"
+playwriter -s 1 -e 'await page.goto("https://example.com")'
 ```
+
+**Always use single quotes** for the `-e` argument. Single quotes prevent bash from interpreting `$`, backticks, and backslashes inside your JS code. Use double quotes or backtick template literals for strings inside the JS.
 
 If `playwriter` is not found, use `npx playwriter@latest` or `bunx playwriter@latest`.

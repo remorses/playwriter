@@ -58,42 +58,50 @@ Default timeout is 10 seconds. you can increase the timeout with `--timeout <ms>
 
 ```bash
 # Navigate to a page
-playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto('https://example.com')"
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com")'
 
 # Click a button
-playwriter -s 1 -e "await state.page.click('button')"
+playwriter -s 1 -e 'await state.page.click("button")'
 
 # Get page title
-playwriter -s 1 -e "await state.page.title()"
+playwriter -s 1 -e 'await state.page.title()'
 
 # Take a screenshot
-playwriter -s 1 -e "await state.page.screenshot({ path: 'screenshot.png', scale: 'css' })"
+playwriter -s 1 -e 'await state.page.screenshot({ path: "screenshot.png", scale: "css" })'
 
 # Get accessibility snapshot
-playwriter -s 1 -e "await snapshot({ page: state.page })"
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
 
 # Get accessibility snapshot for a specific iframe
-const frame = await state.page.locator('iframe').contentFrame()
-await snapshot({ frame })
+playwriter -s 1 -e 'const frame = await state.page.locator("iframe").contentFrame(); await snapshot({ frame })'
 ```
+
+**Why single quotes?** Always wrap `-e` code in single quotes (`'...'`) to prevent bash from interpreting `$`, backticks, and other special characters inside your JS code. Use double quotes or backtick template literals for strings inside the JS code.
 
 **Multiline code:**
 
 ```bash
-# Using $'...' syntax for multiline code
+# Preferred: use heredoc with quoted delimiter (disables all bash expansion)
+playwriter -s 1 -e "$(cat <<'EOF'
+const links = await state.page.$$eval('a', els => els.map(e => e.href));
+console.log('Found', links.length, 'links');
+const price = text.match(/\$[\d.]+/);
+EOF
+)"
+
+# Alternative: $'...' syntax (but beware: \n and \t become special, and
+# single quotes inside must be escaped as \')
 playwriter -s 1 -e $'
 const title = await state.page.title();
 const url = state.page.url();
 console.log({ title, url });
 '
-
-# Or use heredoc
-playwriter -s 1 -e "$(cat <<'EOF'
-const links = await state.page.$$eval('a', els => els.map(e => e.href));
-console.log('Found', links.length, 'links');
-EOF
-)"
 ```
+
+**Quoting rules summary:**
+- **Single quotes** (`'...'`): best for one-liners. No bash expansion at all. But you cannot include a literal single quote inside — use double quotes for JS strings instead.
+- **Heredoc** (`<<'EOF'`): best for multiline code. The quoted `'EOF'` delimiter disables all bash expansion. Any character works inside, including `$`, backticks, and single quotes.
+- **`$'...'`**: allows `\'` escaping but `\n`, `\t`, `\\` become special — conflicts with JS regex patterns.
 
 ### Debugging playwriter issues
 
@@ -328,19 +336,20 @@ await state.page.keyboard.press('Enter')
 await state.page.keyboard.type('Line 2')
 ```
 
-**6. Quote escaping in $'...' syntax**
-When using `$'...'` for multiline code, nested quotes break parsing. Use different quote styles or escape them:
+**6. Quote escaping in bash**
+Bash parses `$`, backticks, and `\` inside double-quoted strings. This silently corrupts JS code containing dollar signs (regex like `/\$[\d.]+/`), template literals, or backslash patterns.
 
 ```bash
-# BAD: nested double quotes break $'...'
-playwriter -s 1 -e $'await state.page.locator("[id=\"_r_a_\"]").click()'
+# BAD: double quotes — bash interprets $ and backticks in your JS
+playwriter -s 1 -e "const price = text.match(/\$[\d.]+/)"
 
-# GOOD: use single quotes inside, or template strings
-playwriter -s 1 -e $'await state.page.locator(\'[id="_r_a_"]\').click()'
+# GOOD: single quotes — bash passes everything through literally
+playwriter -s 1 -e 'await state.page.locator(`[id="_r_a_"]`).click()'
 
-# GOOD: use heredoc for complex quoting
+# GOOD: heredoc for complex code with mixed quotes
 playwriter -s 1 -e "$(cat <<'EOF'
 await state.page.locator('[id="_r_a_"]').click()
+const match = html.match(/\$[\d.]+/g)
 EOF
 )"
 ```
@@ -516,6 +525,22 @@ Search for specific elements:
 ```js
 const snap = await snapshot({ page: state.page, search: /button|submit/i })
 ```
+
+**Scoping snapshots to a specific element** — pass a `locator` instead of `page` to snapshot only a subtree. This dramatically reduces output size when you only care about one section of the page (e.g., the main content area, ignoring the sidebar/header/footer):
+
+```js
+// Full page snapshot: ~150 lines (sidebar, nav, header, footer, everything)
+await snapshot({ page: state.page })
+
+// Scoped to main: ~20 lines (just the content you care about)
+await snapshot({ locator: state.page.locator('main') })
+
+// Scope to a specific form, dialog, or section
+await snapshot({ locator: state.page.locator('[role="dialog"]') })
+await snapshot({ locator: state.page.locator('form#checkout') })
+```
+
+Use this whenever the full page snapshot is dominated by navigation or layout elements you don't need. It saves significant tokens and makes the output much easier to parse.
 
 **Filtering large snapshots in JS** — when the built-in `search` isn't enough (e.g., you need multiple patterns or custom logic), filter the snapshot string directly:
 

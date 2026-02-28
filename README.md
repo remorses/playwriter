@@ -33,7 +33,7 @@ Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly 
 
    ```bash
    npm i -g playwriter
-   playwriter -s 1 -e "await page.goto('https://example.com')"
+   playwriter -s 1 -e 'await page.goto("https://example.com")'
    ```
 
 4. Install the skill so your agent knows how to use Playwriter:
@@ -45,10 +45,12 @@ Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly 
 
 ```bash
 playwriter session new  # creates stateful sandbox, outputs session id (e.g. 1)
-playwriter -s 1 -e "await page.goto('https://example.com')"
-playwriter -s 1 -e "console.log(await snapshot({ page }))"
-playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"
+playwriter -s 1 -e 'await page.goto("https://example.com")'
+playwriter -s 1 -e 'console.log(await snapshot({ page }))'
+playwriter -s 1 -e 'await page.locator("aria-ref=e5").click()'
 ```
+
+> **Tip:** Always use single quotes for `-e` to prevent bash from interpreting `$`, backticks, and `\` in your JS code. Use double quotes for strings inside the JS.
 
 ## CLI Usage
 
@@ -61,15 +63,15 @@ playwriter session list             # show sessions + state keys
 playwriter session reset <id>       # fix connection issues
 
 # Execute (always use -s)
-playwriter -s 1 -e "await page.goto('https://example.com')"
-playwriter -s 1 -e "await page.click('button')"
-playwriter -s 1 -e "console.log(await page.title())"
+playwriter -s 1 -e 'await page.goto("https://example.com")'
+playwriter -s 1 -e 'await page.click("button")'
+playwriter -s 1 -e 'console.log(await page.title())'
 ```
 
 Create your own page to avoid interference from other agents:
 
 ```bash
-playwriter -s 1 -e "state.myPage = await context.newPage(); await state.myPage.goto('https://example.com')"
+playwriter -s 1 -e 'state.myPage = await context.newPage(); await state.myPage.goto("https://example.com")'
 ```
 
 Multiline:
@@ -216,7 +218,7 @@ npx -y traforo -p 19988 -t my-machine -- npx -y playwriter serve --token <secret
 ```bash
 export PLAYWRITER_HOST=https://my-machine-tunnel.traforo.dev
 export PLAYWRITER_TOKEN=<secret>
-playwriter -s 1 -e "await page.goto('https://example.com')"
+playwriter -s 1 -e 'await page.goto("https://example.com")'
 ```
 
 Also works on a LAN without traforo (`PLAYWRITER_HOST=192.168.1.10`). Full guide with use cases (remote Mac mini, user support, multi-machine control): [docs/remote-access.md](./docs/remote-access.md)

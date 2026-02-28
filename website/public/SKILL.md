@@ -58,42 +58,50 @@ Default timeout is 10 seconds. you can increase the timeout with `--timeout <ms>
 
 ```bash
 # Navigate to a page
-playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto('https://example.com')"
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com")'
 
 # Click a button
-playwriter -s 1 -e "await state.page.click('button')"
+playwriter -s 1 -e 'await state.page.click("button")'
 
 # Get page title
-playwriter -s 1 -e "await state.page.title()"
+playwriter -s 1 -e 'await state.page.title()'
 
 # Take a screenshot
-playwriter -s 1 -e "await state.page.screenshot({ path: 'screenshot.png', scale: 'css' })"
+playwriter -s 1 -e 'await state.page.screenshot({ path: "screenshot.png", scale: "css" })'
 
 # Get accessibility snapshot
-playwriter -s 1 -e "await snapshot({ page: state.page })"
+playwriter -s 1 -e 'await snapshot({ page: state.page })'
 
 # Get accessibility snapshot for a specific iframe
-const frame = await state.page.locator('iframe').contentFrame()
-await snapshot({ frame })
+playwriter -s 1 -e 'const frame = await state.page.locator("iframe").contentFrame(); await snapshot({ frame })'
 ```
+
+**Why single quotes?** Always wrap `-e` code in single quotes (`'...'`) to prevent bash from interpreting `$`, backticks, and other special characters inside your JS code. Use double quotes or backtick template literals for strings inside the JS code.
 
 **Multiline code:**
 
 ```bash
-# Using $'...' syntax for multiline code
+# Preferred: use heredoc with quoted delimiter (disables all bash expansion)
+playwriter -s 1 -e "$(cat <<'EOF'
+const links = await state.page.$$eval('a', els => els.map(e => e.href));
+console.log('Found', links.length, 'links');
+const price = text.match(/\$[\d.]+/);
+EOF
+)"
+
+# Alternative: $'...' syntax (but beware: \n and \t become special, and
+# single quotes inside must be escaped as \')
 playwriter -s 1 -e $'
 const title = await state.page.title();
 const url = state.page.url();
 console.log({ title, url });
 '
-
-# Or use heredoc
-playwriter -s 1 -e "$(cat <<'EOF'
-const links = await state.page.$$eval('a', els => els.map(e => e.href));
-console.log('Found', links.length, 'links');
-EOF
-)"
 ```
+
+**Quoting rules summary:**
+- **Single quotes** (`'...'`): best for one-liners. No bash expansion at all. But you cannot include a literal single quote inside — use double quotes for JS strings instead.
+- **Heredoc** (`<<'EOF'`): best for multiline code. The quoted `'EOF'` delimiter disables all bash expansion. Any character works inside, including `$`, backticks, and single quotes.
+- **`$'...'`**: allows `\'` escaping but `\n`, `\t`, `\\` become special — conflicts with JS regex patterns.
 
 ### Debugging playwriter issues
 
@@ -174,7 +182,8 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 - **CDP sessions**: use `getCDPSession({ page: state.page })` not `state.page.context().newCDPSession()` - NEVER use `newCDPSession()` method, it doesn't work through playwriter relay
 - **Wait for load**: use `state.page.waitForLoadState('domcontentloaded')` not `state.page.waitForEvent('load')` - waitForEvent times out if already loaded
 - **Minimize timeouts**: prefer proper waits (`waitForSelector`, `waitForPageLoad`) over `state.page.waitForTimeout()`. Short timeouts (1-2s) are acceptable for non-deterministic events like popups, animations, or tab opens where no specific selector is available
-- **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` or `screenshotWithAccessibilityLabels` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens
+- **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens
+- **Snapshot replaces page.evaluate() for inspection**: do NOT write `page.evaluate()` calls to manually query class names, bounding boxes, child counts, or visibility flags. `snapshot()` already shows every interactive element with its text, role, and a ready-to-use locator. If you catch yourself writing `document.querySelector` or `getBoundingClientRect` inside evaluate — stop and use `snapshot()` instead. Reserve `page.evaluate()` for actions that modify page state (e.g., `localStorage.clear()`, scroll manipulation) or extract non-DOM data (e.g., `window.__CONFIG__`)
 
 ## interaction feedback loop
 
@@ -327,19 +336,20 @@ await state.page.keyboard.press('Enter')
 await state.page.keyboard.type('Line 2')
 ```
 
-**6. Quote escaping in $'...' syntax**
-When using `$'...'` for multiline code, nested quotes break parsing. Use different quote styles or escape them:
+**6. Quote escaping in bash**
+Bash parses `$`, backticks, and `\` inside double-quoted strings. This silently corrupts JS code containing dollar signs (regex like `/\$[\d.]+/`), template literals, or backslash patterns.
 
 ```bash
-# BAD: nested double quotes break $'...'
-playwriter -s 1 -e $'await state.page.locator("[id=\"_r_a_\"]").click()'
+# BAD: double quotes — bash interprets $ and backticks in your JS
+playwriter -s 1 -e "const price = text.match(/\$[\d.]+/)"
 
-# GOOD: use single quotes inside, or template strings
-playwriter -s 1 -e $'await state.page.locator(\'[id="_r_a_"]\').click()'
+# GOOD: single quotes — bash passes everything through literally
+playwriter -s 1 -e 'await state.page.locator(`[id="_r_a_"]`).click()'
 
-# GOOD: use heredoc for complex quoting
+# GOOD: heredoc for complex code with mixed quotes
 playwriter -s 1 -e "$(cat <<'EOF'
 await state.page.locator('[id="_r_a_"]').click()
+const match = html.match(/\$[\d.]+/g)
 EOF
 )"
 ```
@@ -408,34 +418,39 @@ await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
 
-**11. Click times out or does nothing — snapshot first to find the blocking dialog**
-When a click times out or has no visible effect, the most common cause is a **modal or overlay intercepting pointer events**. Do not retry with different selectors or `{ force: true }` — snapshot immediately to find the blocker, then interact with it using its own snapshot locators:
+**11. Click times out or does nothing — snapshot to find the blocker**
+When a click times out, a **modal or overlay** is likely intercepting pointer events. Do not retry with different selectors or `{ force: true }` — snapshot to find the blocker:
 
 ```js
-// BAD: click timed out → retry with force:true (still blocked by the overlay)
-await state.page.locator('button[name="Create Project"]').click({ force: true })
-
-// GOOD: click timed out → snapshot first
-const snap = await snapshot({ page: state.page, search: /dialog|modal/i })
-// Found: dialog > heading "Do you use a framework?" → interact with it properly
+// click timed out → don't retry blindly, find what's blocking
+await snapshot({ page: state.page, search: /dialog|modal/i })
+// Found modal → interact with it properly (don't just close via X, it may reappear)
 await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
-await state.page.getByRole('button', { name: 'Configure SDK' }).click()
-// Now the button is unblocked
-await state.page.getByRole('button', { name: 'Create Project' }).click()
 ```
 
-**12. `dispatchEvent` and `{ force: true }` do not work on React SPAs**
-React uses a synthetic event system. Raw DOM `dispatchEvent(new MouseEvent(...))` and Playwright's `{ force: true }` bypass actionability checks but **do not trigger React event handlers** — component state won't update. If a click appears to succeed but nothing changes, you are clicking the wrong DOM node. Use the snapshot to find the real interactive element (`role=radio`, `role=button`), not a heading or wrapper div:
+**12. Never use `dispatchEvent` or `{ force: true }` to bypass blockers**
+`dispatchEvent(new MouseEvent(...))` and `{ force: true }` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. The same applies to `element.click()` inside `page.evaluate()`. If a click "succeeds" but nothing changes, you're either clicking the wrong node or using the wrong interaction pattern:
 
 ```js
-// BAD: H3 heading is not what React listens to — state won't update
-await state.page.evaluate(() => h3El.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+// BAD: heading click bypasses overlay but React ignores it
 await state.page.locator('h3:has-text("Node.js")').click({ force: true })
-
-// GOOD: snapshot shows the real interactive element
-// - role=radio[name="Node.js"]  ← React's event handler is here
+// BAD: evaluate click bypasses all Playwright input simulation
+await state.page.evaluate(() => document.querySelector('button').click())
+// GOOD: snapshot shows the real interactive element is a radio, not the heading
 await state.page.getByRole('radio', { name: 'Node.js' }).click()
 ```
+
+**13. Over-investigating instead of just interacting**
+When something doesn't respond to a click, do NOT start inspecting CDP event listeners, React fibers, canvas pixel data, or writing `page.evaluate()` to read class names and bounding boxes. This wastes massive context. Instead:
+
+1. Take a `snapshot()` — it shows every interactive element and what to click
+2. Try a different interaction pattern if `click()` didn't work:
+   - **Drawing/annotation tools, canvas paint** → `mouse.down`, move with steps, `mouse.up` (see drag section)
+   - **Keyboard-activated modes** → press the shortcut key (snapshot shows tooltip text like "Draw mode D")
+   - **Sliders, timeline scrubbers** → drag pattern
+   - **Collapsed/toggled toolbars** → click the toggle first, wait, then interact
+3. Take another `snapshot()` to see what changed
+4. Only investigate DOM internals if correct interaction patterns produce zero response after 2–3 attempts
 
 ## checking page state
 
@@ -462,9 +477,9 @@ await snapshot({ page: state.page, search?, showDiffSinceLastCall? })
 `accessibilitySnapshot` is still available as an alias for backward compatibility.
 
 - `search` - string/regex to filter results (returns first 10 matching lines)
-- `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`). Pass `false` to get full snapshot.
+- `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`, but `false` when `search` is provided). Pass `false` to get full snapshot.
 
-Snapshots return full content on first call, then diffs on subsequent calls. Diff is only returned when shorter than full content. If nothing changed, returns "No changes since last snapshot" message. Use `showDiffSinceLastCall: false` to always get full content. This diffing behavior also applies to `getCleanHTML` and `getPageMarkdown`.
+Snapshots return full content on first call, then diffs on subsequent calls. Diff is only returned when shorter than full content. If nothing changed, returns "No changes since last snapshot" message. Use `showDiffSinceLastCall: false` to always get full content. When `search` is provided, diffing is disabled by default so the search filters the full content — pass `showDiffSinceLastCall: true` explicitly to combine both. This diffing behavior also applies to `getCleanHTML` and `getPageMarkdown`.
 
 Example output:
 
@@ -480,28 +495,16 @@ Each interactive line ends with a Playwright locator you can pass to `state.page
 If multiple elements share the same locator, a `>> nth=N` suffix is added (0-based)
 to make it unique.
 
-**Use snapshot locators directly — never invent selectors.** The locator string shown in the snapshot IS the selector. Use it immediately with `getByRole` or `locator()`. Do not guess CSS selectors, `heading >> text=...`, or `getByText` when the snapshot already gives you the exact string:
+**Use snapshot locators directly — never invent selectors.** The snapshot output IS the selector. Do not guess CSS selectors or `getByText` when the snapshot already gives you the exact match:
 
 ```js
-// Snapshot shows: - role=radio[name="Nope, Vanilla"]
+// Snapshot shows: role=radio[name="Nope, Vanilla"]  →  use it directly
 await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
-
-// Snapshot shows: - role=button[name="Configure SDK"]
-await state.page.getByRole('button', { name: 'Configure SDK' }).click()
-
-// Snapshot shows: - role=link[name="SIGN IN"]
+// Snapshot shows: role=link[name="SIGN IN"]  →  or pass raw string to locator()
 await state.page.locator('role=link[name="SIGN IN"]').click()
 ```
 
-**SPA CSS text-transform case mismatch**: accessibility snapshots reflect the visual text, which may be uppercase due to CSS `text-transform`. The actual DOM value (and what `getByRole` matches on) may differ. Use case-insensitive regex to be safe:
-
-```js
-// Snapshot shows heading "NODE.JS" but real DOM value is "Node.js"
-// BAD: exact string may not match
-await state.page.getByRole('heading', { name: 'NODE.JS' })
-// GOOD: case-insensitive regex always works
-await state.page.getByRole('heading', { name: /node\.js/i })
-```
+**Beware CSS text-transform**: snapshots show visual text (`heading "NODE.JS"`) but DOM may be `"Node.js"`. Use case-insensitive regex: `getByRole('heading', { name: /node\.js/i })`.
 
 If a screenshot shows ref labels like `e3`, resolve them using the last snapshot:
 
@@ -522,6 +525,22 @@ Search for specific elements:
 ```js
 const snap = await snapshot({ page: state.page, search: /button|submit/i })
 ```
+
+**Scoping snapshots to a specific element** — pass a `locator` instead of `page` to snapshot only a subtree. This dramatically reduces output size when you only care about one section of the page (e.g., the main content area, ignoring the sidebar/header/footer):
+
+```js
+// Full page snapshot: ~150 lines (sidebar, nav, header, footer, everything)
+await snapshot({ page: state.page })
+
+// Scoped to main: ~20 lines (just the content you care about)
+await snapshot({ locator: state.page.locator('main') })
+
+// Scope to a specific form, dialog, or section
+await snapshot({ locator: state.page.locator('[role="dialog"]') })
+await snapshot({ locator: state.page.locator('form#checkout') })
+```
+
+Use this whenever the full page snapshot is dominated by navigation or layout elements you don't need. It saves significant tokens and makes the output much easier to parse.
 
 **Filtering large snapshots in JS** — when the built-in `search` isn't enough (e.g., you need multiple patterns or custom logic), filter the snapshot string directly:
 
@@ -785,7 +804,7 @@ const fullHtml = await getCleanHTML({ locator: state.page, showDiffSinceLastCall
 
 - `locator` - Playwright Locator or Page to get HTML from
 - `search` - string/regex to filter results (returns first 10 matching lines with 5 lines context)
-- `showDiffSinceLastCall` - returns diff since last call (default: `true`). Pass `false` to get full HTML.
+- `showDiffSinceLastCall` - returns diff since last call (default: `true`, but `false` when `search` is provided). Pass `false` to get full HTML.
 - `includeStyles` - keep style and class attributes (default: false)
 
 **HTML processing:**
@@ -827,7 +846,7 @@ The main article content as plain text, with paragraphs preserved...
 
 - `page` - Playwright Page to extract content from
 - `search` - string/regex to filter content (returns first 10 matching lines with 5 lines context)
-- `showDiffSinceLastCall` - returns diff since last call (default: `true`). Pass `false` to get full content.
+- `showDiffSinceLastCall` - returns diff since last call (default: `true`, but `false` when `search` is provided). Pass `false` to get full content.
 
 **Use cases:**
 
@@ -913,14 +932,7 @@ await screenshotWithAccessibilityLabels({ page: state.page })
 
 Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=sliders, salmon=menus, amber=tabs.
 
-**resizeImage** - shrink an image so it consumes fewer tokens when read back into context. Overwrites the input file by default. Fits within 1568×1568px (Claude-optimal). Always outputs JPEG.
-
-```js
-// Shrink screenshot in-place for LLM ingestion
-await resizeImage({ input: './screenshot.png' })
-```
-
-Also supports explicit dimensions: `width`, `height`, `maxDimension`, `fit` ('inside' | 'cover' | 'contain' | 'fill'), `quality` (1-100, default 80), `output` (defaults to overwriting input).
+**resizeImage** - shrink an image in-place so it consumes fewer tokens when read back into context. `await resizeImage({ input: './screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `output`.
 
 **recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` in the extension context, so **recording survives page navigation**. Video is saved as mp4.
 
@@ -984,6 +996,8 @@ While recording is active, playwriter tracks when each `execute()` call starts a
 A 1-second buffer is preserved around each interaction so viewers see context before and after each action.
 
 Requires `ffmpeg` and `ffprobe` installed on the system.
+
+**Timeout**: `createDemoVideo` runs ffmpeg on the full recording and can take 60–120+ seconds. Always pass `--timeout 120000` (or higher) to the playwriter execute call that contains it, otherwise it will silently time out before the file is written.
 
 ```js
 // Start recording
@@ -1222,6 +1236,17 @@ await state.page.mouse.move(100, 200)
 await state.page.mouse.down()
 await state.page.mouse.move(400, 500, { steps: 10 }) // steps for smooth drag
 await state.page.mouse.up()
+```
+
+**Freehand drawing, annotation widgets, and canvas tools** use this same `mouse.down → move → up` pattern. If a widget expects a drawn stroke (paint tools, annotation overlays, range sliders, timeline scrubbers), always use held-mouse motion — not `mouse.click()`:
+
+```js
+// Draw a stroke across a canvas or annotation layer
+await state.page.mouse.move(startX, startY)
+await state.page.mouse.down()
+await state.page.mouse.move(endX, endY, { steps: 15 }) // steps = smoother stroke
+await state.page.mouse.up()
+await state.page.waitForTimeout(500) // let the widget process the stroke
 ```
 
 ### key hold / release / repeat
