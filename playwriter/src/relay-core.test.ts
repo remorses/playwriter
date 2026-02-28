@@ -1043,11 +1043,11 @@ describe('Relay Core Tests', () => {
         `,
       },
     })
-    expect((result as any).isError).toBe(true)
     const text = (result as any).content[0].text
     // Strip stack traces and call logs to only match the descriptive error line
     const errorLine = text.split('\n').find((l: string) => l.includes('Timeout') || l.includes('not visible') || l.includes('not stable'))
-    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. Element is not visible"`)
+    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. Element is not visible — it may be hidden by CSS, inside a collapsed <details>, inactive tab, or closed accordion. Try: interact with the page to reveal it first, or use { force: true } to skip visibility checks"`)
+    expect((result as any).isError).toBe(true)
     // Cleanup
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
@@ -1075,10 +1075,10 @@ describe('Relay Core Tests', () => {
         `,
       },
     })
-    expect((result as any).isError).toBe(true)
     const text = (result as any).content[0].text
     const errorLine = text.split('\n').find((l: string) => l.includes('Timeout') || l.includes('intercepts'))
     expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. <div id="overlay">Overlay</div> intercepts pointer events"`)
+    expect((result as any).isError).toBe(true)
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
 
@@ -1100,10 +1100,10 @@ describe('Relay Core Tests', () => {
         `,
       },
     })
-    expect((result as any).isError).toBe(true)
     const text = (result as any).content[0].text
     const errorLine = text.split('\n').find((l: string) => l.includes('Timeout') || l.includes('not visible'))
-    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. Element is not visible"`)
+    expect(errorLine).toMatchInlineSnapshot(`"Error executing code: page.click: Timeout 2000ms exceeded. Element is not visible — it may be hidden by CSS, inside a collapsed <details>, inactive tab, or closed accordion. Try: interact with the page to reveal it first, or use { force: true } to skip visibility checks"`)
+    expect((result as any).isError).toBe(true)
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
 
