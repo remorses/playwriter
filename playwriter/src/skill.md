@@ -938,8 +938,6 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 While recording is active, Playwriter automatically overlays a smooth ghost cursor that follows automated mouse actions (`page.mouse.*`, `locator.click()`, hover flows) using `page.onMouseAction` from the Playwright fork.
 
-**Ghost cursor survives MPA navigation**: when recording starts, the cursor bundle is registered via `Page.addScriptToEvaluateOnNewDocument`, so Chrome re-injects and re-enables it on every new document. This means the cursor is visible across full-page navigations (GitHub, Hacker News, etc.) without any extra work.
-
 For demos where cursor movement should be visible and human-like, drive the page with interaction methods (`locator.click()`, `page.click()`, `page.mouse.move()`, `press`, typing). Avoid skipping interactions with direct state jumps (for example, `goto(itemUrl)` instead of clicking the link) when your goal is to show realistic pointer motion in the recording.
 
 **Note**: Recording requires the user to have clicked the Playwriter extension icon on the tab. This grants `activeTab` permission needed for `chrome.tabCapture`. Recording works on tabs where the icon was clicked - if you need to record a new tab, ask the user to click the icon on it first.

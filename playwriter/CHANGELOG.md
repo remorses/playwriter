@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.85
+
+### Bug Fixes
+
+- **Revert ghost cursor init-script persistence**: Removed the `Page.addScriptToEvaluateOnNewDocument` cursor injection path (`addGhostCursorInitScript`) and restored direct per-page injection behavior used before, since the init-script approach did not work reliably in practice.
+
 ## 0.0.84
 
 ### Docs

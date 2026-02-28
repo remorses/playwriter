@@ -1,19 +1,12 @@
 /**
  * Node-side ghost cursor helpers.
  * Injects the browser bundle and forwards mouse action events to the page overlay.
- *
- * Two injection strategies:
- * 1. One-shot: page.evaluate() — used by enableGhostCursor() for single pages
- * 2. Persistent: Page.addScriptToEvaluateOnNewDocument — used by
- *    addGhostCursorInitScript() so the cursor survives MPA navigations.
- *    Chrome re-runs the script on every new document automatically.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page, MouseActionEvent } from '@xmorse/playwright-core'
-import { getCDPSessionForPage, type ICDPSession } from './cdp-session.js'
 
 export interface GhostCursorClientOptions {
   style?: 'minimal' | 'dot' | 'screenstudio'
@@ -30,7 +23,6 @@ interface GhostCursorBrowserApi {
   enable: (options?: GhostCursorClientOptions) => void
   disable: () => void
   applyMouseAction: (event: MouseActionEvent) => void
-  isEnabled: () => boolean
 }
 
 let ghostCursorCode: string | null = null
@@ -84,84 +76,34 @@ export async function disableGhostCursor(options: { page: Page }): Promise<void>
   })
 }
 
-/**
- * Register the ghost cursor bundle as a persistent init script via CDP
- * Page.addScriptToEvaluateOnNewDocument. Chrome re-runs this on every new
- * document (navigation), so the cursor survives MPA page loads.
- *
- * The script auto-enables when the DOM is ready (DOMContentLoaded or
- * requestAnimationFrame fallback) so the cursor is visible immediately
- * on each new page.
- *
- * Returns the CDP identifier needed to remove it later.
- */
-export async function addGhostCursorInitScript(options: {
-  page: Page
-  cursorOptions?: GhostCursorClientOptions
-}): Promise<{ cdp: ICDPSession; identifier: string }> {
-  const { page, cursorOptions } = options
-  const cdp = await getCDPSessionForPage({ page })
-  const code = getGhostCursorCode()
-
-  // Wrap the bundle: inject, then auto-enable once DOM is ready.
-  // DOMContentLoaded may have already fired if the script runs late,
-  // so check document.readyState first.
-  const optionsJson = JSON.stringify(cursorOptions ?? {})
-  const wrappedCode = `
-${code}
-;(function() {
-  function autoEnable() {
-    var api = globalThis.__playwriterGhostCursor;
-    if (api) {
-      var opts = ${optionsJson};
-      api.enable(Object.keys(opts).length ? opts : undefined);
-    }
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', autoEnable, { once: true });
-  } else {
-    requestAnimationFrame(autoEnable);
-  }
-})();
-`
-
-  const result = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: wrappedCode,
-  })
-
-  return { cdp, identifier: result.identifier }
-}
-
-/**
- * Remove a previously registered ghost cursor init script.
- */
-export async function removeGhostCursorInitScript(options: {
-  cdp: ICDPSession
-  identifier: string
-}): Promise<void> {
-  const { cdp, identifier } = options
-  await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
-}
-
 export async function applyGhostCursorMouseAction(options: {
   page: Page
   event: MouseActionEvent
 }): Promise<void> {
   const { page, event } = options
 
-  await page.evaluate(
+  const applied = await page.evaluate(
     ({ serializedEvent }) => {
       const api = (globalThis as { __playwriterGhostCursor?: GhostCursorBrowserApi }).__playwriterGhostCursor
       if (!api) {
-        return
+        return false
       }
 
-      // Ensure cursor is enabled (may be a freshly injected init script
-      // where DOMContentLoaded hasn't fired yet)
-      if (!api.isEnabled()) {
-        api.enable()
-      }
       api.applyMouseAction(serializedEvent)
+      return true
+    },
+    { serializedEvent: event },
+  )
+
+  if (applied) {
+    return
+  }
+
+  await ensureGhostCursorInjected({ page })
+  await page.evaluate(
+    ({ serializedEvent }) => {
+      const api = (globalThis as { __playwriterGhostCursor?: GhostCursorBrowserApi }).__playwriterGhostCursor
+      api?.applyMouseAction(serializedEvent)
     },
     { serializedEvent: event },
   )

@@ -1,19 +1,13 @@
 /**
  * Encapsulates ghost cursor lifecycle for recording sessions.
  * Keeps onMouseAction chaining/restoration isolated from executor logic.
- *
- * Uses Page.addScriptToEvaluateOnNewDocument so the cursor persists across
- * MPA navigations — Chrome re-runs the init script on every new document.
  */
 
 import type { BrowserContext, Page } from '@xmorse/playwright-core'
-import type { ICDPSession } from './cdp-session.js'
 import {
-  addGhostCursorInitScript,
   applyGhostCursorMouseAction,
   disableGhostCursor,
   enableGhostCursor,
-  removeGhostCursorInitScript,
   type GhostCursorClientOptions,
 } from './ghost-cursor.js'
 
@@ -26,15 +20,9 @@ interface RecordingTargetOptions {
   sessionId?: string
 }
 
-interface InitScriptHandle {
-  cdp: ICDPSession
-  identifier: string
-}
-
 export class RecordingGhostCursorController {
   private readonly previousMouseActionByPage = new WeakMap<Page, Page['onMouseAction']>()
   private readonly cursorApplyQueueByPage = new WeakMap<Page, Promise<void>>()
-  private readonly initScriptByPage = new WeakMap<Page, InitScriptHandle>()
   private readonly logger: RecordingGhostCursorLogger
 
   constructor(options: { logger: RecordingGhostCursorLogger }) {
@@ -69,12 +57,6 @@ export class RecordingGhostCursorController {
     const { page } = options
 
     try {
-      // Register persistent init script so cursor survives MPA navigations
-      const handle = await addGhostCursorInitScript({ page })
-      this.initScriptByPage.set(page, handle)
-
-      // Also enable on the current page immediately (init script only runs
-      // on future navigations, not the current document)
       await enableGhostCursor({ page })
 
       if (!this.previousMouseActionByPage.has(page)) {
@@ -111,17 +93,6 @@ export class RecordingGhostCursorController {
     page.onMouseAction = this.previousMouseActionByPage.get(page) ?? null
     this.previousMouseActionByPage.delete(page)
     this.cursorApplyQueueByPage.delete(page)
-
-    // Remove the persistent init script so future navigations don't inject cursor
-    const handle = this.initScriptByPage.get(page)
-    if (handle) {
-      try {
-        await removeGhostCursorInitScript(handle)
-      } catch (error) {
-        this.logger.error('[playwriter] Failed to remove ghost cursor init script', error)
-      }
-      this.initScriptByPage.delete(page)
-    }
 
     try {
       await disableGhostCursor({ page })
