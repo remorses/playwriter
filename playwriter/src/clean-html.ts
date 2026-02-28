@@ -26,9 +26,9 @@ function isRegExp(value: any): value is RegExp {
 
 function getSnapshotKey(locator: Locator | Page): string {
   if (isPage(locator)) {
-    return '__page__'
+    return 'page'
   }
-  return locator.selector()
+  return `locator:${locator.selector()}`
 }
 
 export async function getCleanHTML(options: GetCleanHTMLOptions): Promise<string> {

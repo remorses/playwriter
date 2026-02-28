@@ -790,7 +790,7 @@ export class PlaywrightExecutor {
         const shouldCacheSnapshot = !frame
         // Cache keyed by locator selector so full-page and locator-scoped snapshots
         // don't pollute each other's diff baselines
-        const snapshotKey = locator ? locator.selector() : '__page__'
+        const snapshotKey = locator ? `locator:${locator.selector()}` : 'page'
         let pageSnapshots = this.lastSnapshots.get(resolvedPage)
         if (!pageSnapshots) {
           pageSnapshots = new Map()
