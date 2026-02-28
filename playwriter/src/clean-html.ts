@@ -28,8 +28,7 @@ function getSnapshotKey(locator: Locator | Page): string {
   if (isPage(locator)) {
     return '__page__'
   }
-  // For locators, use a string representation
-  return (locator as any)._selector || '__locator__'
+  return locator.selector()
 }
 
 export async function getCleanHTML(options: GetCleanHTMLOptions): Promise<string> {

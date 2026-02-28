@@ -251,7 +251,7 @@ export class PlaywrightExecutor {
 
   private userState: Record<string, any> = {}
   private browserLogs: Map<string, string[]> = new Map()
-  private lastSnapshots: WeakMap<Page, string> = new WeakMap()
+  private lastSnapshots: WeakMap<Page, Map<string, string>> = new WeakMap()
   private lastRefToLocator: WeakMap<Page, Map<string, string>> = new WeakMap()
   private warningEvents: WarningEvent[] = []
   private nextWarningEventId = 0
@@ -788,9 +788,17 @@ export class PlaywrightExecutor {
         this.lastRefToLocator.set(resolvedPage, refToLocator)
 
         const shouldCacheSnapshot = !frame
-        const previousSnapshot = shouldCacheSnapshot ? this.lastSnapshots.get(resolvedPage) : undefined
+        // Cache keyed by locator selector so full-page and locator-scoped snapshots
+        // don't pollute each other's diff baselines
+        const snapshotKey = locator ? locator.selector() : '__page__'
+        let pageSnapshots = this.lastSnapshots.get(resolvedPage)
+        if (!pageSnapshots) {
+          pageSnapshots = new Map()
+          this.lastSnapshots.set(resolvedPage, pageSnapshots)
+        }
+        const previousSnapshot = shouldCacheSnapshot ? pageSnapshots.get(snapshotKey) : undefined
         if (shouldCacheSnapshot) {
-          this.lastSnapshots.set(resolvedPage, snapshotStr)
+          pageSnapshots.set(snapshotKey, snapshotStr)
         }
 
         // Diff defaults off when search is provided, but agent can explicitly enable both
