@@ -52,8 +52,6 @@ playwriter -s <sessionId> -e "<code>"
 
 The `-s` flag specifies a session ID (required). Get one with `playwriter session new`. Use the same session to persist state across commands.
 
-Default timeout is 10 seconds. you can increase the timeout with `--timeout <ms>`
-
 **Examples:**
 
 ```bash
