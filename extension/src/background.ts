@@ -708,6 +708,64 @@ export function sendMessage(message: any): void {
   }
 }
 
+const PLAYWRITER_GROUP_TITLE = 'playwriter'
+const PLAYWRITER_GROUP_COLOR: chrome.tabGroups.ColorEnum = 'green'
+const TAB_GROUP_STYLE_REAPPLY_DELAY_MS = 120
+const TAB_GROUP_STYLE_SETTLE_DELAY_MS = 700
+const TAB_GROUP_STYLE_NUDGE_DELAY_MS = 40
+
+async function applyPlaywriterGroupStyle(
+  groupId: number,
+  { forcePaintNudge = false }: { forcePaintNudge?: boolean } = {},
+): Promise<void> {
+  const style = {
+    title: PLAYWRITER_GROUP_TITLE,
+    color: PLAYWRITER_GROUP_COLOR,
+  }
+
+  try {
+    await chrome.tabGroups.update(groupId, style)
+  } catch (error: any) {
+    logger.debug('Failed to style playwriter group:', groupId, error.message)
+    return
+  }
+
+  // Chrome sometimes paints a just-created group chip as blank/white until another
+  // user interaction. Reapplying style on a short delay forces a stable repaint.
+  await sleep(TAB_GROUP_STYLE_REAPPLY_DELAY_MS)
+
+  try {
+    await chrome.tabGroups.update(groupId, style)
+  } catch (error: any) {
+    logger.debug('Failed to restyle playwriter group:', groupId, error.message)
+    return
+  }
+
+  // A second delayed write catches Chrome's late group-chip paint on some profiles.
+  await sleep(TAB_GROUP_STYLE_SETTLE_DELAY_MS)
+
+  try {
+    await chrome.tabGroups.update(groupId, style)
+  } catch (error: any) {
+    logger.debug('Failed to settle playwriter group style:', groupId, error.message)
+    return
+  }
+
+  if (forcePaintNudge) {
+    try {
+      await chrome.tabGroups.update(groupId, {
+        title: `${PLAYWRITER_GROUP_TITLE} `,
+        color: PLAYWRITER_GROUP_COLOR,
+      })
+      await sleep(TAB_GROUP_STYLE_NUDGE_DELAY_MS)
+      await chrome.tabGroups.update(groupId, style)
+      logger.debug('Applied group label paint nudge:', groupId)
+    } catch (error: any) {
+      logger.debug('Failed group label paint nudge:', groupId, error.message)
+    }
+  }
+}
+
 async function syncTabGroup(): Promise<void> {
   try {
     // Include 'connecting' tabs in the group only when the relay is alive, so that
@@ -722,7 +780,7 @@ async function syncTabGroup(): Promise<void> {
       .map(([tabId]) => tabId)
 
     // Always query by title - no cached ID that can go stale
-    const existingGroups = await chrome.tabGroups.query({ title: 'playwriter' })
+    const existingGroups = await chrome.tabGroups.query({ title: PLAYWRITER_GROUP_TITLE })
 
     // If no connected tabs, clear any existing playwriter groups
     if (connectedTabIds.length === 0) {
@@ -753,6 +811,19 @@ async function syncTabGroup(): Promise<void> {
     }
 
     const allTabs = await chrome.tabs.query({})
+    if (groupId === undefined) {
+      const connectedGroupedIds = new Set(
+        allTabs
+          .filter((tab) => tab.id !== undefined && connectedTabIds.includes(tab.id) && tab.groupId !== undefined && tab.groupId >= 0)
+          .map((tab) => tab.groupId!),
+      )
+
+      if (connectedGroupedIds.size === 1) {
+        groupId = connectedGroupedIds.values().next().value
+        logger.debug('Adopted existing group as playwriter group:', groupId)
+      }
+    }
+
     const tabsInGroup = allTabs.filter((t) => t.groupId === groupId && t.id !== undefined)
     const tabIdsInGroup = new Set(tabsInGroup.map((t) => t.id!))
 
@@ -768,15 +839,30 @@ async function syncTabGroup(): Promise<void> {
       }
     }
 
+    let didCreateGroup = false
+    let didAdoptGroup = false
+
     if (tabsToAdd.length > 0) {
       if (groupId === undefined) {
-        const newGroupId = await chrome.tabs.group({ tabIds: tabsToAdd })
-        await chrome.tabGroups.update(newGroupId, { title: 'playwriter', color: 'green' })
-        logger.debug('Created tab group:', newGroupId, 'with tabs:', tabsToAdd)
+        groupId = await chrome.tabs.group({ tabIds: tabsToAdd })
+        didCreateGroup = true
+        logger.debug('Created tab group:', groupId, 'with tabs:', tabsToAdd)
       } else {
         await chrome.tabs.group({ tabIds: tabsToAdd, groupId })
         logger.debug('Added tabs to existing group:', tabsToAdd)
       }
+    }
+
+    if (groupId !== undefined) {
+      if (!didCreateGroup && tabsToAdd.length === 0) {
+        // If we didn't create and didn't add, but we still resolved a group ID here,
+        // it's an adopted pre-existing group.
+        didAdoptGroup = existingGroups.length === 0
+      }
+
+      await applyPlaywriterGroupStyle(groupId, {
+        forcePaintNudge: didCreateGroup || didAdoptGroup,
+      })
     }
   } catch (error: any) {
     logger.debug('Failed to sync tab group:', error.message)
@@ -823,6 +909,14 @@ function emitChildDetachesForTab(tabId: number): void {
 async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
   if (msg.method !== 'forwardCDPCommand') return
 
+  const detachSessionId =
+    msg.params.method === 'Target.detachFromTarget' &&
+    msg.params.params &&
+    'sessionId' in msg.params.params &&
+    typeof msg.params.params.sessionId === 'string'
+      ? msg.params.params.sessionId
+      : undefined
+
   let targetTabId: number | undefined
   let targetTab: TabInfo | undefined
 
@@ -840,6 +934,15 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
       targetTabId = childSession.tabId
       targetTab = store.getState().tabs.get(childSession.tabId)
       logger.debug('Found parent tab for child session:', msg.params.sessionId, 'tabId:', childSession.tabId)
+    }
+  }
+
+  if (!targetTab && detachSessionId) {
+    const childSession = childSessions.get(detachSessionId)
+    if (childSession) {
+      targetTabId = childSession.tabId
+      targetTab = store.getState().tabs.get(childSession.tabId)
+      logger.debug('Found parent tab for detach child session:', detachSessionId, 'tabId:', childSession.tabId)
     }
   }
 
@@ -936,6 +1039,12 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
   }
 
   if (!debuggee || !targetTab) {
+    if (msg.params.method === 'Target.detachFromTarget' && detachSessionId) {
+      logger.debug('Skipping detach for unknown child session:', detachSessionId)
+      childSessions.delete(detachSessionId)
+      return {}
+    }
+
     throw new Error(
       `No tab found for method ${msg.params.method} sessionId: ${msg.params.sessionId} params: ${JSON.stringify(msg.params.params || null)}`,
     )
