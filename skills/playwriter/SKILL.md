@@ -21,6 +21,8 @@ This outputs the complete documentation including:
 
 **Do NOT skip this step.** The quick examples below will fail without understanding timeouts, selector rules, and common pitfalls from the full docs.
 
+**Read the ENTIRE output.** Do NOT pipe through `head`, `tail`, or any truncation command. The skill output must be read in its entirety — critical rules about timeouts, selectors, and common pitfalls are spread throughout the document, not just at the top.
+
 ## Minimal Example (after reading full docs)
 
 ```bash

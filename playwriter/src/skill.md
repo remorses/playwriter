@@ -185,97 +185,47 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 
 ## interaction feedback loop
 
-Every browser interaction should follow a **observe → act → observe** loop. After every action, you must check its result before proceeding. Never chain multiple actions blindly — the page may not have responded as expected.
+Every browser interaction must follow **observe → act → observe**. Never chain multiple actions blindly.
 
-**Core loop:**
-
-1. **Open page** — get or create your page and navigate to the target URL
-2. **Observe** — print `state.page.url()` and take an accessibility snapshot. Always print the URL so you know where you are — pages can redirect, and actions can trigger unexpected navigation.
-3. **Check** — read the snapshot and URL. If the page isn't ready (still loading, expected content missing, wrong URL), **wait and observe again** — don't act on stale or incomplete state. Only proceed when you can identify the element to interact with.
+1. **Open page** — get or create your page, navigate to URL
+2. **Observe** — print `state.page.url()` + `snapshot()`. Always print URL — pages can redirect unexpectedly.
+3. **Check** — if page isn't ready (loading, wrong URL, content missing), wait and observe again
 4. **Act** — perform one action (click, type, submit)
-5. **Observe again** — print URL + snapshot to verify the action's effect. If the action didn't take effect (nothing changed, page still loading), wait and observe again before proceeding.
-6. **Repeat** — continue from step 3 until the task is complete
-
-```
-┌─────────────────────────────────────────────┐
-│            open page + goto URL             │
-└──────────────────┬──────────────────────────┘
-                   ▼
-          ┌────────────────┐
-     ┌───►│    observe      │◄─────────────────┐
-     │    │ (url + snapshot) │                   │
-     │    └───────┬────────┘                   │
-     │            ▼                            │
-     │    ┌────────────────┐                   │
-     │    │     check       │                   │
-     │    │  (read result)  │                   │
-     │    └───┬────────┬───┘                   │
-     │  not   │        │ ready                 │
-     │  ready │        ▼                       │
-     └────────┘ ┌────────────────┐             │
-                │      act        │             │
-                │  (click/type)   │─────────────┘
-                └────────────────┘
-```
-
-**Example: opening a Framer plugin via the command palette**
-
-Each step is a separate execute call. Notice how every action is followed by a snapshot to verify what happened:
+5. **Observe again** — print URL + snapshot to verify the action's effect
+6. **Repeat** from step 3 until task is complete
 
 ```js
-// 1. Open page and observe — always print URL first
+// Each step should be a separate execute call:
+// Step 1: navigate + observe
 state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
-await state.page.goto('https://framer.com/projects/my-project', { waitUntil: 'domcontentloaded' })
+await state.page.goto('https://example.com', { waitUntil: 'domcontentloaded' })
 console.log('URL:', state.page.url())
 await snapshot({ page: state.page }).then(console.log)
 ```
 
 ```js
-// 2. Act: open command palette → observe result
-await state.page.keyboard.press('Meta+k')
+// Step 2: act + observe
+await state.page.locator('button:has-text("Submit")').click()
 console.log('URL:', state.page.url())
-await snapshot({ page: state.page, search: /dialog|Search/ }).then(console.log)
-// If dialog didn't appear, observe again before retrying
+await snapshot({ page: state.page }).then(console.log)
 ```
+
+If nothing changed after an action, try `waitForPageLoad({ page: state.page, timeout: 3000 })` or you may have clicked the wrong element.
+
+**Deeper observation** — when snapshots aren't enough to understand what happened, combine multiple channels:
 
 ```js
-// 3. Act: type search query → observe result
-await state.page.keyboard.type('MCP')
-console.log('URL:', state.page.url())
-await snapshot({ page: state.page, search: /MCP/ }).then(console.log)
+// Check console for errors after an action
+const errors = await getLatestLogs({ page: state.page, search: /error|fail/i, count: 20 })
+
+// Combine snapshot + logs for full picture
+const snap = await snapshot({ page: state.page, search: /dialog|error|message/ })
+const logs = await getLatestLogs({ page: state.page, search: /error/i, count: 10 })
+console.log('UI:', snap)
+console.log('Logs:', logs)
 ```
 
-```js
-// 4. Act: press Enter → observe plugin loaded
-await state.page.keyboard.press('Enter')
-await state.page.waitForTimeout(1000)
-console.log('URL:', state.page.url())
-const frame = state.page.frames().find((f) => f.url().includes('plugins.framercdn.com'))
-await snapshot({ page: state.page, frame: frame || undefined }).then(console.log)
-// If frame not found, wait and observe again — plugin may still be loading
-```
-
-**Other ways to observe action results:**
-
-Snapshots are the primary feedback mechanism, but some actions have side effects that are better observed through other channels:
-
-- **Console logs** — check for errors or app state after an action:
-  ```js
-  await getLatestLogs({ page: state.page, search: /error|fail/i, count: 20 })
-  ```
-- **Network requests** — verify API calls were made after a form submit or button click:
-  ```js
-  state.page.on('response', async (res) => {
-    if (res.url().includes('/api/')) {
-      console.log(res.status(), res.url())
-    }
-  })
-  ```
-- **URL changes** — confirm navigation happened:
-  ```js
-  console.log(state.page.url())
-  ```
-- **Screenshots** — only for visual layout issues (see "choosing between snapshot methods" below).
+Use `getLatestLogs()` for console errors, `state.page.url()` for navigation, screenshots only for visual layout issues.
 
 ## common mistakes to avoid
 
@@ -301,13 +251,9 @@ await state.page.keyboard.press('Meta+v') // always verify with screenshot!
 ```
 
 **3. Using stale locators from old snapshots**
-Locators (especially ones with `>> nth=`) can change when the page updates. Always get a fresh snapshot before clicking:
+Locators (especially ones with `>> nth=`) can change when the page updates. Always get a fresh snapshot before clicking, then immediately use locators from that output:
 
 ```js
-// BAD: using ref from minutes ago
-await state.page.locator('[id="old-id"]').click() // element may have changed
-
-// GOOD: get fresh snapshot, then immediately use locators from it
 await snapshot({ page: state.page, showDiffSinceLastCall: true })
 // Now use the NEW locators from this output
 ```
@@ -322,29 +268,22 @@ await screenshotWithAccessibilityLabels({ page: state.page })
 ```
 
 **5. Text concatenation without line breaks**
-`keyboard.type()` doesn't insert newlines from `\n` in strings. Use `keyboard.press('Enter')`:
+`keyboard.type()` doesn't insert newlines from `\n` in strings. Use `keyboard.press('Enter')` between lines:
 
 ```js
-// BAD: newlines in string don't create line breaks
-await state.page.keyboard.type('Line 1\nLine 2') // becomes "Line 1Line 2"
-
-// GOOD: use Enter key for line breaks
 await state.page.keyboard.type('Line 1')
 await state.page.keyboard.press('Enter')
 await state.page.keyboard.type('Line 2')
 ```
 
 **6. Quote escaping in bash**
-Bash parses `$`, backticks, and `\` inside double-quoted strings. This silently corrupts JS code containing dollar signs (regex like `/\$[\d.]+/`), template literals, or backslash patterns.
+Bash parses `$`, backticks, and `\` inside double-quoted strings. This silently corrupts JS code. Always use single quotes or heredoc:
 
 ```bash
-# BAD: double quotes — bash interprets $ and backticks in your JS
-playwriter -s 1 -e "const price = text.match(/\$[\d.]+/)"
-
-# GOOD: single quotes — bash passes everything through literally
+# single quotes — bash passes everything through literally
 playwriter -s 1 -e 'await state.page.locator(`[id="_r_a_"]`).click()'
 
-# GOOD: heredoc for complex code with mixed quotes
+# heredoc for complex code with mixed quotes
 playwriter -s 1 -e "$(cat <<'EOF'
 await state.page.locator('[id="_r_a_"]').click()
 const match = html.match(/\$[\d.]+/g)
@@ -353,17 +292,10 @@ EOF
 ```
 
 **7. Using screenshots when snapshots suffice**
-Screenshots + image analysis is expensive and slow. Only use screenshots for visual/CSS issues:
+Screenshots + image analysis is expensive and slow. Only use screenshots for visual/CSS issues. Use snapshot for text checks:
 
 ```js
-// BAD: screenshot to check if text appeared (wastes tokens on image analysis)
-await state.page.screenshot({ path: 'check.png', scale: 'css' })
-
-// GOOD: snapshot is text — fast, cheap, searchable
 await snapshot({ page: state.page, search: /expected text/i })
-
-// GOOD: evaluate DOM directly for content checks
-const text = await state.page.evaluate(() => document.querySelector('.message')?.textContent)
 ```
 
 **8. Assuming page content loaded**
@@ -378,28 +310,19 @@ await waitForPageLoad({ page: state.page, timeout: 5000 })
 ```
 
 **9. Not using playwriter for JS-rendered sites**
-Do NOT waste context trying webfetch, curl, or Playwright CLI screenshots on SPAs (Instagram, Twitter, etc.). These sites return empty HTML shells — the real content is rendered by JavaScript. Use playwriter with a real browser session instead:
+Do NOT waste context trying webfetch, curl, or Playwright CLI screenshots on SPAs (Instagram, Twitter, etc.). These return empty HTML shells. Use playwriter directly:
 
 ```js
-// BAD: webfetch/curl on Instagram returns empty HTML, grep finds nothing, huge context wasted
-// BAD: Playwright CLI screenshot needs browser install, produces blank/modal-blocked images
-
-// GOOD: use playwriter — real browser, full JS rendering, interactive
 state.page = context.pages().find((p) => p.url() === 'about:blank') ?? (await context.newPage())
 await state.page.goto('https://www.instagram.com/p/ABC123/', { waitUntil: 'domcontentloaded' })
 await waitForPageLoad({ page: state.page, timeout: 8000 })
 await snapshot({ page: state.page, search: /cookie|consent|accept/i }).then(console.log)
-// Now you can see modals, dismiss them, navigate carousels, extract content
 ```
 
 **10. Login buttons that open popups**
-Playwriter extension cannot control popup windows. If a login button opens a popup (common with OAuth/SSO), use cmd+click to open in a new tab instead:
+Playwriter cannot control popup windows. Use cmd+click to open in a new tab instead:
 
 ```js
-// BAD: popup window is not controllable by playwriter
-await state.page.click('button:has-text("Login with Google")')
-
-// GOOD: cmd+click opens in new tab that playwriter can control
 await state.page.locator('button:has-text("Login with Google")').click({ modifiers: ['Meta'] })
 await state.page.waitForTimeout(2000)
 
@@ -427,14 +350,9 @@ await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
 ```
 
 **12. Never use `dispatchEvent` or `{ force: true }` to bypass blockers**
-`dispatchEvent(new MouseEvent(...))` and `{ force: true }` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. The same applies to `element.click()` inside `page.evaluate()`. If a click "succeeds" but nothing changes, you're either clicking the wrong node or using the wrong interaction pattern:
+`dispatchEvent(new MouseEvent(...))`, `{ force: true }`, and `element.click()` inside `page.evaluate()` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. Use snapshot to find the real interactive element:
 
 ```js
-// BAD: heading click bypasses overlay but React ignores it
-await state.page.locator('h3:has-text("Node.js")').click({ force: true })
-// BAD: evaluate click bypasses all Playwright input simulation
-await state.page.evaluate(() => document.querySelector('button').click())
-// GOOD: snapshot shows the real interactive element is a radio, not the heading
 await state.page.getByRole('radio', { name: 'Node.js' }).click()
 ```
 
@@ -450,29 +368,11 @@ When something doesn't respond to a click, do NOT start inspecting CDP event lis
 3. Take another `snapshot()` to see what changed
 4. Only investigate DOM internals if correct interaction patterns produce zero response after 2–3 attempts
 
-## checking page state
-
-After any action (click, submit, navigate), verify what happened. Always print URL first, then snapshot:
-
-```js
-// Always print URL first, then snapshot
-console.log('URL:', state.page.url())
-await snapshot({ page: state.page }).then(console.log)
-
-// Filter for specific content when snapshot is large
-console.log('URL:', state.page.url())
-await snapshot({ page: state.page, search: /dialog|button|error/i }).then(console.log)
-```
-
-If nothing changed, try `await waitForPageLoad({ page: state.page, timeout: 3000 })` or you may have clicked the wrong element.
-
 ## accessibility snapshots
 
 ```js
 await snapshot({ page: state.page, search?, showDiffSinceLastCall? })
 ```
-
-`accessibilitySnapshot` is still available as an alias for backward compatibility.
 
 - `search` - string/regex to filter results (returns first 10 matching lines)
 - `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`, but `false` when `search` is provided). Pass `false` to get full snapshot.
@@ -512,12 +412,6 @@ const locator = refToLocator({ ref: 'e3' })
 await state.page.locator(locator!).click()
 ```
 
-```js
-await state.page.locator('[id="nav-home"]').click()
-await state.page.locator('[data-testid="docs-link"]').click()
-await state.page.locator('role=link[name="Blog"]').click()
-```
-
 Search for specific elements:
 
 ```js
@@ -540,38 +434,11 @@ await snapshot({ locator: state.page.locator('form#checkout') })
 
 Use this whenever the full page snapshot is dominated by navigation or layout elements you don't need. It saves significant tokens and makes the output much easier to parse.
 
-**Filtering large snapshots in JS** — when the built-in `search` isn't enough (e.g., you need multiple patterns or custom logic), filter the snapshot string directly:
-
-```js
-const snap = await snapshot({ page: state.page, showDiffSinceLastCall: false })
-const relevant = snap
-  .split('\n')
-  .filter((l) => l.includes('dialog') || l.includes('error') || l.includes('button'))
-  .join('\n')
-console.log(relevant)
-```
-
-This is much cheaper than taking a screenshot — use it as your primary debugging tool for verifying text content, checking if elements exist, or confirming state changes.
+**Filtering large snapshots in JS** — when `search` isn't enough, filter the string directly: `snap.split('\n').filter(l => l.includes('dialog') || l.includes('error')).join('\n')`
 
 ## choosing between snapshot methods
 
-Both `snapshot` and `screenshotWithAccessibilityLabels` use the same ref system, so you can combine them effectively.
-
-**Use `snapshot` when:**
-
-- Page has simple, semantic structure (articles, forms, lists)
-- You need to search for specific text or patterns
-- Token usage matters (text is smaller than images)
-- You need to process the output programmatically
-
-**Use `screenshotWithAccessibilityLabels` when:**
-
-- Page has complex visual layout (grids, galleries, dashboards, maps)
-- Spatial position matters (e.g., "first image", "top-left button")
-- DOM order doesn't match visual order
-- You need to understand the visual hierarchy
-
-**Combining both:** Use screenshot first to understand layout and identify target elements visually, then use `snapshot({ search: /pattern/ })` for efficient searching in subsequent calls.
+Use `snapshot` for text-heavy pages (forms, articles) — fast, cheap, searchable. Use `screenshotWithAccessibilityLabels` for complex visual layouts (grids, galleries, dashboards) where spatial position matters. Both share the same ref system and can be combined.
 
 ## selector best practices
 
@@ -657,13 +524,9 @@ await waitForPageLoad({ page: state.page, timeout: 5000 })
 
 ## common patterns
 
-**Authenticated fetches** - to access protected resources, fetch from within page context (includes session cookies automatically):
+**Authenticated fetches** - fetch from within page context to include session cookies automatically:
 
 ```js
-// BAD: curl/external requests don't have session cookies
-// curl -H "Cookie: ..." often fails due to missing cookies or CSRF
-
-// GOOD: fetch inside state.page.evaluate uses browser's full session
 const data = await state.page.evaluate(async (url) => {
   const resp = await fetch(url)
   return await resp.text()
@@ -694,16 +557,6 @@ await state.page.evaluate(async (url) => {
 - Geolocation, camera, microphone APIs
 
 Instead, use simpler alternatives (single download via `a.click()`, store data in `state`, etc).
-
-**Links that open new tabs** - playwriter cannot control popup windows opened via `window.open`. Use cmd+click to open in a controllable new tab instead (see mistake #9 above for a full example):
-
-```js
-await state.page.locator('a[target=_blank]').click({ modifiers: ['Meta'] })
-await state.page.waitForTimeout(1000)
-const pages = context.pages()
-const newTab = pages[pages.length - 1]
-console.log('New tab URL:', newTab.url())
-```
 
 **Downloads** - capture and save:
 
@@ -805,19 +658,7 @@ const fullHtml = await getCleanHTML({ locator: state.page, showDiffSinceLastCall
 - `showDiffSinceLastCall` - returns diff since last call (default: `true`, but `false` when `search` is provided). Pass `false` to get full HTML.
 - `includeStyles` - keep style and class attributes (default: false)
 
-**HTML processing:**
-The function cleans HTML for compact, readable output:
-
-- **Removes tags**: script, style, link, meta, noscript, svg, head
-- **Unwraps nested wrappers**: Empty divs/spans with no attributes that only wrap a single child are collapsed (e.g., `<div><div><div><p>text</p></div></div></div>` → `<div><p>text</p></div>`)
-- **Removes empty elements**: Elements with no attributes and no content are removed
-- **Truncates long values**: Attribute values >200 chars and text content >500 chars are truncated
-
-**Attributes kept (summary):**
-
-- Common semantic and ARIA attributes (e.g., `href`, `name`, `type`, `aria-*`)
-- All `data-*` test attributes
-- Frequently used test IDs and special attributes (e.g., `testid`, `qa`, `e2e`, `vimium-label`)
+Cleans HTML automatically: removes script/style/svg/head tags, unwraps empty wrappers, removes empty elements, truncates long values. Keeps semantic attributes (`href`, `name`, `type`, `aria-*`, `data-*`).
 
 **getPageMarkdown** - extract main page content as plain text using Mozilla Readability (same algorithm as Firefox Reader View). Strips navigation, ads, sidebars, and other clutter. Returns formatted text with title, author, and content:
 
@@ -845,12 +686,6 @@ The main article content as plain text, with paragraphs preserved...
 - `page` - Playwright Page to extract content from
 - `search` - string/regex to filter content (returns first 10 matching lines with 5 lines context)
 - `showDiffSinceLastCall` - returns diff since last call (default: `true`, but `false` when `search` is provided). Pass `false` to get full content.
-
-**Use cases:**
-
-- Extract article text for LLM processing without HTML noise
-- Get readable content from news sites, blogs, documentation
-- Compare content changes after interactions
 
 **waitForPageLoad** - smart load detection that ignores analytics/ads:
 
@@ -932,103 +767,51 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 **resizeImage** - shrink an image in-place so it consumes fewer tokens when read back into context. `await resizeImage({ input: './screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `output`.
 
-**recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` in the extension context, so **recording survives page navigation**. Video is saved as mp4.
+**recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` so **recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Requires user to have clicked the Playwriter extension icon on the tab. Auto-resizes viewport to 16:9 (override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`).
 
-While recording is active, Playwriter automatically overlays a smooth ghost cursor that follows automated mouse actions (`page.mouse.*`, `locator.click()`, hover flows) using `page.onMouseAction` from the Playwright fork.
-
-For demos where cursor movement should be visible and human-like, drive the page with interaction methods (`locator.click()`, `page.click()`, `page.mouse.move()`, `press`, typing). Avoid skipping interactions with direct state jumps (for example, `goto(itemUrl)` instead of clicking the link) when your goal is to show realistic pointer motion in the recording.
-
-**Note**: Recording requires the user to have clicked the Playwriter extension icon on the tab. This grants `activeTab` permission needed for `chrome.tabCapture`. Recording works on tabs where the icon was clicked - if you need to record a new tab, ask the user to click the icon on it first.
-
-Recording auto-resizes the viewport to 16:9 aspect ratio before starting (shrink-to-fit, never increases dimensions). Override with `aspectRatio` or set `null` to skip. Recording also auto-stops after 15 minutes by default to prevent filling disk. For longer recordings, pass a higher `maxDurationMs` (e.g. `maxDurationMs: 60 * 60 * 1000` for 1 hour) or `0` to disable.
+For demos, use interaction methods (`locator.click()`, `page.mouse.move()`) instead of `goto()` to show realistic cursor motion.
 
 ```js
-// Start recording - outputPath must be specified upfront
 await recording.start({
   page: state.page,
   outputPath: './recording.mp4',
-  frameRate: 30, // default: 30
-  audio: false, // default: false (tab audio)
-  videoBitsPerSecond: 2500000, // 2.5 Mbps
-  aspectRatio: { width: 16, height: 9 }, // default: 16:9, set null to skip
-  maxDurationMs: 15 * 60 * 1000, // default: 15 min, set 0 to disable
+  frameRate: 30, // default
+  audio: false, // default (tab audio)
+  videoBitsPerSecond: 2500000,
+  aspectRatio: { width: 16, height: 9 }, // default, set null to skip
+  maxDurationMs: 15 * 60 * 1000, // default, set 0 to disable
 })
 
-// Navigate around - recording continues!
+// Recording survives navigation
 await state.page.click('a')
 await state.page.waitForLoadState('domcontentloaded')
-await state.page.goBack()
 
-// Stop and get result — always capture the full result including executionTimestamps
-// if you plan to call createDemoVideo. Save to state if using separate execute calls.
-const result = await recording.stop({ page: state.page })
-state.recordingResult = result
-console.log(`Saved ${result.size} bytes, duration: ${result.duration}ms, timestamps: ${result.executionTimestamps.length}`)
+// Stop — save full result including executionTimestamps for createDemoVideo
+state.recordingResult = await recording.stop({ page: state.page })
+
+// Other: recording.isRecording({ page }), recording.cancel({ page })
 ```
 
-Additional recording utilities:
+**ghostCursor.show / ghostCursor.hide** - show/hide cursor overlay for screenshots and demos:
 
 ```js
-// Check if recording is active
-const { isRecording, startedAt } = await recording.isRecording({ page: state.page })
-
-// Cancel recording without saving
-await recording.cancel({ page: state.page })
-```
-
-**ghostCursor.show / ghostCursor.hide** - manually show or hide the in-page cursor overlay. Useful for screenshots and demos even when recording is not running.
-
-```js
-// Show cursor in the center (or keep current position if already visible)
-await ghostCursor.show({ page: state.page })
-
-// Optional styles: 'minimal' (default triangular pointer), 'dot', 'screenstudio'
-await ghostCursor.show({ page: state.page, style: 'minimal' })
-
-// Hide cursor overlay
+await ghostCursor.show({ page: state.page, style: 'minimal' }) // 'minimal', 'dot', 'screenstudio'
 await ghostCursor.hide({ page: state.page })
 ```
 
-`startRecording`, `stopRecording`, `isRecording`, and `cancelRecording` remain available as backward-compatible aliases.
-
-**Key difference from getDisplayMedia**: This approach uses `chrome.tabCapture` which runs in the extension context, not the page. The recording persists across navigations because the extension holds the `MediaRecorder`, not the page's JavaScript context.
-
-**createDemoVideo** - create a polished demo video from a recording by automatically speeding up idle sections (time between execute() calls) while keeping interactions at normal speed. Useful for creating demo videos of agent workflows without long pauses.
-
-While recording is active, playwriter tracks when each `execute()` call starts and ends. `recording.stop()` returns these timestamps alongside the video file. `createDemoVideo` uses this data to identify idle gaps and speed them up with ffmpeg in a single pass.
-
-A 0.5-second buffer is preserved on each side of an interaction (1 second total) so viewers see context before and after each action.
-
-Requires `ffmpeg` and `ffprobe` installed on the system.
-
-**Timeout**: `createDemoVideo` runs ffmpeg on the full recording and can take 60–120+ seconds. Always pass `--timeout 120000` (or higher) to the playwriter execute call that contains it, otherwise it will silently time out before the file is written.
+**createDemoVideo** - speeds up idle sections (time between execute() calls) while keeping interactions at normal speed. Requires `ffmpeg`/`ffprobe`. Timestamps are tracked automatically during recording and returned by `recording.stop()`. **Timeout**: can take 60–120+ seconds, always pass `--timeout 120000` or higher.
 
 ```js
-// Start recording
-await recording.start({ page: state.page, outputPath: './recording.mp4' })
-```
-
-```js
-// ... multiple execute() calls with browser interactions ...
-// Each call's timing is tracked automatically while recording is active
-```
-
-```js
-// Stop recording — save the FULL result to state if createDemoVideo runs in a separate execute call
-// (executionTimestamps is what powers the idle detection — don't destructure it away)
+// After recording.stop(), save full result to state (executionTimestamps powers idle detection)
 state.recordingResult = await recording.stop({ page: state.page })
-console.log(`${state.recordingResult.executionTimestamps.length} timestamps captured`)
 
-// Create demo video — idle gaps are sped up 6x by default
-// Run this in a SEPARATE execute call with --timeout 120000 or higher
+// In a SEPARATE execute call with --timeout 120000:
 const demoPath = await createDemoVideo({
   recordingPath: state.recordingResult.path,
   durationMs: state.recordingResult.duration,
   executionTimestamps: state.recordingResult.executionTimestamps,
-  speed: 6, // optional, default 6x for idle sections
-  // outputFile: './demo.mp4', // optional, defaults to recording-demo.mp4
+  speed: 6, // default 6x for idle sections
 })
-console.log('Demo video:', demoPath)
 ```
 
 ## pinned elements
@@ -1128,60 +911,7 @@ console.log(data)
 
 Clean up listeners when done: `state.page.removeAllListeners('request'); state.page.removeAllListeners('response');`
 
-## debugging web apps
-
-When debugging why a web app isn't working (e.g., content not rendering, API errors, state issues), use these techniques **before** resorting to screenshots:
-
-**1. Console logs** — use `getLatestLogs` to check for errors:
-
-```js
-const errors = await getLatestLogs({ page: state.page, search: /error|fail/i, count: 20 })
-const appLogs = await getLatestLogs({ page: state.page, search: /myComponent|state/i })
-```
-
-**2. DOM inspection via evaluate** — check content directly without screenshots:
-
-```js
-const info = await state.page.evaluate(() => {
-  const msgs = document.querySelectorAll('.message')
-  return Array.from(msgs).map((m) => ({
-    text: m.textContent?.slice(0, 200),
-    visible: m.offsetHeight > 0,
-  }))
-})
-console.log(JSON.stringify(info, null, 2))
-```
-
-**3. Combine snapshot + logs for full picture:**
-
-```js
-await state.page.keyboard.press('Enter')
-await state.page.waitForTimeout(2000)
-
-const snap = await snapshot({ page: state.page, search: /dialog|error|message/ })
-const logs = await getLatestLogs({ page: state.page, search: /error/i, count: 10 })
-console.log('UI:', snap)
-console.log('Logs:', logs)
-```
-
-## capabilities
-
-Examples of what playwriter can do:
-
-- Monitor console logs while user reproduces a bug
-- Intercept network requests to reverse-engineer APIs and build SDKs
-- Scrape data by replaying paginated API calls instead of scrolling DOM
-- Get accessibility snapshot to find elements, then automate interactions
-- Use visual screenshots to understand complex layouts like image grids, dashboards, or maps
-- Debug issues by collecting logs and controlling the page simultaneously
-- Handle popups, downloads, iframes, and dialog boxes
-- Record videos of browser sessions that survive page navigation
-
-## computer use
-
-Playwriter provides the same browser control as Anthropic's `computer_20250124` tool and the Claude Chrome extension, using Playwright APIs instead of screenshot-based coordinate clicking. No computer use beta needed.
-
-This section covers low-level mouse/keyboard APIs not documented elsewhere. For locator-based clicking, screenshots, navigation, forms, evaluate, snapshots, and network interception see their dedicated sections above.
+## computer use (low-level mouse/keyboard)
 
 ### clicking
 
@@ -1284,19 +1014,4 @@ Prefer locator-based actions over coordinates — locators are stable across scr
 
 ## Ghost Browser integration
 
-Playwriter supports [Ghost Browser](https://ghostbrowser.com/) for multi-identity automation. When running in Ghost Browser, the `chrome` object exposes APIs to control identities, proxies, and sessions - useful for managing multiple accounts, rotating proxies, or isolated cookie sessions.
-
-```js
-// List identities and open tabs in different ones
-const identities = await chrome.projects.getIdentitiesList()
-await chrome.ghostPublicAPI.openTab({ url: 'https://reddit.com', identity: identities[0].id })
-
-// Assign proxies per tab or identity
-const proxies = await chrome.ghostProxies.getList()
-await chrome.ghostProxies.setTabProxy(tabId, proxies[0].id)
-```
-
-For complete API reference with all methods, types, and examples, read:
-`extension/src/ghost-browser-api.d.ts`
-
-Note: Only works in Ghost Browser. In regular Chrome, calls fail with "not available".
+When running in [Ghost Browser](https://ghostbrowser.com/), the `chrome` object exposes APIs for multi-identity automation (identities, proxies, sessions). See `extension/src/ghost-browser-api.d.ts` for full API reference. Only works in Ghost Browser — calls fail in regular Chrome.
