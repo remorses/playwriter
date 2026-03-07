@@ -56,6 +56,8 @@ export type PlaywrightClient = {
   id: string
   extensionId: string | null
   ws: WSContext
+  groupName?: string
+  groupColor?: string
 }
 
 export type RelayState = {
@@ -172,10 +174,10 @@ export function removeExtension(state: RelayState, { extensionId }: { extensionI
 /** Add a playwright client (state + ws handle co-located). */
 export function addPlaywrightClient(
   state: RelayState,
-  { id, extensionId, ws }: { id: string; extensionId: string | null; ws: WSContext },
+  { id, extensionId, ws, groupName, groupColor }: { id: string; extensionId: string | null; ws: WSContext; groupName?: string; groupColor?: string },
 ): RelayState {
   const newClients = new Map(state.playwrightClients)
-  newClients.set(id, { id, extensionId, ws })
+  newClients.set(id, { id, extensionId, ws, groupName, groupColor })
   return { ...state, playwrightClients: newClients }
 }
 

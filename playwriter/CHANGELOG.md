@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.87
+
+### Bug Fixes
+
+- **Fix tab group flapping with multiple sessions**: Only send `groupName`/`groupColor` fields on `Target.createTarget` commands, not on every `forwardCDPCommand`. Previously, broadcast commands like `Target.setAutoAttach` would inject the sender's group metadata into every CDP command, overwriting unrelated tabs' group assignments and causing disconnects.
+
+## 0.0.86
+
+### Features
+
+- **Custom session tab group names and colors**: `playwriter session new` now accepts `--name` and `--color` options to control the Chrome tab group name and color for that session's tabs. Different sessions with different names get separate tab groups. The group metadata flows through the CDP URL query params → relay state → `forwardCDPCommand` params → extension `TabInfo`. Backward compatible: older extensions ignore the new fields, and omitting the options preserves the default "playwriter" green group.
+
 ## 0.0.85
 
 ### Bug Fixes

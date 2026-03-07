@@ -217,12 +217,16 @@ export interface CdpConfig {
   port?: number
   token?: string
   extensionId?: string | null
+  groupName?: string
+  groupColor?: string
 }
 
 export interface SessionMetadata {
   extensionId: string | null
   browser: string | null
   profile: { email: string; id: string } | null
+  groupName?: string
+  groupColor?: string
 }
 
 export interface ExecutorOptions {
@@ -1276,9 +1280,12 @@ export class ExecutorManager {
     let executor = this.executors.get(sessionId)
     if (!executor) {
       const baseConfig = typeof this.cdpConfig === 'function' ? this.cdpConfig(sessionId) : this.cdpConfig
-      const cdpConfig = sessionMetadata?.extensionId
-        ? { ...baseConfig, extensionId: sessionMetadata.extensionId }
-        : baseConfig
+      const cdpConfig = {
+        ...baseConfig,
+        ...(sessionMetadata?.extensionId ? { extensionId: sessionMetadata.extensionId } : {}),
+        ...(sessionMetadata?.groupName ? { groupName: sessionMetadata.groupName } : {}),
+        ...(sessionMetadata?.groupColor ? { groupColor: sessionMetadata.groupColor } : {}),
+      }
       executor = new PlaywrightExecutor({
         cdpConfig,
         sessionMetadata,

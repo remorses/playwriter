@@ -24,6 +24,9 @@ Get a new session ID to use in commands:
 ```bash
 playwriter session new
 # outputs: 1
+
+# label tabs with project name and color (grey/blue/red/yellow/green/pink/purple/cyan/orange)
+playwriter session new --name myproject --color red
 ```
 
 **Always use your own session** - pass `-s <id>` to all commands. Using the same session preserves your `state` between calls. Using a different session gives you a fresh `state`.
