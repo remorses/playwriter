@@ -1639,7 +1639,7 @@ export async function startPlayWriterCDPRelayServer({
       const { ExecutorManager } = await import('./executor.js')
       // Pass config instead of URL so executor can generate unique client IDs for each connection
       executorManager = new ExecutorManager({
-        cdpConfig: { host: '127.0.0.1', port },
+        cdpConfig: { host, port, token },
         logger: logger || { log: console.error, error: console.error },
       })
     }

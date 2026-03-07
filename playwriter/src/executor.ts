@@ -1019,10 +1019,14 @@ export class PlaywrightExecutor {
         await recordingGhostCursor.hide({ page: targetPage })
       }
 
+      const relayHost = this.cdpConfig.host || '127.0.0.1'
+      const relayToken = this.cdpConfig.token
       const recordingApi = createRecordingApi({
         context,
         defaultPage: page,
+        relayHost,
         relayPort,
+        relayToken,
         ghostCursorController: recordingGhostCursor,
         onStart: () => {
           self.recordingStartedAt = Date.now()

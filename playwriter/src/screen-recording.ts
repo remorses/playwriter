@@ -92,8 +92,12 @@ export interface StartRecordingOptions {
   audio?: boolean
   /** Path to save the video file */
   outputPath: string
+  /** Relay server host (default: '127.0.0.1') */
+  relayHost?: string
   /** Relay server port (default: 19988) */
   relayPort?: number
+  /** Authentication token for remote relay server */
+  relayToken?: string
   /** Aspect ratio to fit viewport to before recording (default: { width: 16, height: 9 }).
    *  Set to null to skip viewport resizing. */
   aspectRatio?: { width: number; height: number } | null
@@ -107,8 +111,12 @@ export interface StopRecordingOptions {
   page: Page
   /** CDP tab session ID (pw-tab-* format) to identify which tab to stop recording */
   sessionId?: string
+  /** Relay server host (default: '127.0.0.1') */
+  relayHost?: string
   /** Relay server port (default: 19988) */
   relayPort?: number
+  /** Authentication token for remote relay server */
+  relayToken?: string
 }
 
 export interface RecordingState {
@@ -130,15 +138,17 @@ interface RecordingTargetOptions {
 interface CreateRecordingApiOptions {
   context: BrowserContext
   defaultPage: Page
+  relayHost: string
   relayPort: number
+  relayToken?: string
   ghostCursorController: RecordingGhostCursorController
   onStart: () => void
   onFinish: () => void
   getExecutionTimestamps: () => ExecutionTimestamp[]
 }
 
-interface StartRecordingWithDefaultsOptions extends Omit<StartRecordingOptions, 'relayPort'> {}
-interface StopRecordingWithDefaultsOptions extends Omit<StopRecordingOptions, 'relayPort'> {}
+interface StartRecordingWithDefaultsOptions extends Omit<StartRecordingOptions, 'relayHost' | 'relayPort' | 'relayToken'> {}
+interface StopRecordingWithDefaultsOptions extends Omit<StopRecordingOptions, 'relayHost' | 'relayPort' | 'relayToken'> {}
 interface IsRecordingWithDefaultsOptions {
   page?: Page
   sessionId?: string
@@ -162,15 +172,17 @@ function resolveRecordingTargetPage(options: {
 }
 
 function withRecordingDefaults<T extends { page?: Page; sessionId?: string }, R>(options: {
+  relayHost: string
   relayPort: number
+  relayToken?: string
   defaultPage: Page
-  fn: (opts: T & { relayPort: number; sessionId?: string }) => Promise<R>
+  fn: (opts: T & { relayHost: string; relayPort: number; relayToken?: string; sessionId?: string }) => Promise<R>
 }): (input?: T) => Promise<R> {
-  const { relayPort, defaultPage, fn } = options
+  const { relayHost, relayPort, relayToken, defaultPage, fn } = options
   return async (input: T = {} as T) => {
     const targetPage = input.page || defaultPage
     const sessionId = input.sessionId || targetPage.sessionId() || undefined
-    return fn({ page: targetPage, sessionId, relayPort, ...input })
+    return fn({ page: targetPage, sessionId, relayHost, relayPort, relayToken, ...input })
   }
 }
 
@@ -180,33 +192,23 @@ export function createRecordingApi(options: CreateRecordingApiOptions): {
   isRecording: (opts?: IsRecordingWithDefaultsOptions) => Promise<RecordingState>
   cancel: (opts?: CancelRecordingWithDefaultsOptions) => Promise<void>
 } {
-  const { context, defaultPage, relayPort, ghostCursorController, onStart, onFinish, getExecutionTimestamps } = options
+  const { context, defaultPage, relayHost, relayPort, relayToken, ghostCursorController, onStart, onFinish, getExecutionTimestamps } = options
 
   // Stores the original viewport before aspect-ratio resize so we can restore on stop/cancel
   let preRecordingViewport: { width: number; height: number } | null = null
   // Auto-stop timer to prevent unbounded recordings
   let maxDurationTimer: ReturnType<typeof setTimeout> | null = null
 
-  const startWithDefaults = withRecordingDefaults<StartRecordingWithDefaultsOptions, RecordingState>({
-    relayPort,
-    defaultPage,
-    fn: startRecording,
-  })
-  const stopWithDefaults = withRecordingDefaults<StopRecordingWithDefaultsOptions, { path: string; duration: number; size: number }>({
-    relayPort,
-    defaultPage,
-    fn: stopRecording,
-  })
   const isRecordingWithDefaults = async (opts: IsRecordingWithDefaultsOptions = {}): Promise<RecordingState> => {
     const targetPage = opts.page || defaultPage
     const sessionId = opts.sessionId || targetPage.sessionId() || undefined
-    return isRecording({ page: targetPage, sessionId, relayPort })
+    return isRecording({ page: targetPage, sessionId, relayHost, relayPort, relayToken })
   }
 
   const cancelWithDefaults = async (opts: CancelRecordingWithDefaultsOptions = {}): Promise<void> => {
     const targetPage = opts.page || defaultPage
     const sessionId = opts.sessionId || targetPage.sessionId() || undefined
-    await cancelRecording({ page: targetPage, sessionId, relayPort })
+    await cancelRecording({ page: targetPage, sessionId, relayHost, relayPort, relayToken })
   }
 
   const start = async (opts?: StartRecordingWithDefaultsOptions): Promise<RecordingState> => {
@@ -226,7 +228,11 @@ export function createRecordingApi(options: CreateRecordingApiOptions): {
       }
     }
 
-    const result = await startWithDefaults(opts)
+    const sessionId = opts?.sessionId || targetPage.sessionId() || undefined
+    if (!opts?.outputPath) {
+      throw new Error('outputPath is required for recording')
+    }
+    const result = await startRecording({ ...opts, page: targetPage, sessionId, relayHost, relayPort, relayToken, outputPath: opts.outputPath })
     onStart()
     await ghostCursorController.enableForRecording({ page: targetPage })
 
@@ -264,7 +270,8 @@ export function createRecordingApi(options: CreateRecordingApiOptions): {
   ): Promise<{ path: string; duration: number; size: number; executionTimestamps: ExecutionTimestamp[] }> => {
     clearMaxDurationTimer()
     const targetPage = resolveRecordingTargetPage({ context, defaultPage, ghostCursorController, target: opts })
-    const result = await stopWithDefaults(opts)
+    const sessionId = opts?.sessionId || targetPage.sessionId() || undefined
+    const result = await stopRecording({ ...opts, page: targetPage, sessionId, relayHost, relayPort, relayToken })
     const executionTimestamps = [...getExecutionTimestamps()]
     onFinish()
     await ghostCursorController.disableForRecording({ page: targetPage })
@@ -301,16 +308,21 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
     audioBitsPerSecond = 128000,
     audio = false,
     outputPath,
+    relayHost = '127.0.0.1',
     relayPort = 19988,
+    relayToken,
   } = options
 
   // Resolve relative paths to absolute using the caller's cwd.
   // The relay server may have a different cwd, so we must resolve here.
   const absoluteOutputPath = path.resolve(outputPath)
 
-  const response = await fetch(`http://127.0.0.1:${relayPort}/recording/start`, {
+  const response = await fetch(`http://${relayHost}:${relayPort}/recording/start`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(relayToken ? { Authorization: `Bearer ${relayToken}` } : {}),
+    },
     body: JSON.stringify({
       sessionId,
       frameRate,
@@ -355,11 +367,14 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
 export async function stopRecording(
   options: StopRecordingOptions,
 ): Promise<{ path: string; duration: number; size: number }> {
-  const { sessionId, relayPort = 19988 } = options
+  const { sessionId, relayHost = '127.0.0.1', relayPort = 19988, relayToken } = options
 
-  const response = await fetch(`http://127.0.0.1:${relayPort}/recording/stop`, {
+  const response = await fetch(`http://${relayHost}:${relayPort}/recording/stop`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(relayToken ? { Authorization: `Bearer ${relayToken}` } : {}),
+    },
     body: JSON.stringify({ sessionId }),
   })
 
@@ -378,15 +393,21 @@ export async function stopRecording(
 export async function isRecording(options: {
   page: Page
   sessionId?: string
+  relayHost?: string
   relayPort?: number
+  relayToken?: string
 }): Promise<RecordingState> {
-  const { sessionId, relayPort = 19988 } = options
+  const { sessionId, relayHost = '127.0.0.1', relayPort = 19988, relayToken } = options
 
-  const url = new URL(`http://127.0.0.1:${relayPort}/recording/status`)
+  const url = new URL(`http://${relayHost}:${relayPort}/recording/status`)
   if (sessionId) {
     url.searchParams.set('sessionId', sessionId)
   }
-  const response = await fetch(url.toString())
+  const response = await fetch(url.toString(), {
+    headers: {
+      ...(relayToken ? { Authorization: `Bearer ${relayToken}` } : {}),
+    },
+  })
   const result = (await response.json()) as IsRecordingResult
 
   return { isRecording: result.isRecording, startedAt: result.startedAt, tabId: result.tabId }
@@ -398,13 +419,18 @@ export async function isRecording(options: {
 export async function cancelRecording(options: {
   page: Page
   sessionId?: string
+  relayHost?: string
   relayPort?: number
+  relayToken?: string
 }): Promise<void> {
-  const { sessionId, relayPort = 19988 } = options
+  const { sessionId, relayHost = '127.0.0.1', relayPort = 19988, relayToken } = options
 
-  const response = await fetch(`http://127.0.0.1:${relayPort}/recording/cancel`, {
+  const response = await fetch(`http://${relayHost}:${relayPort}/recording/cancel`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(relayToken ? { Authorization: `Bearer ${relayToken}` } : {}),
+    },
     body: JSON.stringify({ sessionId }),
   })
 

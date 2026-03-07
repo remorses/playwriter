@@ -207,8 +207,9 @@ async function executeCode(options: {
 cli
   .command('session new', 'Create a new session and print the session ID')
   .option('--host <host>', 'Remote relay server host')
+  .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .option('--browser <stableKey>', 'Stable browser key when multiple browsers are connected')
-  .action(async (options: { host?: string; browser?: string }) => {
+  .action(async (options: { host?: string; token?: string; browser?: string }) => {
     const isLocal = !options.host && !process.env.PLAYWRITER_HOST
 
     let extensions: ExtensionStatus[] = []
@@ -283,9 +284,13 @@ cli
           ? null
           : selectedExtension.stableKey || selectedExtension.extensionId
       const cwd = process.cwd()
+      const token = options.token || process.env.PLAYWRITER_TOKEN
       const response = await fetch(`${serverUrl}/cli/session/new`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ extensionId, cwd }),
       })
       if (!response.ok) {
@@ -304,7 +309,8 @@ cli
 cli
   .command('session list', 'List all active sessions')
   .option('--host <host>', 'Remote relay server host')
-  .action(async (options: { host?: string }) => {
+  .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
+  .action(async (options: { host?: string; token?: string }) => {
     if (!options.host && !process.env.PLAYWRITER_HOST) {
       await ensureRelayServer({ logger: console, env: cliRelayEnv })
     }
@@ -319,8 +325,12 @@ cli
     }> = []
 
     try {
+      const token = options.token || process.env.PLAYWRITER_TOKEN
       const response = await fetch(`${serverUrl}/cli/sessions`, {
         signal: AbortSignal.timeout(2000),
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       })
       if (!response.ok) {
         console.error(`Error: ${response.status} ${await response.text()}`)
@@ -385,7 +395,8 @@ cli
 cli
   .command('session delete <sessionId>', 'Delete a session and clear its state')
   .option('--host <host>', 'Remote relay server host')
-  .action(async (sessionId: string, options: { host?: string }) => {
+  .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
+  .action(async (sessionId: string, options: { host?: string; token?: string }) => {
     const serverUrl = await getServerUrl(options.host)
 
     if (!options.host && !process.env.PLAYWRITER_HOST) {
@@ -393,9 +404,13 @@ cli
     }
 
     try {
+      const token = options.token || process.env.PLAYWRITER_TOKEN
       const response = await fetch(`${serverUrl}/cli/session/delete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ sessionId }),
       })
 
@@ -415,7 +430,8 @@ cli
 cli
   .command('session reset <sessionId>', 'Reset the browser connection for a session')
   .option('--host <host>', 'Remote relay server host')
-  .action(async (sessionId: string, options: { host?: string }) => {
+  .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
+  .action(async (sessionId: string, options: { host?: string; token?: string }) => {
     const cwd = process.cwd()
     const serverUrl = await getServerUrl(options.host)
 
@@ -424,9 +440,13 @@ cli
     }
 
     try {
+      const token = options.token || process.env.PLAYWRITER_TOKEN
       const response = await fetch(`${serverUrl}/cli/reset`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ sessionId, cwd }),
       })
 
