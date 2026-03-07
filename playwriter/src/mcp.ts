@@ -16,7 +16,7 @@ Buffer.prototype[util.inspect.custom] = function () {
 import dedent from 'string-dedent'
 import { LOG_FILE_PATH, VERSION, parseRelayHost } from './utils.js'
 import { ensureRelayServer, RELAY_PORT } from './relay-client.js'
-import { PlaywrightExecutor, CodeExecutionTimeoutError } from './executor.js'
+import { PlaywrightExecutor, CodeExecutionTimeoutError, type CdpConfig } from './executor.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -98,7 +98,29 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
   }
 
   // Pass config instead of pre-generated URL so executor can generate unique URLs for each connection
-  const cdpConfig = remote || { port: RELAY_PORT }
+  const cdpConfig: CdpConfig = remote || { port: RELAY_PORT }
+
+  // Auto-select extension when multiple Chrome profiles are connected:
+  // pick the one with active targets so users can switch profiles without config changes.
+  if (!cdpConfig.extensionId) {
+    try {
+      const { httpBaseUrl } = parseRelayHost(cdpConfig.host || '127.0.0.1', cdpConfig.port || RELAY_PORT)
+      const res = await fetch(`${httpBaseUrl}/extensions/status`, { signal: AbortSignal.timeout(2000) })
+      if (res.ok) {
+        const data = (await res.json()) as { extensions: Array<{ extensionId: string; stableKey?: string; activeTargets: number; profile?: { email?: string } }> }
+        if (data.extensions && data.extensions.length > 1) {
+          const active = data.extensions.find((e) => e.activeTargets > 0)
+          if (active) {
+            cdpConfig.extensionId = active.stableKey || active.extensionId
+            mcpLogger?.log?.(`Auto-selected extension: ${cdpConfig.extensionId} (${active.profile?.email || 'unknown'})`)
+          }
+        }
+      }
+    } catch {
+      // ignore - falls through to default behavior which surfaces the multi-extension error
+    }
+  }
+
   executor = new PlaywrightExecutor({
     cdpConfig,
     logger: mcpLogger,
