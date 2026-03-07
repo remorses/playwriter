@@ -11,6 +11,10 @@ type ForwardCDPCommand = {
       sessionId?: string
       params?: ProtocolMapping.Commands[K]['paramsType'][0]
       source?: 'playwriter'
+      /** Tab group name for this session's tabs (extension uses for chrome.tabGroups) */
+      groupName?: string
+      /** Tab group color for this session's tabs (chrome.tabGroups.ColorEnum value) */
+      groupColor?: string
     }
   }
 }[keyof ProtocolMapping.Commands]

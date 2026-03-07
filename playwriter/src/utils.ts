@@ -36,11 +36,15 @@ export function getCdpUrl({
   host = '127.0.0.1',
   token,
   extensionId,
+  groupName,
+  groupColor,
 }: {
   port?: number
   host?: string
   token?: string
   extensionId?: string | null
+  groupName?: string
+  groupColor?: string
 } = {}) {
   const id = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
   const params = new URLSearchParams()
@@ -49,6 +53,12 @@ export function getCdpUrl({
   }
   if (extensionId) {
     params.set('extensionId', extensionId)
+  }
+  if (groupName) {
+    params.set('groupName', groupName)
+  }
+  if (groupColor) {
+    params.set('groupColor', groupColor)
   }
   const queryString = params.toString()
   const suffix = queryString ? `?${queryString}` : ''

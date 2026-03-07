@@ -208,7 +208,18 @@ cli
   .command('session new', 'Create a new session and print the session ID')
   .option('--host <host>', 'Remote relay server host')
   .option('--browser <stableKey>', 'Stable browser key when multiple browsers are connected')
-  .action(async (options: { host?: string; browser?: string }) => {
+  .option('--name <name>', 'Tab group name (default: playwriter)')
+  .option('--color <color>', 'Tab group color: grey, blue, red, yellow, green, pink, purple, cyan, orange (default: green)')
+  .action(async (options: { host?: string; browser?: string; name?: string; color?: string }) => {
+    const validColors = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange']
+    if (options.color && !validColors.includes(options.color.toLowerCase())) {
+      console.error(`Invalid color: ${options.color}. Must be one of: ${validColors.join(', ')}`)
+      process.exit(1)
+    }
+    if (options.color) {
+      options.color = options.color.toLowerCase()
+    }
+
     const isLocal = !options.host && !process.env.PLAYWRITER_HOST
 
     let extensions: ExtensionStatus[] = []
@@ -286,7 +297,7 @@ cli
       const response = await fetch(`${serverUrl}/cli/session/new`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ extensionId, cwd }),
+        body: JSON.stringify({ extensionId, cwd, groupName: options.name, groupColor: options.color }),
       })
       if (!response.ok) {
         const text = await response.text()

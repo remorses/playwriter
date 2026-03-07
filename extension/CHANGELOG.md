@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.0.77
+
+### Bug Fixes
+
+- **Fix tab group flapping causing tab disconnects with multiple sessions**: When two sessions existed with different group names (e.g. "hackernews explorer" and "reddit explorer"), broadcast CDP commands like `Target.setAutoAttach` would overwrite unrelated tabs' group metadata with the sender's session group. This caused `syncTabGroup` to continuously shuffle tabs between groups, and the temporary `chrome.tabs.ungroup()` during the move fired `onUpdated` with `groupId=-1`, which the handler misinterpreted as a manual removal — disconnecting the tab. Fixed by:
+  - Only applying group metadata on `Target.createTarget` (tab creation), not on every CDP command
+  - Adding a `tabsBeingMoved` guard set so `syncTabGroup`'s programmatic ungroup/regroup doesn't trigger disconnects
+  - Narrowing the store subscriber to only trigger `syncTabGroup` on group-relevant field changes (state, groupName, groupColor), not unrelated tab field updates
+
+## 0.0.76
+
+### Bug Fixes
+
+- **Fix tab group color not applying (white group)**: `chrome.tabGroups.update()` can race with `chrome.tabs.group()` — Chrome hasn't fully initialized the group internally when the update runs, leaving it with the default grey/white color. Added retry logic with verification: after each update attempt, the actual group color is read back and compared; if it doesn't match, the update is retried with increasing delays (up to 2 retries).
+
+## 0.0.75
+
+### Features
+
+- **Custom tab group names and colors**: Sessions can now specify a custom Chrome tab group name and color. Tabs from different sessions with different names are placed in separate Chrome tab groups. The relay forwards `groupName` and `groupColor` in every `forwardCDPCommand`, and the extension manages multiple groups accordingly. Default behavior (single "playwriter" green group) is unchanged when no custom name/color is set.
+
 ## 0.0.74
 
 ### Bug Fixes

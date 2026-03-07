@@ -108,6 +108,10 @@ const TAB_GROUP_TITLE = 'playwriter'
 let childSessions: Map<string, { tabId: number; targetId?: string }> = new Map()
 let nextSessionId = 1
 let tabGroupQueue: Promise<void> = Promise.resolve()
+// Guard set: tab IDs currently being moved by syncTabGroup (ungroup → regroup).
+// The onUpdated handler checks this to avoid disconnecting tabs that are being
+// programmatically shuffled between groups (chrome.tabs.ungroup fires groupId=-1).
+const tabsBeingMoved = new Set<number>()
 // Cache Target.setAutoAttach params so existing and future tabs enable OOPIF target events.
 // This ensures Playwright can build the iframe frame tree when connecting over CDP.
 let autoAttachParams: Protocol.Target.SetAutoAttachRequest | null = null
@@ -711,80 +715,212 @@ export function sendMessage(message: any): void {
   }
 }
 
-async function syncTabGroup(): Promise<void> {
+/** Derive the set of managed group titles from a tabs map. */
+function getManagedGroupTitles(tabs: Map<number, TabInfo>): Set<string> {
+  const titles = new Set<string>([TAB_GROUP_TITLE])
+  for (const info of tabs.values()) {
+    titles.add(info.groupName || TAB_GROUP_TITLE)
+  }
+  return titles
+}
+
+const VALID_GROUP_COLORS = new Set<chrome.tabGroups.ColorEnum>([
+  'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
+])
+
+function toValidGroupColor(color: string | undefined): chrome.tabGroups.ColorEnum {
+  if (color && VALID_GROUP_COLORS.has(color as chrome.tabGroups.ColorEnum)) {
+    return color as chrome.tabGroups.ColorEnum
+  }
+  return TAB_GROUP_COLOR
+}
+
+/**
+ * chrome.tabGroups.update() can fail silently after chrome.tabs.group() due to a
+ * race condition: Chrome hasn't fully initialized the group internally when the
+ * update call runs, leaving the group with default grey/white color. Retrying
+ * after a short delay fixes this reliably.
+ */
+async function updateTabGroupWithRetry(
+  groupId: number,
+  properties: chrome.tabGroups.UpdateProperties,
+  { maxRetries = 2, delayMs = 50 }: { maxRetries?: number; delayMs?: number } = {},
+): Promise<void> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, delayMs * attempt)
+        })
+      }
+      await chrome.tabGroups.update(groupId, properties)
+      // Verify the color actually applied (Chrome can silently ignore the update)
+      if (properties.color) {
+        const group = await chrome.tabGroups.get(groupId)
+        if (group.color !== properties.color) {
+          logger.debug('Tab group color mismatch after update, retrying:', groupId, group.color, '→', properties.color)
+          continue
+        }
+      }
+      return
+    } catch (e: any) {
+      if (attempt === maxRetries) {
+        logger.debug('Failed to update tab group after retries:', groupId, e.message)
+      }
+    }
+  }
+}
+
+async function syncTabGroup({ prevTabs }: { prevTabs?: Map<number, TabInfo> } = {}): Promise<void> {
   try {
     // Include 'connecting' tabs in the group only when the relay is alive, so that
     // tabs the user drags into the group stay visible while attaching. When the relay
     // is dead all tabs are 'connecting' (waiting for reconnect) and the group should
-    // be cleaned up. The onUpdated handler (line ~1601) already guards against the
+    // be cleaned up. The onUpdated handler already guards against the
     // ungroup→disconnect loop for 'connecting' tabs, so excluding them here is safe.
-    const { connectionState } = store.getState()
+    const { connectionState, tabs: currentTabs } = store.getState()
     const isRelayConnected = connectionState === 'connected'
-    const connectedTabIds = Array.from(store.getState().tabs.entries())
-      .filter(([_, info]) => info.state === 'connected' || (info.state === 'connecting' && isRelayConnected))
-      .map(([tabId]) => tabId)
+    const connectedTabs = Array.from(currentTabs.entries())
+      .filter(([_, info]) => {
+        return info.state === 'connected' || (info.state === 'connecting' && isRelayConnected)
+      })
 
-    // Always query by title - no cached ID that can go stale
-    const existingGroups = await chrome.tabGroups.query({ title: TAB_GROUP_TITLE })
+    // Build a map of groupName → { tabIds, color } for desired state
+    const desiredGroups = new Map<string, { tabIds: number[]; color: chrome.tabGroups.ColorEnum }>()
+    for (const [tabId, info] of connectedTabs) {
+      const name = info.groupName || TAB_GROUP_TITLE
+      const color = toValidGroupColor(info.groupColor)
+      const existing = desiredGroups.get(name)
+      if (existing) {
+        existing.tabIds.push(tabId)
+      } else {
+        desiredGroups.set(name, { tabIds: [tabId], color })
+      }
+    }
 
-    // If no connected tabs, clear any existing playwriter groups
-    if (connectedTabIds.length === 0) {
-      for (const group of existingGroups) {
+    // Derive the full set of titles to query: union of current + previous tabs.
+    // Previous tabs may have had group names whose tabs just disconnected — we need
+    // to find those Chrome groups to clean them up.
+    const currentTitles = getManagedGroupTitles(currentTabs)
+    const previousTitles = prevTabs ? getManagedGroupTitles(prevTabs) : new Set<string>()
+    const allTitlesToQuery = new Set([...currentTitles, ...previousTitles])
+
+    // Collect all Chrome tab groups that match any managed title
+    const allManagedGroups: chrome.tabGroups.TabGroup[] = []
+    for (const title of allTitlesToQuery) {
+      const groups = await chrome.tabGroups.query({ title })
+      allManagedGroups.push(...groups)
+    }
+
+    // If no connected tabs, clear all managed groups
+    if (connectedTabs.length === 0) {
+      for (const group of allManagedGroups) {
         const tabsInGroup = await chrome.tabs.query({ groupId: group.id })
         const tabIdsToUngroup = tabsInGroup.map((t) => t.id).filter((id): id is number => id !== undefined)
         if (tabIdsToUngroup.length > 0) {
-          await chrome.tabs.ungroup(tabIdsToUngroup)
+          for (const id of tabIdsToUngroup) {
+            tabsBeingMoved.add(id)
+          }
+          try {
+            await chrome.tabs.ungroup(tabIdsToUngroup)
+          } finally {
+            for (const id of tabIdsToUngroup) {
+              tabsBeingMoved.delete(id)
+            }
+          }
         }
-        logger.debug('Cleared playwriter group:', group.id)
+        logger.debug('Cleared managed group:', group.title, group.id)
       }
       return
     }
 
-    // Consolidate duplicate groups into one
-    let groupId: number | undefined = existingGroups[0]?.id
-    if (existingGroups.length > 1) {
-      const [keep, ...duplicates] = existingGroups
-      groupId = keep.id
-      for (const group of duplicates) {
-        const tabsInDupe = await chrome.tabs.query({ groupId: group.id })
-        const tabIdsToUngroup = tabsInDupe.map((t) => t.id).filter((id): id is number => id !== undefined)
-        if (tabIdsToUngroup.length > 0) {
-          await chrome.tabs.ungroup(tabIdsToUngroup)
+    // For each desired group, find or create the Chrome tab group and sync membership.
+    // We query current group membership live per group (not a stale snapshot) to avoid
+    // cross-group move bugs when multiple groups are updated in one sync.
+    for (const [groupName, { tabIds: desiredTabIds, color }] of desiredGroups) {
+      const matchingGroups = allManagedGroups.filter((g) => g.title === groupName)
+
+      // Consolidate duplicates: keep first, ungroup tabs in duplicates
+      let groupId: number | undefined = matchingGroups[0]?.id
+      if (matchingGroups.length > 1) {
+        const [keep, ...duplicates] = matchingGroups
+        groupId = keep.id
+        for (const dupe of duplicates) {
+          const tabsInDupe = await chrome.tabs.query({ groupId: dupe.id })
+          const idsToUngroup = tabsInDupe.map((t) => t.id).filter((id): id is number => id !== undefined)
+          if (idsToUngroup.length > 0) {
+            await chrome.tabs.ungroup(idsToUngroup)
+          }
+          logger.debug('Removed duplicate group:', groupName, dupe.id)
         }
-        logger.debug('Removed duplicate playwriter group:', group.id)
+      }
+
+      const desiredSet = new Set(desiredTabIds)
+      // Query live membership for this specific group (avoids stale snapshot issues)
+      const currentTabsInGroup = groupId !== undefined
+        ? await chrome.tabs.query({ groupId })
+        : []
+      const currentIdsInGroup = new Set(
+        currentTabsInGroup.map((t) => t.id).filter((id): id is number => id !== undefined),
+      )
+
+      const tabsToAdd = desiredTabIds.filter((id) => !currentIdsInGroup.has(id))
+      const tabsToRemove = Array.from(currentIdsInGroup).filter((id) => !desiredSet.has(id))
+
+      if (tabsToRemove.length > 0) {
+        try {
+          // Mark tabs as being moved so onUpdated doesn't disconnect them when
+          // chrome.tabs.ungroup fires groupId=-1
+          for (const id of tabsToRemove) {
+            tabsBeingMoved.add(id)
+          }
+          await chrome.tabs.ungroup(tabsToRemove)
+          logger.debug('Removed tabs from group', groupName, ':', tabsToRemove)
+        } catch (e: any) {
+          logger.debug('Failed to ungroup tabs:', tabsToRemove, e.message)
+        } finally {
+          for (const id of tabsToRemove) {
+            tabsBeingMoved.delete(id)
+          }
+        }
+      }
+
+      if (tabsToAdd.length > 0) {
+        if (groupId === undefined) {
+          const newGroupId = await chrome.tabs.group({ tabIds: tabsToAdd })
+          await updateTabGroupWithRetry(newGroupId, { title: groupName, color })
+          logger.debug('Created tab group:', groupName, newGroupId, 'with tabs:', tabsToAdd)
+        } else {
+          await chrome.tabs.group({ tabIds: tabsToAdd, groupId })
+          await updateTabGroupWithRetry(groupId, { title: groupName, color })
+          logger.debug('Added tabs to group', groupName, ':', tabsToAdd)
+        }
+      } else if (groupId !== undefined) {
+        // Ensure the existing group keeps the right color/title.
+        // Chrome can reset these on group collapse/expand or tab moves.
+        await updateTabGroupWithRetry(groupId, { title: groupName, color })
       }
     }
 
-    const allTabs = await chrome.tabs.query({})
-    const tabsInGroup = allTabs.filter((t) => t.groupId === groupId && t.id !== undefined)
-    const tabIdsInGroup = new Set(tabsInGroup.map((t) => t.id!))
-
-    const tabsToAdd = connectedTabIds.filter((id) => !tabIdsInGroup.has(id))
-    const tabsToRemove = Array.from(tabIdsInGroup).filter((id) => !connectedTabIds.includes(id))
-
-    if (tabsToRemove.length > 0) {
-      try {
-        await chrome.tabs.ungroup(tabsToRemove)
-        logger.debug('Removed tabs from group:', tabsToRemove)
-      } catch (e: any) {
-        logger.debug('Failed to ungroup tabs:', tabsToRemove, e.message)
+    // Clean up managed groups that no longer have any desired tabs
+    for (const group of allManagedGroups) {
+      if (group.title && !desiredGroups.has(group.title)) {
+        const tabsInGroup = await chrome.tabs.query({ groupId: group.id })
+        const tabIdsToUngroup = tabsInGroup.map((t) => t.id).filter((id): id is number => id !== undefined)
+        if (tabIdsToUngroup.length > 0) {
+          for (const id of tabIdsToUngroup) {
+            tabsBeingMoved.add(id)
+          }
+          try {
+            await chrome.tabs.ungroup(tabIdsToUngroup)
+          } finally {
+            for (const id of tabIdsToUngroup) {
+              tabsBeingMoved.delete(id)
+            }
+          }
+        }
+        logger.debug('Cleaned up empty managed group:', group.title, group.id)
       }
-    }
-
-    if (tabsToAdd.length > 0) {
-      if (groupId === undefined) {
-        const newGroupId = await chrome.tabs.group({ tabIds: tabsToAdd })
-        await chrome.tabGroups.update(newGroupId, { title: TAB_GROUP_TITLE, color: TAB_GROUP_COLOR })
-        logger.debug('Created tab group:', newGroupId, 'with tabs:', tabsToAdd)
-      } else {
-        await chrome.tabs.group({ tabIds: tabsToAdd, groupId })
-        await chrome.tabGroups.update(groupId, { title: TAB_GROUP_TITLE, color: TAB_GROUP_COLOR })
-        logger.debug('Added tabs to existing group:', tabsToAdd)
-      }
-    } else if (groupId !== undefined) {
-      // No tabs to add, but ensure the existing group keeps the right color/title.
-      // Chrome can reset these on group collapse/expand or tab moves.
-      await chrome.tabGroups.update(groupId, { title: TAB_GROUP_TITLE, color: TAB_GROUP_COLOR })
     }
   } catch (error: any) {
     logger.debug('Failed to sync tab group:', error.message)
@@ -884,6 +1020,16 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
   let targetTabId = resolved?.tabId
   let targetTab = resolved?.tab
 
+  // Group metadata (groupName/groupColor) is intentionally NOT applied here on
+  // every command. The relay only sends these fields on Target.createTarget, and
+  // the extension applies them in the Target.createTarget handler below.
+  // Previously, applying group fields on every command caused a flapping bug:
+  // broadcast commands (like Target.setAutoAttach) would overwrite unrelated tabs'
+  // group metadata with the sender's session group, making syncTabGroup continuously
+  // shuffle tabs between groups and triggering disconnects.
+  const msgGroupName = msg.params.groupName
+  const msgGroupColor = msg.params.groupColor
+
   const debuggee = targetTabId ? { tabId: targetTabId } : undefined
 
   // Root-level Target.setAutoAttach must apply to all connected tabs since
@@ -954,6 +1100,17 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
       logger.debug('Created tab:', tab.id, 'waiting for it to load...')
       await sleep(100)
       const { targetInfo } = await attachTab(tab.id)
+      // Apply group metadata from the command to the newly created tab
+      if (tab.id && (msgGroupName || msgGroupColor)) {
+        store.setState((state) => {
+          const newTabs = new Map(state.tabs)
+          const tabInfo = newTabs.get(tab.id!)
+          if (tabInfo) {
+            newTabs.set(tab.id!, { ...tabInfo, groupName: msgGroupName, groupColor: msgGroupColor })
+          }
+          return { tabs: newTabs }
+        })
+      }
       return { targetId: targetInfo.targetId } satisfies Protocol.Target.CreateTargetResponse
     }
 
@@ -1124,11 +1281,14 @@ async function attachTab(
 
     store.setState((state) => {
       const newTabs = new Map(state.tabs)
+      const existing = newTabs.get(tabId)
       newTabs.set(tabId, {
+        ...existing,
         sessionId,
         targetId: targetInfo.targetId,
         state: 'connected',
         attachOrder,
+        errorText: undefined,
       })
       return { tabs: newTabs, connectionState: 'connected', errorText: undefined }
     })
@@ -1557,17 +1717,25 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 })
 
-function serializeTabs(tabs: Map<number, TabInfo>): string {
-  return JSON.stringify(Array.from(tabs.entries()))
+// Only compare group-relevant fields to avoid triggering syncTabGroup on unrelated
+// tab changes (pinnedCount, isRecording, etc.) that don't affect group membership.
+function serializeGroupProjection(tabs: Map<number, TabInfo>): string {
+  const projection = Array.from(tabs.entries()).map(([id, info]) => {
+    return [id, info.state, info.groupName, info.groupColor] as const
+  })
+  return JSON.stringify(projection)
 }
 
 store.subscribe((state, prevState) => {
   logger.log(state)
   void updateIcons()
   updateContextMenuVisibility()
-  const tabsChanged = serializeTabs(state.tabs) !== serializeTabs(prevState.tabs)
-  if (tabsChanged) {
-    tabGroupQueue = tabGroupQueue.then(syncTabGroup).catch((e) => {
+  const groupChanged = serializeGroupProjection(state.tabs) !== serializeGroupProjection(prevState.tabs)
+  if (groupChanged) {
+    const prevTabs = prevState.tabs
+    tabGroupQueue = tabGroupQueue.then(() => {
+      return syncTabGroup({ prevTabs })
+    }).catch((e) => {
       logger.debug('syncTabGroup error:', e)
     })
   }
@@ -1637,16 +1805,37 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // Queue tab group operations to serialize with syncTabGroup and disconnectEverything
     tabGroupQueue = tabGroupQueue
       .then(async () => {
-        // Query for playwriter group by title - no stale cached ID
-        const existingGroups = await chrome.tabGroups.query({ title: TAB_GROUP_TITLE })
-        const groupId = existingGroups[0]?.id
-        if (groupId === undefined) {
+        // Derive managed titles from current store tabs (default + any custom group names)
+        const currentManagedTitles = getManagedGroupTitles(store.getState().tabs)
+        // Build a map from Chrome group ID → { title, color } so we can persist
+        // group metadata when a tab is manually dragged into a managed group
+        const managedGroupInfo = new Map<number, { title: string; color: string }>()
+        for (const title of currentManagedTitles) {
+          const groups = await chrome.tabGroups.query({ title })
+          for (const g of groups) {
+            managedGroupInfo.set(g.id, { title: g.title || TAB_GROUP_TITLE, color: g.color || TAB_GROUP_COLOR })
+          }
+        }
+        if (managedGroupInfo.size === 0) {
           return
         }
         const { tabs } = store.getState()
-        if (changeInfo.groupId === groupId) {
+        if (managedGroupInfo.has(changeInfo.groupId!)) {
           if (!tabs.has(tabId) && !isRestrictedUrl(tab.url)) {
-            logger.debug('Tab manually added to playwriter group:', tabId)
+            // Persist the group's title/color on the tab before connecting so
+            // syncTabGroup keeps it in the correct group after attach
+            const groupMeta = managedGroupInfo.get(changeInfo.groupId!)!
+            store.setState((state) => {
+              const newTabs = new Map(state.tabs)
+              newTabs.set(tabId, {
+                ...newTabs.get(tabId),
+                state: 'connecting' as TabState,
+                groupName: groupMeta.title,
+                groupColor: groupMeta.color,
+              })
+              return { tabs: newTabs }
+            })
+            logger.debug('Tab manually added to managed group:', tabId, groupMeta.title)
             await connectTab(tabId)
           }
         } else if (tabs.has(tabId)) {
@@ -1655,7 +1844,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             logger.debug('Tab removed from group while connecting, ignoring:', tabId)
             return
           }
-          logger.debug('Tab manually removed from playwriter group:', tabId)
+          // syncTabGroup temporarily ungroups tabs during moves, which fires
+          // onUpdated with groupId=-1. Skip disconnect for tabs being moved.
+          if (tabsBeingMoved.has(tabId)) {
+            logger.debug('Tab being moved by syncTabGroup, ignoring ungroup event:', tabId)
+            return
+          }
+          logger.debug('Tab manually removed from managed group:', tabId)
           await disconnectTab(tabId)
         }
       })

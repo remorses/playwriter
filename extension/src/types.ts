@@ -9,6 +9,10 @@ export interface TabInfo {
   pinnedCount?: number
   attachOrder?: number
   isRecording?: boolean
+  /** Chrome tab group name for this tab's session (default: 'playwriter') */
+  groupName?: string
+  /** Chrome tab group color for this tab's session (default: 'green') */
+  groupColor?: string
 }
 
 export interface ExtensionState {

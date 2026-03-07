@@ -563,16 +563,29 @@ export async function startPlayWriterCDPRelayServer({
     params,
     sessionId,
     source,
+    clientId,
   }: {
     extensionId: string | null
     method: CDPCommand['method'] | (string & {})
     params: CDPCommand['params']
     sessionId?: CDPCommand['sessionId']
     source?: CDPCommand['source']
+    clientId?: string
   }) {
     const conn = getExtensionConnection(extensionId)
     const connectedTargets = conn?.connectedTargets || new Map<string, relayState.ConnectedTarget>()
     const resolvedExtensionId = conn?.id || extensionId
+
+    // Look up tab group metadata from the Playwright client that sent this command.
+    // Only included on Target.createTarget — NOT on every command. Sending group
+    // fields on every command caused a flapping bug: broadcast commands like
+    // Target.setAutoAttach would overwrite unrelated tabs' group metadata, making
+    // syncTabGroup continuously shuffle tabs between groups and triggering disconnects.
+    const client = clientId ? store.getState().playwrightClients.get(clientId) : undefined
+    const groupFields = method === 'Target.createTarget' && (client?.groupName || client?.groupColor)
+      ? { groupName: client.groupName, groupColor: client.groupColor }
+      : {}
+
     switch (method) {
       case 'Browser.getVersion': {
         return {
@@ -603,7 +616,7 @@ export async function startPlayWriterCDPRelayServer({
         await sendToExtension({
           extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
-          params: { method, params, source },
+          params: { method, params, source, ...groupFields },
         })
         return {}
       }
@@ -665,7 +678,7 @@ export async function startPlayWriterCDPRelayServer({
         return await sendToExtension({
           extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
-          params: { method, params, source },
+          params: { method, params, source, ...groupFields },
         })
       }
 
@@ -673,7 +686,7 @@ export async function startPlayWriterCDPRelayServer({
         return await sendToExtension({
           extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
-          params: { method, params, source },
+          params: { method, params, source, ...groupFields },
         })
       }
 
@@ -717,7 +730,7 @@ export async function startPlayWriterCDPRelayServer({
         const result = await sendToExtension({
           extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
-          params: { sessionId, method, params, source },
+          params: { sessionId, method, params, source, ...groupFields },
         })
 
         await contextCreatedPromise
@@ -729,7 +742,7 @@ export async function startPlayWriterCDPRelayServer({
     return await sendToExtension({
       extensionId: resolvedExtensionId,
       method: 'forwardCDPCommand',
-      params: { sessionId, method, params, source },
+      params: { sessionId, method, params, source, ...groupFields },
     })
   }
 
@@ -925,6 +938,8 @@ export async function startPlayWriterCDPRelayServer({
       const clientId = c.req.param('clientId') || 'default'
       const url = new URL(c.req.url, 'http://localhost')
       const requestedExtensionId = url.searchParams.get('extensionId')
+      const clientGroupName = url.searchParams.get('groupName') || undefined
+      const clientGroupColor = url.searchParams.get('groupColor') || undefined
       // When extensionId is explicit, resolve directly. Otherwise use fallback which
       // handles single-extension and uniquely-active-extension cases (#52).
       const resolvedExtension = requestedExtensionId
@@ -956,7 +971,7 @@ export async function startPlayWriterCDPRelayServer({
 
           // Add client first so it can receive Target.attachedToTarget events
           store.setState((s) => {
-            return relayState.addPlaywrightClient(s, { id: clientId, extensionId: clientExtensionId, ws })
+            return relayState.addPlaywrightClient(s, { id: clientId, extensionId: clientExtensionId, ws, groupName: clientGroupName, groupColor: clientGroupColor })
           })
           const extensionConnection = getExtensionConnection(clientExtensionId)
           const targetCount = extensionConnection?.connectedTargets.size || 0
@@ -1016,6 +1031,7 @@ export async function startPlayWriterCDPRelayServer({
               params,
               sessionId,
               source,
+              clientId,
             })
 
             if (method === 'Target.setAutoAttach' && !sessionId) {
@@ -1767,7 +1783,7 @@ export async function startPlayWriterCDPRelayServer({
   })
 
   app.post('/cli/session/new', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { extensionId?: string | null; cwd?: string }
+    const body = (await c.req.json().catch(() => ({}))) as { extensionId?: string | null; cwd?: string; groupName?: string; groupColor?: string }
     const sessionId = String(nextSessionNumber++)
     const extensionId = body.extensionId || null
     const cwd = body.cwd
@@ -1787,6 +1803,8 @@ export async function startPlayWriterCDPRelayServer({
         extensionId: conn.stableKey,
         browser: conn.info.browser || null,
         profile: conn.info ? { email: conn.info.email || '', id: conn.info.id || '' } : null,
+        groupName: body.groupName,
+        groupColor: body.groupColor,
       },
     })
     const metadata = executor.getSessionMetadata()
