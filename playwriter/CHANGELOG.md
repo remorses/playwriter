@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.88
+
+### Improvements
+
+- **Inline download behavior normalization in relay**: Removed the standalone `toPageDownloadBehavior` helper and inlined the `allowAndName -> allow` mapping at the call site to keep the download-behavior forwarding path more direct.
+
+## 0.0.87
+
+### Improvements
+
+- **Simplify relay download compatibility path**: Extracted Browser-download compatibility emission into a focused helper and simplified download-behavior mapping logic in the relay, while keeping dual `Page.download*` + `Browser.download*` forwarding behavior and improving test assertions to include `Page.setDownloadBehavior` forwarding.
+
+## 0.0.86
+
+### Bug Fixes
+
+- **Fix extension-mode downloads for Playwright clients**: Relay now translates `Browser.setDownloadBehavior` into per-target `Page.setDownloadBehavior`, caches the behavior for future page targets, and emits both `Page.download*` and synthetic root-session `Browser.download*` events so `page.waitForEvent('download')` works while preserving backward compatibility for clients that still rely on `Page.downloadWillBegin`/`Page.downloadProgress`.
+
 ## 0.0.85
 
 ### Bug Fixes

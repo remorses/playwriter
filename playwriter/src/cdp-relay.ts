@@ -83,6 +83,7 @@ export async function startPlayWriterCDPRelayServer({
 } = {}): Promise<RelayServer> {
   const emitter = new EventEmitter()
   const store = relayState.createRelayStore()
+  const extensionDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
@@ -557,6 +558,92 @@ export async function startPlayWriterCDPRelayServer({
     }
   }
 
+  function getPageTargetSessionIds({ extensionId }: { extensionId: string }): string[] {
+    const extensionState = store.getState().extensions.get(extensionId)
+    if (!extensionState) {
+      return []
+    }
+    return Array.from(extensionState.connectedTargets.values())
+      .filter((target) => {
+        return target.targetInfo.type === 'page'
+      })
+      .map((target) => {
+        return target.sessionId
+      })
+  }
+
+  function maybeEmitBrowserDownloadCompatEvent({
+    method,
+    params,
+    extensionId,
+  }: {
+    method: string
+    params: unknown
+    extensionId: string
+  }): void {
+    const browserEventMethod =
+      method === 'Page.downloadWillBegin'
+        ? 'Browser.downloadWillBegin'
+        : method === 'Page.downloadProgress'
+          ? 'Browser.downloadProgress'
+          : null
+    if (!browserEventMethod) {
+      return
+    }
+    sendToPlaywright({
+      message: {
+        method: browserEventMethod,
+        params,
+      } as CDPEventBase,
+      source: 'server',
+      extensionId,
+    })
+  }
+
+  async function applyDownloadBehaviorToTargets({
+    extensionId,
+    behavior,
+    source,
+    targetSessionIds,
+  }: {
+    extensionId: string
+    behavior: Protocol.Browser.SetDownloadBehaviorRequest
+    source?: CDPCommand['source']
+    targetSessionIds?: string[]
+  }): Promise<void> {
+    const pageBehavior: Protocol.Page.SetDownloadBehaviorRequest['behavior'] =
+      behavior.behavior === 'allowAndName' ? 'allow' : behavior.behavior
+    const pageParams: Protocol.Page.SetDownloadBehaviorRequest = (() => {
+      if (pageBehavior === 'allow' && behavior.downloadPath) {
+        return { behavior: pageBehavior, downloadPath: behavior.downloadPath }
+      }
+      return { behavior: pageBehavior }
+    })()
+    const sessions = targetSessionIds || getPageTargetSessionIds({ extensionId })
+    if (sessions.length === 0) {
+      return
+    }
+    await Promise.all(
+      sessions.map(async (targetSessionId) => {
+        try {
+          await sendToExtension({
+            extensionId,
+            method: 'forwardCDPCommand',
+            params: {
+              sessionId: targetSessionId,
+              method: 'Page.setDownloadBehavior',
+              params: pageParams,
+              source,
+            },
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          logger?.log(pc.yellow(`[Server] Failed to apply Page.setDownloadBehavior to ${targetSessionId}: ${message}`))
+        }
+      }),
+    )
+  }
+
   async function routeCdpCommand({
     extensionId,
     method,
@@ -585,6 +672,18 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       case 'Browser.setDownloadBehavior': {
+        const downloadBehaviorParams = params as Protocol.Browser.SetDownloadBehaviorRequest | undefined
+        if (!downloadBehaviorParams?.behavior) {
+          throw new Error('behavior is required for Browser.setDownloadBehavior')
+        }
+        if (resolvedExtensionId) {
+          extensionDownloadBehavior.set(resolvedExtensionId, downloadBehaviorParams)
+          await applyDownloadBehaviorToTargets({
+            extensionId: resolvedExtensionId,
+            behavior: downloadBehaviorParams,
+            source,
+          })
+        }
         return {}
       }
 
@@ -1336,6 +1435,8 @@ export async function startPlayWriterCDPRelayServer({
             const cdpEvent: CDPEventBase = { method, sessionId, params }
             emitter.emit('cdp:event', { event: cdpEvent, sessionId })
 
+            maybeEmitBrowserDownloadCompatEvent({ method, params, extensionId: connectionId })
+
             if (method === 'Target.attachedToTarget') {
               const targetParams = params as Protocol.Target.AttachedToTargetEvent
               const incomingSessionId = sessionId
@@ -1395,6 +1496,15 @@ export async function startPlayWriterCDPRelayServer({
                   targetInfo: targetParams.targetInfo,
                 }),
               )
+
+              const cachedDownloadBehavior = extensionDownloadBehavior.get(connectionId)
+              if (cachedDownloadBehavior && targetParams.targetInfo.type === 'page') {
+                void applyDownloadBehaviorToTargets({
+                  extensionId: connectionId,
+                  behavior: cachedDownloadBehavior,
+                  targetSessionIds: [targetParams.sessionId],
+                })
+              }
 
               // Only forward to Playwright if this is a new target to avoid duplicates
               if (!alreadyConnected) {

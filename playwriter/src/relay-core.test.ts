@@ -1,7 +1,9 @@
 import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { chromium } from '@xmorse/playwright-core'
 import { getCDPSessionForPage } from './cdp-session.js'
-import { getCdpUrl } from './utils.js'
+import { getCdpUrl, LOG_CDP_FILE_PATH } from './utils.js'
+import fs from 'node:fs'
 import {
   setupTestContext,
   cleanupTestContext,
@@ -120,6 +122,157 @@ describe('Relay Core Tests', () => {
     await cdpSession.detach()
     await page.close()
   }, 60000)
+
+  it('should emit download events for both Browser and Page domains in extension mode', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const logFilePath = LOG_CDP_FILE_PATH
+    const logLineCountBefore = fs.existsSync(logFilePath)
+      ? fs
+          .readFileSync(logFilePath, 'utf-8')
+          .split('\n')
+          .filter((line) => {
+            return line.trim().length > 0
+          }).length
+      : 0
+
+    const server = await createSimpleServer({
+      routes: {
+        '/': `<!doctype html>
+<html>
+  <body>
+    <button id="download-button">Download</button>
+    <script>
+      const button = document.getElementById('download-button');
+      button.addEventListener('click', () => {
+        const blob = new Blob(['playwriter-download-test'], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'playwriter-download-test.txt';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+        }, 1000);
+      });
+    </script>
+  </body>
+</html>`,
+      },
+    })
+
+    const page = await browserContext.newPage()
+    await page.goto(server.baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.bringToFront()
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const directBrowser = await withTimeout({
+      promise: chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
+      timeoutMs: 10000,
+      errorMessage: 'Timed out connecting over CDP for download reproduction test',
+    })
+
+    const connectedPage = directBrowser
+      .contexts()[0]
+      .pages()
+      .find((candidatePage) => {
+        return candidatePage.url() === server.baseUrl + '/'
+      })
+    if (!connectedPage) {
+      throw new Error('Connected page not found for download reproduction test')
+    }
+
+    const downloadResult = await Promise.all([
+      connectedPage.waitForEvent('download', { timeout: 3000 }).then(
+        (download) => {
+          return { timedOut: false, suggestedFilename: download.suggestedFilename() }
+        },
+        (error: Error) => {
+          return { timedOut: true, errorMessage: error.message }
+        },
+      ),
+      connectedPage.click('#download-button'),
+    ])
+
+    expect(downloadResult[0]).toMatchInlineSnapshot(`
+      {
+        "suggestedFilename": "playwriter-download-test.txt",
+        "timedOut": false,
+      }
+    `)
+
+    await directBrowser.close()
+    await page.close()
+    await server.close()
+
+    const logLinesAfter = fs
+      .readFileSync(logFilePath, 'utf-8')
+      .split('\n')
+      .filter((line) => {
+        return line.trim().length > 0
+      })
+      .slice(logLineCountBefore)
+
+    const newEntries = logLinesAfter
+      .map((line) => {
+        return tryJsonParse(line)
+      })
+      .filter((entry): entry is { direction: string; message: { method?: string } } => {
+        return Boolean(entry && typeof entry === 'object' && 'direction' in entry && 'message' in entry)
+      })
+
+    const methods = newEntries
+      .map((entry) => {
+        return {
+          direction: entry.direction,
+          method: typeof entry.message?.method === 'string' ? entry.message.method : 'response',
+        }
+      })
+      .filter((entry) => {
+        return (
+          entry.method.includes('download') ||
+          entry.method === 'Browser.setDownloadBehavior' ||
+          entry.method === 'Page.setDownloadBehavior'
+        )
+      })
+
+    const summary = {
+      hasBrowserSetDownloadBehavior: methods.some((entry) => {
+        return entry.direction === 'from-playwright' && entry.method === 'Browser.setDownloadBehavior'
+      }),
+      hasPageSetDownloadBehavior: methods.some((entry) => {
+        return entry.direction === 'to-extension' && entry.method === 'Page.setDownloadBehavior'
+      }),
+      hasPageDownloadWillBegin: methods.some((entry) => {
+        return entry.method === 'Page.downloadWillBegin'
+      }),
+      hasPageDownloadProgress: methods.some((entry) => {
+        return entry.method === 'Page.downloadProgress'
+      }),
+      hasBrowserDownloadWillBegin: methods.some((entry) => {
+        return entry.method === 'Browser.downloadWillBegin'
+      }),
+      hasBrowserDownloadProgress: methods.some((entry) => {
+        return entry.method === 'Browser.downloadProgress'
+      }),
+    }
+
+    expect(summary).toMatchInlineSnapshot(`
+      {
+        "hasBrowserDownloadProgress": false,
+        "hasBrowserDownloadWillBegin": false,
+        "hasBrowserSetDownloadBehavior": true,
+        "hasPageDownloadProgress": false,
+        "hasPageDownloadWillBegin": false,
+        "hasPageSetDownloadBehavior": true,
+      }
+    `)
+  }, 120000)
 
   it('should execute code and capture console output', async () => {
     await client.callTool({
