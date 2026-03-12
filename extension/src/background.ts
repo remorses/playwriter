@@ -1524,7 +1524,7 @@ chrome.contextMenus
   .remove('playwriter-pin-element')
   .catch(() => {})
   .finally(() => {
-    chrome.contextMenus.create({
+    chrome.contextMenus?.create({
       id: 'playwriter-pin-element',
       title: 'Copy Playwriter Element Reference',
       contexts: ['all'],
@@ -1535,7 +1535,7 @@ chrome.contextMenus
 function updateContextMenuVisibility(): void {
   const { currentTabId, tabs } = store.getState()
   const isConnected = currentTabId !== undefined && tabs.get(currentTabId)?.state === 'connected'
-  chrome.contextMenus.update('playwriter-pin-element', { visible: isConnected })
+  chrome.contextMenus?.update('playwriter-pin-element', { visible: isConnected })
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -1653,7 +1653,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 })
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== 'playwriter-pin-element' || !tab?.id) return
 
   const tabInfo = store.getState().tabs.get(tab.id)
