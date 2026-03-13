@@ -300,7 +300,7 @@ function setPressed(options: { pressed: boolean }): void {
       ? 0.94
       : runtime.options.style === 'minimal'
         ? 0.93
-      : 0.82
+        : 0.82
     : 1
   element.style.opacity = options.pressed ? '1' : getBaseOpacity()
   applyTransform()

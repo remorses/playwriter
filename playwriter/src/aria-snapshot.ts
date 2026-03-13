@@ -163,10 +163,7 @@ export async function resizeImage(options: ResizeImageOptions): Promise<ResizeIm
     }
   })()
 
-  const buffer = await sharp(inputBuffer)
-    .resize(resizeOpts)
-    .jpeg({ quality })
-    .toBuffer()
+  const buffer = await sharp(inputBuffer).resize(resizeOpts).jpeg({ quality }).toBuffer()
 
   // Default: overwrite input file. When input is a Buffer, no file is written
   // unless output is explicitly set.

@@ -107,8 +107,18 @@ describe('addExtension', () => {
 
   test('allows multiple extensions with different stableKeys', () => {
     let state = emptyState()
-    state = relayState.addExtension(state, { id: 'ext-1', info: { browser: 'Chrome' }, stableKey: 'profile:a', ws: fakeWs() })
-    state = relayState.addExtension(state, { id: 'ext-2', info: { browser: 'Firefox' }, stableKey: 'profile:b', ws: fakeWs() })
+    state = relayState.addExtension(state, {
+      id: 'ext-1',
+      info: { browser: 'Chrome' },
+      stableKey: 'profile:a',
+      ws: fakeWs(),
+    })
+    state = relayState.addExtension(state, {
+      id: 'ext-2',
+      info: { browser: 'Firefox' },
+      stableKey: 'profile:b',
+      ws: fakeWs(),
+    })
 
     expect(state.extensions.size).toBe(2)
   })
@@ -494,8 +504,6 @@ describe('updateTargetUrl', () => {
   })
 })
 
-
-
 // ---------------------------------------------------------------------------
 // Derivation helpers
 // ---------------------------------------------------------------------------
@@ -542,7 +550,12 @@ describe('store.setState with transitions', () => {
     const store = relayState.createRelayStore()
 
     store.setState((s) => {
-      return relayState.addExtension(s, { id: 'ext-1', info: { browser: 'Chrome' }, stableKey: 'profile:1', ws: fakeWs() })
+      return relayState.addExtension(s, {
+        id: 'ext-1',
+        info: { browser: 'Chrome' },
+        stableKey: 'profile:1',
+        ws: fakeWs(),
+      })
     })
 
     expect(store.getState().extensions.size).toBe(1)

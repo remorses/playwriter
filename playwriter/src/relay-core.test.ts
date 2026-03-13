@@ -978,32 +978,30 @@ describe('Relay Core Tests', () => {
     }
   }, 60000)
 
-  it(
-    'should preserve system color scheme instead of forcing light mode',
-    async () => {
-      const browserContext = getBrowserContext()
-      const serviceWorker = await getExtensionServiceWorker(browserContext)
+  it('should preserve system color scheme instead of forcing light mode', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
 
-      const page = await browserContext.newPage()
-      await page.goto('https://example.com')
-      await page.bringToFront()
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com')
+    await page.bringToFront()
 
-      // test-utils launches with colorScheme: 'dark', so before MCP connection
-      // the browser should report dark mode
-      const colorSchemeBefore = await page.evaluate(() => {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      })
-      expect(colorSchemeBefore).toBe('dark')
+    // test-utils launches with colorScheme: 'dark', so before MCP connection
+    // the browser should report dark mode
+    const colorSchemeBefore = await page.evaluate(() => {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    })
+    expect(colorSchemeBefore).toBe('dark')
 
-      await serviceWorker.evaluate(async () => {
-        await globalThis.toggleExtensionForActiveTab()
-      })
-      await new Promise((r) => setTimeout(r, 500))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await new Promise((r) => setTimeout(r, 500))
 
-      const result = await client.callTool({
-        name: 'execute',
-        arguments: {
-          code: js`
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
                     const pages = context.pages();
                     const urls = pages.map(p => p.url());
                     const targetPage = pages.find(p => p.url().includes('example.com'));
@@ -1014,15 +1012,15 @@ describe('Relay Core Tests', () => {
                     const isLight = await targetPage.evaluate(() => window.matchMedia('(prefers-color-scheme: light)').matches);
                     return { matchesDark: isDark, matchesLight: isLight };
                 `,
-        },
-      })
+      },
+    })
 
-      console.log('Color scheme after MCP connection:', result.content)
+    console.log('Color scheme after MCP connection:', result.content)
 
-      // After MCP connection, color scheme should NOT be forced to light.
-      // The page.ts default is now 'no-override', so the browser's actual
-      // color scheme (dark, from test-utils launch config) should be preserved.
-      expect(result.content).toMatchInlineSnapshot(`
+    // After MCP connection, color scheme should NOT be forced to light.
+    // The page.ts default is now 'no-override', so the browser's actual
+    // color scheme (dark, from test-utils launch config) should be preserved.
+    expect(result.content).toMatchInlineSnapshot(`
         [
           {
             "text": "[return value] { matchesDark: true, matchesLight: false }",
@@ -1031,10 +1029,8 @@ describe('Relay Core Tests', () => {
         ]
       `)
 
-      await page.close()
-    },
-    60000,
-  )
+    await page.close()
+  }, 60000)
 
   it('should get clean HTML with getCleanHTML', async () => {
     const browserContext = getBrowserContext()
@@ -1358,7 +1354,10 @@ describe('Relay Core Tests', () => {
       }
     `)
     // Cleanup
-    await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
+    await client.callTool({
+      name: 'execute',
+      arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` },
+    })
   }, 30000)
 
   it('should show descriptive error when clicking an element covered by another', async () => {
@@ -1417,7 +1416,10 @@ describe('Relay Core Tests', () => {
         "isError": true,
       }
     `)
-    await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
+    await client.callTool({
+      name: 'execute',
+      arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` },
+    })
   }, 30000)
 
   it('should show descriptive error when clicking a display:none element', async () => {
@@ -1465,7 +1467,9 @@ describe('Relay Core Tests', () => {
         "isError": true,
       }
     `)
-    await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
+    await client.callTool({
+      name: 'execute',
+      arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` },
+    })
   }, 30000)
-
 })

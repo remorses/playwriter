@@ -48,7 +48,9 @@ describe('onMouseAction callback', () => {
     await serviceWorker.evaluate(async () => {
       await (globalThis as any).toggleExtensionForActiveTab()
     })
-    await new Promise((r) => { setTimeout(r, 200) })
+    await new Promise((r) => {
+      setTimeout(r, 200)
+    })
 
     const directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
     const contexts = directBrowser.contexts()

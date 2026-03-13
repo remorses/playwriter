@@ -156,8 +156,9 @@ export function removeExtension(state: RelayState, { extensionId }: { extensionI
   newExtensions.delete(extensionId)
 
   // Also remove playwright clients bound to this extension
-  const clientsToRemove = Array.from(state.playwrightClients.values())
-    .filter((client) => client.extensionId === extensionId)
+  const clientsToRemove = Array.from(state.playwrightClients.values()).filter(
+    (client) => client.extensionId === extensionId,
+  )
   if (clientsToRemove.length === 0) {
     return { ...state, extensions: newExtensions }
   }
@@ -493,5 +494,3 @@ export function updateTargetUrl(
   newExtensions.set(extensionId, { ...ext, connectedTargets: newTargets })
   return { ...state, extensions: newExtensions }
 }
-
-

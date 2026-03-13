@@ -222,36 +222,48 @@ if you add runtime code (a new method, property, or type) to the fork without up
 2. **add a doc entry in the markdown** — this is what the type generator reads
    - methods: `playwright/docs/src/api/class-page.md`, `class-browsercontext.md`, `class-locator.md`, etc.
    - format examples:
+
      ```md
      ## async method: BrowserContext.getExistingCDPSession
-     * since: v1.59
-     * langs: js
-     - returns: <[CDPSession]>
+
+     - since: v1.59
+     - langs: js
+
+     * returns: <[CDPSession]>
 
      Description of what the method does.
 
      ### param: BrowserContext.getExistingCDPSession.page
-     * since: v1.59
-     - `page` <[Page]|[Frame]>
+
+     - since: v1.59
+
+     * `page` <[Page]|[Frame]>
 
      Parameter description.
      ```
+
      ```md
      ## property: Page.onMouseAction
-     * since: v1.59
-     * langs: js
-     - type: <[null]|[function]\([MouseActionEvent]\):[Promise]<[void]>>
+
+     - since: v1.59
+     - langs: js
+
+     * type: <[null]|[function]\([MouseActionEvent]\):[Promise]<[void]>>
 
      Property description.
      ```
+
      ```md
      ## method: Locator.selector
-     * since: v1.59
-     * langs: js
-     - returns: <[string]>
+
+     - since: v1.59
+     - langs: js
+
+     * returns: <[string]>
 
      Method description.
      ```
+
    - use `* langs: js` for JS/TS-only APIs (skips Java/Python/C# generation)
 
 3. **add type overrides if needed** — `playwright/utils/generate_types/overrides.d.ts`
@@ -260,11 +272,13 @@ if you add runtime code (a new method, property, or type) to the fork without up
    - standalone type aliases (`export type Foo = {...}`) do NOT need a doc entry, only interface members do
 
 4. **regenerate types.d.ts**
+
    ```bash
    node playwright/utils/generate_types/index.js
    ```
 
 5. **rebuild playwright-core**
+
    ```bash
    pnpm playwright:build  # 0.1s
    ```

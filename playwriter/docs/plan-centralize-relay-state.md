@@ -93,20 +93,20 @@ type RelayState = {
 Extract all state mutations as pure functions: `(state, event) -> newState`. These
 are the functions currently scattered as inline mutations inside WebSocket handlers.
 
-| Function | Currently at | What it does |
-|---|---|---|
-| `addExtension` | extension `onOpen` (~line 1163) | Adds new connection to `extensions` |
-| `removeExtension` | extension `onClose` (~line 1500-1516) | Removes connection, cleans up |
-| `addPlaywrightClient` | cdp `onOpen` (~line 911) | Adds client to `playwrightClients` |
-| `removePlaywrightClient` | cdp `onClose` (~line 1090) | Removes client |
-| `addTarget` | `Target.attachedToTarget` (~line 1311) | Adds target to connection's `connectedTargets` |
-| `removeTarget` | `Target.detachedFromTarget` (~line 1338) | Removes target by sessionId |
-| `removeTargetByCrash` | `Target.targetCrashed` (~line 1350) | Finds and removes crashed target by targetId |
-| `updateTargetInfo` | `Target.targetInfoChanged` (~line 1368) | Updates `targetInfo` on target |
-| `addFrameId` | `Page.frameAttached`/`frameNavigated` (~line 1387, 1419) | Adds frameId to target's `frameIds` |
-| `removeFrameId` | `Page.frameDetached` (~line 1403) | Removes frameId from owning target |
-| `updateTargetUrl` | `Page.frameNavigated`/`navigatedWithinDocument` (~line 1425, 1452) | Updates URL/title on target |
-| `removeClientsForExtension` | extension `onClose` (~line 1518) | Removes all clients bound to a disconnected extension |
+| Function                    | Currently at                                                       | What it does                                          |
+| --------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------- |
+| `addExtension`              | extension `onOpen` (~line 1163)                                    | Adds new connection to `extensions`                   |
+| `removeExtension`           | extension `onClose` (~line 1500-1516)                              | Removes connection, cleans up                         |
+| `addPlaywrightClient`       | cdp `onOpen` (~line 911)                                           | Adds client to `playwrightClients`                    |
+| `removePlaywrightClient`    | cdp `onClose` (~line 1090)                                         | Removes client                                        |
+| `addTarget`                 | `Target.attachedToTarget` (~line 1311)                             | Adds target to connection's `connectedTargets`        |
+| `removeTarget`              | `Target.detachedFromTarget` (~line 1338)                           | Removes target by sessionId                           |
+| `removeTargetByCrash`       | `Target.targetCrashed` (~line 1350)                                | Finds and removes crashed target by targetId          |
+| `updateTargetInfo`          | `Target.targetInfoChanged` (~line 1368)                            | Updates `targetInfo` on target                        |
+| `addFrameId`                | `Page.frameAttached`/`frameNavigated` (~line 1387, 1419)           | Adds frameId to target's `frameIds`                   |
+| `removeFrameId`             | `Page.frameDetached` (~line 1403)                                  | Removes frameId from owning target                    |
+| `updateTargetUrl`           | `Page.frameNavigated`/`navigatedWithinDocument` (~line 1425, 1452) | Updates URL/title on target                           |
+| `removeClientsForExtension` | extension `onClose` (~line 1518)                                   | Removes all clients bound to a disconnected extension |
 
 Each function takes `RelayState` + event params and returns a new `RelayState`.
 No I/O, no side effects. Per the skill: "setState() callbacks pure -- no I/O, no
@@ -171,13 +171,13 @@ shape. Handler: side effects that need event data."
 Add a single `store.subscribe()` after store creation. Move these side effects
 into it:
 
-| Side effect | Currently in | Why it fits subscribe |
-|---|---|---|
-| Extension ping start/stop | `onOpen`/`onClose` handlers | "If extension in state, ping it; if removed, stop" |
-| Close playwright clients on extension disconnect | `onClose` (~line 1518) | "If extension gone from state, close its clients" |
-| Clean up recording relays on extension disconnect | `onClose` (~line 1493) | "If extension gone, cancel its recordings" |
-| Reject pending requests on extension disconnect | `onClose` (~line 1503) | "If extension gone, reject all pending" |
-| Logging connection/disconnection | scattered across handlers | "If extensions/clients map changed, log it" |
+| Side effect                                       | Currently in                | Why it fits subscribe                              |
+| ------------------------------------------------- | --------------------------- | -------------------------------------------------- |
+| Extension ping start/stop                         | `onOpen`/`onClose` handlers | "If extension in state, ping it; if removed, stop" |
+| Close playwright clients on extension disconnect  | `onClose` (~line 1518)      | "If extension gone from state, close its clients"  |
+| Clean up recording relays on extension disconnect | `onClose` (~line 1493)      | "If extension gone, cancel its recordings"         |
+| Reject pending requests on extension disconnect   | `onClose` (~line 1503)      | "If extension gone, reject all pending"            |
+| Logging connection/disconnection                  | scattered across handlers   | "If extensions/clients map changed, log it"        |
 
 Per the skill: "Side effects in subscribe should be derived from state shape, not
 from specific events -- ask 'given this state, what should the world look like?'
@@ -245,12 +245,12 @@ debug the state transition that's wrong.
 
 ## Files changed summary
 
-| File | Change |
-|---|---|
-| `src/relay-state.ts` | **New** -- pure state type, transition functions, derivation helpers |
-| `src/relay-state.test.ts` | **New** -- unit tests for all transition functions |
-| `src/cdp-relay.ts` | **Modified** -- replace scattered Maps with Zustand store, replace inline mutations with `setState()`, add `subscribe()`, update helpers |
-| `package.json` | **Modified** -- add `zustand` dependency (if not already present) |
+| File                      | Change                                                                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/relay-state.ts`      | **New** -- pure state type, transition functions, derivation helpers                                                                     |
+| `src/relay-state.test.ts` | **New** -- unit tests for all transition functions                                                                                       |
+| `src/cdp-relay.ts`        | **Modified** -- replace scattered Maps with Zustand store, replace inline mutations with `setState()`, add `subscribe()`, update helpers |
+| `package.json`            | **Modified** -- add `zustand` dependency (if not already present)                                                                        |
 
 ## What does NOT change
 

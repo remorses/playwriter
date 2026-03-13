@@ -1000,7 +1000,7 @@ export class PlaywrightExecutor {
         },
       })
 
-      const showGhostCursor = async (options?: ({ page?: Page } & GhostCursorClientOptions)) => {
+      const showGhostCursor = async (options?: { page?: Page } & GhostCursorClientOptions) => {
         const targetPage = options?.page || page
         const cursorOptions: GhostCursorClientOptions | undefined = (() => {
           if (!options) {
@@ -1102,18 +1102,15 @@ export class PlaywrightExecutor {
 
       const vmContext = vm.createContext(vmContextObj)
       const autoReturnExpr = getAutoReturnExpression(code)
-      const wrappedCode = autoReturnExpr !== null
-        ? `(async () => { return await (${autoReturnExpr}) })()`
-        : `(async () => { ${code} })()`
+      const wrappedCode =
+        autoReturnExpr !== null ? `(async () => { return await (${autoReturnExpr}) })()` : `(async () => { ${code} })()`
       const hasExplicitReturn = autoReturnExpr !== null || /\breturn\b/.test(code)
 
       // Track execution timestamps relative to recording start (seconds).
       // Used to identify idle gaps that can be sped up in demo videos.
       // Captured before execution so we can record timing even if it throws.
       const recordingStartSnapshot = this.recordingStartedAt
-      const execStartSec = recordingStartSnapshot !== null
-        ? (Date.now() - recordingStartSnapshot) / 1000
-        : -1
+      const execStartSec = recordingStartSnapshot !== null ? (Date.now() - recordingStartSnapshot) / 1000 : -1
 
       const result = await (async () => {
         try {
@@ -1126,7 +1123,11 @@ export class PlaywrightExecutor {
           // that should not be sped up in the demo video.
           // Compare against snapshot to avoid cross-session contamination if
           // recording was stopped and restarted inside the same execute() call.
-          if (recordingStartSnapshot !== null && execStartSec >= 0 && this.recordingStartedAt === recordingStartSnapshot) {
+          if (
+            recordingStartSnapshot !== null &&
+            execStartSec >= 0 &&
+            this.recordingStartedAt === recordingStartSnapshot
+          ) {
             const execEndSec = (Date.now() - recordingStartSnapshot) / 1000
             this.executionTimestamps.push({ start: execStartSec, end: execEndSec })
           }

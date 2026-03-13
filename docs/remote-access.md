@@ -160,7 +160,7 @@ done
 
 ## Docker / devcontainer setup
 
-The relay server **must run on the same machine as Chrome**. The Chrome extension connects to the relay via localhost WebSocket, and the `/extension` endpoint only accepts connections from `127.0.0.1`. This means `playwriter serve` always runs on the  host — never inside the container.
+The relay server **must run on the same machine as Chrome**. The Chrome extension connects to the relay via localhost WebSocket, and the `/extension` endpoint only accepts connections from `127.0.0.1`. This means `playwriter serve` always runs on the host — never inside the container.
 
 From Docker, set `PLAYWRITER_HOST` to reach the host relay.
 
@@ -212,11 +212,11 @@ playwriter -s 1 -e "await page.goto('https://example.com')"
 
 ### Platform support for `host.docker.internal`
 
-| Platform             | Works out of the box? | Notes                                            |
-| -------------------- | --------------------- | ------------------------------------------------ |
-| **macOS** (Docker Desktop)  | Yes                   | Supported since Docker Desktop 18.03             |
-| **Windows** (Docker Desktop) | Yes                  | Supported since Docker Desktop 18.03             |
-| **Linux** (Docker Engine)   | No                    | Requires `--add-host` or `extra_hosts` (see below) |
+| Platform                     | Works out of the box? | Notes                                              |
+| ---------------------------- | --------------------- | -------------------------------------------------- |
+| **macOS** (Docker Desktop)   | Yes                   | Supported since Docker Desktop 18.03               |
+| **Windows** (Docker Desktop) | Yes                   | Supported since Docker Desktop 18.03               |
+| **Linux** (Docker Engine)    | No                    | Requires `--add-host` or `extra_hosts` (see below) |
 
 On Linux, `host.docker.internal` is **not provided automatically** by Docker Engine. You must add it explicitly:
 
@@ -233,7 +233,7 @@ services:
     environment:
       - PLAYWRITER_HOST=host.docker.internal
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
 ```
 
 The `host-gateway` special value (available since Docker Engine 20.10) resolves to the host's gateway IP. On older Docker versions, replace it with the bridge gateway IP directly (typically `172.17.0.1`, find it with `ip route | grep default`).

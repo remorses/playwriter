@@ -76,10 +76,7 @@ export async function disableGhostCursor(options: { page: Page }): Promise<void>
   })
 }
 
-export async function applyGhostCursorMouseAction(options: {
-  page: Page
-  event: MouseActionEvent
-}): Promise<void> {
+export async function applyGhostCursorMouseAction(options: { page: Page; event: MouseActionEvent }): Promise<void> {
   const { page, event } = options
 
   const applied = await page.evaluate(

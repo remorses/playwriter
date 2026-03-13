@@ -549,9 +549,7 @@ export async function startPlayWriterCDPRelayServer({
           }),
         )
         const updatedTargets = store.getState().extensions.get(extensionId)?.connectedTargets.size || 0
-        logger?.log(
-          pc.blue(`Auto-created tab, now have ${updatedTargets} targets, url: ${result.targetInfo.url}`),
-        )
+        logger?.log(pc.blue(`Auto-created tab, now have ${updatedTargets} targets, url: ${result.targetInfo.url}`))
       }
     } catch (e) {
       logger?.error('Failed to auto-create initial tab:', e)
@@ -1155,7 +1153,10 @@ export async function startPlayWriterCDPRelayServer({
               }
             }
 
-            if (method === 'Target.setDiscoverTargets' && (params as Protocol.Target.SetDiscoverTargetsRequest)?.discover) {
+            if (
+              method === 'Target.setDiscoverTargets' &&
+              (params as Protocol.Target.SetDiscoverTargetsRequest)?.discover
+            ) {
               const freshExt2 = store.getState().extensions.get(extensionConn.id)
               const freshTargets2 = freshExt2?.connectedTargets || new Map()
               for (const target of freshTargets2.values()) {
@@ -1247,7 +1248,11 @@ export async function startPlayWriterCDPRelayServer({
 
         onClose() {
           store.setState((s) => relayState.removePlaywrightClient(s, { clientId }))
-          logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`))
+          logger?.log(
+            pc.yellow(
+              `Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`,
+            ),
+          )
         },
 
         onError(event) {
@@ -1316,7 +1321,9 @@ export async function startPlayWriterCDPRelayServer({
           // Check for existing connection with same stableKey and close it
           const existingExt = relayState.findExtensionByStableKey(store.getState(), stableKey)
           if (existingExt && existingExt.id !== connectionId) {
-            logger?.log(pc.yellow(`Replacing extension connection for ${stableKey} (${existingExt.id} -> ${connectionId})`))
+            logger?.log(
+              pc.yellow(`Replacing extension connection for ${stableKey} (${existingExt.id} -> ${connectionId})`),
+            )
             if (existingExt.ws) {
               existingExt.ws.close(4001, 'Extension Replaced')
             }
@@ -1445,7 +1452,8 @@ export async function startPlayWriterCDPRelayServer({
               const currentExtState = store.getState().extensions.get(connectionId)
               const iframeOwnerSessionId =
                 targetParams.targetInfo.type === 'iframe' && iframeParentFrameId && currentExtState
-                  ? getPageTargetForFrameId({ extensionState: currentExtState, frameId: iframeParentFrameId })?.sessionId
+                  ? getPageTargetForFrameId({ extensionState: currentExtState, frameId: iframeParentFrameId })
+                      ?.sessionId
                   : undefined
 
               // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
@@ -1615,10 +1623,7 @@ export async function startPlayWriterCDPRelayServer({
                     title: frameParams.frame.name || undefined,
                   }),
                 )
-                logger?.log(
-                  pc.magenta('[Server] Updated target URL from Page.frameNavigated:'),
-                  frameParams.frame.url,
-                )
+                logger?.log(pc.magenta('[Server] Updated target URL from Page.frameNavigated:'), frameParams.frame.url)
               }
 
               sendToPlaywright({
@@ -1636,10 +1641,7 @@ export async function startPlayWriterCDPRelayServer({
                 store.setState((s) =>
                   relayState.updateTargetUrl(s, { extensionId: connectionId, sessionId, url: navParams.url }),
                 )
-                logger?.log(
-                  pc.magenta('[Server] Updated target URL from Page.navigatedWithinDocument:'),
-                  navParams.url,
-                )
+                logger?.log(pc.magenta('[Server] Updated target URL from Page.navigatedWithinDocument:'), navParams.url)
               }
 
               sendToPlaywright({
@@ -1695,9 +1697,7 @@ export async function startPlayWriterCDPRelayServer({
                   return ext.id !== connectionId && ext.stableKey === closingExtension.stableKey && Boolean(ext.ws)
                 })
             : []
-          const successorExtension = closingExtension
-            ? successorCandidates[0]
-            : undefined
+          const successorExtension = closingExtension ? successorCandidates[0] : undefined
 
           if (successorExtension) {
             logger?.log(
@@ -1966,9 +1966,9 @@ export async function startPlayWriterCDPRelayServer({
     if (!relay) {
       return c.json({ success: false, error: 'Extension not connected' }, 500)
     }
-    const recordingParams = (resolvedSessionId
-      ? { ...recordingOptions, sessionId: resolvedSessionId }
-      : recordingOptions) as StartRecordingBody
+    const recordingParams = (
+      resolvedSessionId ? { ...recordingOptions, sessionId: resolvedSessionId } : recordingOptions
+    ) as StartRecordingBody
     const result = await relay.startRecording(recordingParams)
     const status = result.success ? 200 : result.error?.includes('required') ? 400 : 500
     return c.json(result, status)

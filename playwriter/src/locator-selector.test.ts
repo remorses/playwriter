@@ -58,7 +58,9 @@ describe('Locator.selector()', () => {
 
   it('getByRole', () => {
     expect(page.getByRole('button').selector()).toMatchInlineSnapshot(`"internal:role=button"`)
-    expect(page.getByRole('button', { name: 'Submit' }).selector()).toMatchInlineSnapshot(`"internal:role=button[name="Submit"i]"`)
+    expect(page.getByRole('button', { name: 'Submit' }).selector()).toMatchInlineSnapshot(
+      `"internal:role=button[name="Submit"i]"`,
+    )
     expect(page.getByRole('link').selector()).toMatchInlineSnapshot(`"internal:role=link"`)
     expect(page.getByRole('heading').selector()).toMatchInlineSnapshot(`"internal:role=heading"`)
     expect(page.getByRole('textbox').selector()).toMatchInlineSnapshot(`"internal:role=textbox"`)
@@ -71,8 +73,12 @@ describe('Locator.selector()', () => {
   })
 
   it('getByPlaceholder', () => {
-    expect(page.getByPlaceholder('Enter name').selector()).toMatchInlineSnapshot(`"internal:attr=[placeholder="Enter name"i]"`)
-    expect(page.getByPlaceholder('Enter email').selector()).toMatchInlineSnapshot(`"internal:attr=[placeholder="Enter email"i]"`)
+    expect(page.getByPlaceholder('Enter name').selector()).toMatchInlineSnapshot(
+      `"internal:attr=[placeholder="Enter name"i]"`,
+    )
+    expect(page.getByPlaceholder('Enter email').selector()).toMatchInlineSnapshot(
+      `"internal:attr=[placeholder="Enter email"i]"`,
+    )
   })
 
   it('getByLabel', () => {
@@ -84,7 +90,9 @@ describe('Locator.selector()', () => {
   })
 
   it('getByTestId', () => {
-    expect(page.getByTestId('dashboard').selector()).toMatchInlineSnapshot(`"internal:testid=[data-testid="dashboard"s]"`)
+    expect(page.getByTestId('dashboard').selector()).toMatchInlineSnapshot(
+      `"internal:testid=[data-testid="dashboard"s]"`,
+    )
   })
 
   it('chained locators', () => {
@@ -95,21 +103,30 @@ describe('Locator.selector()', () => {
   })
 
   it('filtered locators', () => {
-    expect(page.locator('button').filter({ hasText: 'Save' }).selector()).toMatchInlineSnapshot(`"button >> internal:has-text="Save"i"`)
-    expect(page.locator('div').filter({ has: page.locator('span') }).selector()).toMatchInlineSnapshot(`"div >> internal:has="span""`)
-    expect(page.locator('button').filter({ hasNotText: 'Cancel' }).selector()).toMatchInlineSnapshot(`"button >> internal:has-not-text="Cancel"i"`)
+    expect(page.locator('button').filter({ hasText: 'Save' }).selector()).toMatchInlineSnapshot(
+      `"button >> internal:has-text="Save"i"`,
+    )
+    expect(
+      page
+        .locator('div')
+        .filter({ has: page.locator('span') })
+        .selector(),
+    ).toMatchInlineSnapshot(`"div >> internal:has="span""`)
+    expect(page.locator('button').filter({ hasNotText: 'Cancel' }).selector()).toMatchInlineSnapshot(
+      `"button >> internal:has-not-text="Cancel"i"`,
+    )
   })
 
   it('described locators', () => {
-    expect(page.locator('button').describe('main action button').selector()).toMatchInlineSnapshot(`"button >> internal:describe="main action button""`)
+    expect(page.locator('button').describe('main action button').selector()).toMatchInlineSnapshot(
+      `"button >> internal:describe="main action button""`,
+    )
   })
 
   it('combined with and/or', () => {
-    expect(
-      page.locator('button').and(page.locator('.primary')).selector(),
-    ).toMatchInlineSnapshot(`"button >> internal:and=".primary""`)
-    expect(
-      page.locator('button').or(page.locator('a')).selector(),
-    ).toMatchInlineSnapshot(`"button >> internal:or="a""`)
+    expect(page.locator('button').and(page.locator('.primary')).selector()).toMatchInlineSnapshot(
+      `"button >> internal:and=".primary""`,
+    )
+    expect(page.locator('button').or(page.locator('a')).selector()).toMatchInlineSnapshot(`"button >> internal:or="a""`)
   })
 })

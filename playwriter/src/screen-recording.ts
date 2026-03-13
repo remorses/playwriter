@@ -9,12 +9,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import type { BrowserContext, Page } from '@xmorse/playwright-core'
-import type {
-  StartRecordingResult,
-  StopRecordingResult,
-  IsRecordingResult,
-  CancelRecordingResult,
-} from './protocol.js'
+import type { StartRecordingResult, StopRecordingResult, IsRecordingResult, CancelRecordingResult } from './protocol.js'
 import { EXTENSION_IDS } from './utils.js'
 import { RecordingGhostCursorController } from './recording-ghost-cursor.js'
 
@@ -176,7 +171,9 @@ function withRecordingDefaults<T extends { page?: Page; sessionId?: string }, R>
 
 export function createRecordingApi(options: CreateRecordingApiOptions): {
   start: (opts?: StartRecordingWithDefaultsOptions) => Promise<RecordingState>
-  stop: (opts?: StopRecordingWithDefaultsOptions) => Promise<{ path: string; duration: number; size: number; executionTimestamps: ExecutionTimestamp[] }>
+  stop: (
+    opts?: StopRecordingWithDefaultsOptions,
+  ) => Promise<{ path: string; duration: number; size: number; executionTimestamps: ExecutionTimestamp[] }>
   isRecording: (opts?: IsRecordingWithDefaultsOptions) => Promise<RecordingState>
   cancel: (opts?: CancelRecordingWithDefaultsOptions) => Promise<void>
 } {
@@ -192,7 +189,10 @@ export function createRecordingApi(options: CreateRecordingApiOptions): {
     defaultPage,
     fn: startRecording,
   })
-  const stopWithDefaults = withRecordingDefaults<StopRecordingWithDefaultsOptions, { path: string; duration: number; size: number }>({
+  const stopWithDefaults = withRecordingDefaults<
+    StopRecordingWithDefaultsOptions,
+    { path: string; duration: number; size: number }
+  >({
     relayPort,
     defaultPage,
     fn: stopRecording,
@@ -395,11 +395,7 @@ export async function isRecording(options: {
 /**
  * Cancel recording without saving.
  */
-export async function cancelRecording(options: {
-  page: Page
-  sessionId?: string
-  relayPort?: number
-}): Promise<void> {
+export async function cancelRecording(options: { page: Page; sessionId?: string; relayPort?: number }): Promise<void> {
   const { sessionId, relayPort = 19988 } = options
 
   const response = await fetch(`http://127.0.0.1:${relayPort}/recording/cancel`, {

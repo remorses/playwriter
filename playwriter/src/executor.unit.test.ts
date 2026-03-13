@@ -105,17 +105,13 @@ describe('shouldAutoReturn', () => {
 
 describe('wrapCode', () => {
   it('wraps single expressions with return await', () => {
-    expect(wrapCode('await page.title()')).toBe(
-      '(async () => { return await (await page.title()) })()',
-    )
+    expect(wrapCode('await page.title()')).toBe('(async () => { return await (await page.title()) })()')
   })
 
   it('strips trailing semicolons to avoid SyntaxError (#58)', () => {
     // The bug: trailing semicolons inside return await (...;) produce invalid JS
     const wrapped = wrapCode('await screenshotWithAccessibilityLabels({ page });')
-    expect(wrapped).toBe(
-      '(async () => { return await (await screenshotWithAccessibilityLabels({ page })) })()',
-    )
+    expect(wrapped).toBe('(async () => { return await (await screenshotWithAccessibilityLabels({ page })) })()')
     // Verify it's valid JS by parsing it
     expect(() => new Function(wrapped)).not.toThrow()
   })
