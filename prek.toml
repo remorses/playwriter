@@ -1,0 +1,29 @@
+exclude = { glob = ["playwright/**", "claude-extension/**", "opensrc/**", "**/*.snap", "**/__snapshots__/**"] }
+
+# Fast built-in hooks (Rust-native, no network or runtime needed)
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace", args = ["--markdown-linebreak-ext=md"] },
+  { id = "end-of-file-fixer" },
+  { id = "check-json", exclude = { glob = ["**/tsconfig*.json"] } },
+  { id = "check-yaml" },
+  { id = "check-toml" },
+  { id = "check-case-conflict" },
+  { id = "check-merge-conflict" },
+  { id = "check-added-large-files", args = ["--maxkb=1024"] },
+  { id = "detect-private-key" },
+  { id = "no-commit-to-branch", args = ["-b", "main", "-b", "master"] },
+]
+
+# Prettier (uses the project's existing config)
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "prettier"
+name = "prettier"
+language = "system"
+entry = "npx prettier --write --ignore-unknown"
+types_or = ["javascript", "jsx", "ts", "tsx", "json", "yaml", "markdown", "css", "html"]
+priority = 10

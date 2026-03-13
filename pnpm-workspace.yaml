@@ -1,5 +1,9 @@
 packages:
   - ./*
   - playwright/packages/playwright-core
+allowBuilds:
+  '@j178/prek': false
+  bufferutil: false
+  esbuild: false
 
 preferWorkspacePackages: true
