@@ -8,11 +8,11 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           submodules: true
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
@@ -21,7 +21,7 @@ jobs:
           version: 9
           run_install: false
       - name: Install pnpm dependencies (with cache)
-        uses: covbot/pnpm-install-with-cache@v1
+        uses: covbot/pnpm-install-with-cache@995fcd44de7b93326e513102c66f72c741e19a8c # v1.0.1
       # scripts
       # - run: pnpm build
       # - run: pnpm test
