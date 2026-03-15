@@ -1,0 +1,8 @@
+# Handle line endings automatically for text files
+* text=auto
+
+# Ensure all dist files use LF in the repository
+dist/** text eol=lf
+
+# Ensure shell scripts always use LF
+*.sh text eol=lf
