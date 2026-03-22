@@ -17,6 +17,8 @@ function sleep(ms: number): Promise<void> {
 let childSessions: Map<string, number> = new Map()
 let nextSessionId = 1
 let tabGroupQueue: Promise<void> = Promise.resolve()
+// Tab IDs currently being created by Target.createTarget so auto-connect skips them.
+const relayCreatedTabs = new Set<number>()
 
 class ConnectionManager {
   ws: WebSocket | null = null
@@ -145,6 +147,13 @@ class ConnectionManager {
       //
       // But with createInitialTab, the SAME client that triggered the create is waiting for
       // Target.setAutoAttach - so we'd send the event twice to the same client.
+      if (message.method === 'reloadExtension') {
+        sendMessage({ id: message.id, result: { success: true } })
+        // Delay so the response reaches the relay before we reload
+        setTimeout(() => chrome.runtime.reload(), 50)
+        return
+      }
+
       if (message.method === 'createInitialTab') {
         try {
           logger.debug('Creating initial tab for Playwright client')
@@ -584,9 +593,15 @@ async function handleCommand(msg: ExtensionCommandMessage): Promise<any> {
       const tab = await chrome.tabs.create({ url, active: false })
       if (!tab.id) throw new Error('Failed to create tab')
       logger.debug('Created tab:', tab.id, 'waiting for it to load...')
-      await sleep(100)
-      const { targetInfo } = await attachTab(tab.id)
-      return { targetId: targetInfo.targetId } satisfies Protocol.Target.CreateTargetResponse
+      // Block auto-connect from racing to attach this tab before we do.
+      relayCreatedTabs.add(tab.id)
+      try {
+        await sleep(100)
+        const { targetInfo } = await attachTab(tab.id)
+        return { targetId: targetInfo.targetId } satisfies Protocol.Target.CreateTargetResponse
+      } finally {
+        relayCreatedTabs.delete(tab.id)
+      }
     }
 
     case 'Target.closeTarget': {
@@ -1133,6 +1148,10 @@ function initAutoConnect(): void {
     if (store.getState().tabs.has(tab.id)) {
       return
     }
+    // Skip tabs being created by the relay's Target.createTarget handler.
+    if (relayCreatedTabs.has(tab.id)) {
+      return
+    }
     void connectTab(tab.id)
   })
 
@@ -1149,6 +1168,10 @@ function initAutoConnect(): void {
     }
     const existing = store.getState().tabs.get(tabId)
     if (existing?.state === 'connected' || existing?.state === 'connecting') {
+      return
+    }
+    // Skip tabs being created by the relay's Target.createTarget handler.
+    if (relayCreatedTabs.has(tabId)) {
       return
     }
     void connectTab(tabId)

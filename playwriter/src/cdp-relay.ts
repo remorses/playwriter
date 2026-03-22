@@ -456,6 +456,15 @@ export async function startPlayWriterCDPRelayServer({ port = 19988, host = '127.
     return c.json({ connected: extensionWs !== null })
   })
 
+  app.post('/extension/reload', async (c) => {
+    try {
+      await sendToExtension({ method: 'reloadExtension', timeout: 5000 })
+      return c.json({ success: true })
+    } catch (err) {
+      return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+  })
+
   // CDP Discovery Endpoints - Standard Chrome DevTools Protocol HTTP API
   // Allows tools like Playwright to discover the WebSocket URL via http://host:port
   // Spec: https://chromium.googlesource.com/chromium/src/+/main/content/browser/devtools/devtools_http_handler.cc
