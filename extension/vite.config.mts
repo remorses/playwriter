@@ -15,6 +15,7 @@ const playwriterPkg = JSON.parse(readFileSync(resolve(__dirname, '../playwriter/
 const defineEnv: Record<string, string> = {
   'process.env.PLAYWRITER_PORT': JSON.stringify(process.env.PLAYWRITER_PORT || '19988'),
   __PLAYWRITER_VERSION__: JSON.stringify(playwriterPkg.version),
+  __PLAYWRITER_OPEN_WELCOME_PAGE__: JSON.stringify(process.env.PLAYWRITER_OPEN_WELCOME_PAGE !== '0'),
 }
 if (process.env.TESTING) {
   defineEnv['import.meta.env.TESTING'] = 'true'

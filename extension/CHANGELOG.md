@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.78
+
+### Changes
+
+- **Skip welcome tab in packaged automation builds**: Added a build-time flag so the extension copy bundled into the Playwriter CLI does not auto-open `welcome.html` on install. Regular dev/test extension builds still keep the welcome page.
+
 ## 0.0.77
 
 ### Changes

@@ -44,6 +44,25 @@ Reset a session if the browser connection is stale or broken:
 playwriter session reset <sessionId>
 ```
 
+### Start a managed browser
+
+If no Playwriter-enabled browser is running yet, start one with the bundled
+extension already loaded:
+
+```bash
+playwriter browser start
+```
+
+- Auto-detects **Chrome for Testing** first, then **Chromium**
+- On Linux without `DISPLAY` / `WAYLAND_DISPLAY`, defaults to `--headless`
+- Uses a dedicated profile under `~/.playwriter/browser-profile`
+
+Pass an explicit browser binary path if needed:
+
+```bash
+playwriter browser start /path/to/browser-binary
+```
+
 ### Execute code
 
 ```bash
@@ -128,33 +147,17 @@ Control user's Chrome browser via playwright code snippets. Prefer single-line c
 
 **When to use playwriter instead of webfetch/curl:** If a website is JS-heavy (SPAs like Instagram, Twitter, Facebook, etc.), has cookie consent modals, login walls, lazy-loaded content, carousels, or infinite scroll — **always use playwriter**. Simple fetch/webfetch will return an empty HTML shell with no content. Do NOT waste time trying curl, webfetch, or parsing raw HTML from JS-rendered sites. Go straight to playwriter: navigate with a real browser, dismiss modals, then extract what you need via `page.evaluate()` or network interception.
 
-**If Chrome is not running**, the extension can't connect. Start Chrome from the command line before retrying:
+**If no Playwriter-enabled browser is running**, start one before retrying:
 
 ```bash
-# macOS
-open -a "Google Chrome" --args --profile-directory=Default
-
-# Linux
-google-chrome --profile-directory=Default &
-
-# Windows (cmd)
-start chrome.exe --profile-directory=Default
-
-# Windows (PowerShell)
-Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
+playwriter browser start
 ```
 
-To also enable automatic tab capture for screen recording (no manual extension click needed), add the `--allowlisted-extension-id` and `--auto-accept-this-tab-capture` flags:
+For AVPS / VPS environments without a display server, this command automatically
+uses headless Chromium. You can also force it explicitly:
 
 ```bash
-# macOS
-open -a "Google Chrome" --args --profile-directory=Default --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture
-
-# Linux
-google-chrome --profile-directory=Default --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture &
-
-# Windows
-start chrome.exe --profile-directory=Default --allowlisted-extension-id=jfeammnjpkecdekppnclgkkffahnhfhe --auto-accept-this-tab-capture
+playwriter browser start --headless
 ```
 
 You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs.
@@ -777,7 +780,7 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 **resizeImage** - shrink an image in-place so it consumes fewer tokens when read back into context. `await resizeImage({ input: './screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `output`.
 
-**recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` so **recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Requires user to have clicked the Playwriter extension icon on the tab. Auto-resizes viewport to 16:9 (override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`).
+**recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` so **recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. If the browser was launched with `playwriter browser start`, the required Chrome flags are already enabled so no manual extension click is needed. Otherwise, click the Playwriter extension icon once on the tab before recording. Auto-resizes viewport to 16:9 (override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`).
 
 For demos, use interaction methods (`locator.click()`, `page.mouse.move()`) instead of `goto()` to show realistic cursor motion.
 

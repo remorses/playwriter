@@ -6,6 +6,13 @@ import util from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { cac } from '@xmorse/cac'
 import pc from 'picocolors'
+import {
+  getBrowserLaunchArgs,
+  getDefaultBrowserUserDataDir,
+  startBrowserProcess,
+} from './browser-launch.js'
+import { resolveBrowserExecutablePath, shouldUseHeadlessByDefault } from './browser-config.js'
+import { getBundledExtensionPath } from './package-paths.js'
 
 // Prevent Buffers from dumping hex bytes in util.inspect output.
 Buffer.prototype[util.inspect.custom] = function () {
@@ -27,6 +34,74 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliRelayEnv = { PLAYWRITER_AUTO_ENABLE: '1' }
 
 const cli = cac('playwriter')
+
+cli
+  .command('browser start [binaryPath]', 'Start Chromium or Chrome for Testing with the bundled Playwriter extension')
+  .option('--user-data-dir <dir>', 'Persistent browser profile directory used for the managed browser')
+  .option('--headless', 'Run the browser in headless mode')
+  .option('--headed', 'Force headed mode even on Linux without DISPLAY/WAYLAND_DISPLAY')
+  .option('--disable-sandbox', 'Disable the browser sandbox, useful on some VPS setups')
+  .action(
+    async (
+      binaryPath: string | undefined,
+      options: {
+        userDataDir?: string
+        headless?: boolean
+        headed?: boolean
+        disableSandbox?: boolean
+      },
+    ) => {
+      if (options.headless && options.headed) {
+        console.error('Error: --headless and --headed cannot be used together.')
+        process.exit(1)
+      }
+
+      try {
+        await ensureRelayServer({ logger: console, env: cliRelayEnv })
+
+        const browserPath = resolveBrowserExecutablePath({ browserPath: binaryPath })
+        const extensionPath = getBundledExtensionPath()
+        const userDataDir = path.resolve(options.userDataDir || getDefaultBrowserUserDataDir())
+        const headless = options.headed ? false : options.headless ? true : shouldUseHeadlessByDefault()
+        const args = getBrowserLaunchArgs({
+          extensionPath,
+          userDataDir,
+          headless,
+          noSandbox: options.disableSandbox,
+        })
+
+        const { pid } = startBrowserProcess({
+          browserPath,
+          args,
+          userDataDir,
+        })
+
+        const connectedExtensions = await waitForConnectedExtensions({
+          timeoutMs: 15000,
+          pollIntervalMs: 250,
+          logger: console,
+        })
+
+        console.log(`Browser started (pid ${pid}).`)
+        console.log(`  Binary: ${browserPath}`)
+        console.log(`  Extension: ${extensionPath}`)
+        console.log(`  Profile: ${userDataDir}`)
+        console.log(`  Mode: ${headless ? 'headless' : 'headed'}`)
+        console.log('  Permissions: recording/tabCapture flags enabled')
+
+        if (connectedExtensions.length > 0) {
+          console.log('Playwriter extension connected to the relay server.')
+          return
+        }
+
+        console.log('Browser started, but the extension has not connected yet.')
+        console.log(`Check logs at: ${LOG_FILE_PATH}`)
+      } catch (error: any) {
+        console.error(`Error: ${error.message}`)
+        process.exit(1)
+      }
+    },
+  )
 
 cli
   .command('', 'Start the MCP server or controls the browser with -e')

@@ -9,37 +9,23 @@
 import os from 'node:os'
 import path from 'node:path'
 import type { BrowserContext, Page } from '@xmorse/playwright-core'
+import { shouldUseHeadlessByDefault } from './browser-config.js'
 import type {
   StartRecordingResult,
   StopRecordingResult,
   IsRecordingResult,
   CancelRecordingResult,
 } from './protocol.js'
-import { EXTENSION_IDS } from './utils.js'
 import { RecordingGhostCursorController } from './recording-ghost-cursor.js'
 
 /**
- * Generate a shell command to quit and restart Chrome with flags that allow automatic tab capture.
- * This enables screen recording without user interaction (clicking extension icon).
- *
- * Required flags:
- * - --allowlisted-extension-id=<id> - grants the extension special privileges (one per extension)
- * - --auto-accept-this-tab-capture - auto-accepts tab capture permission requests
+ * Generate a CLI command that starts a managed Playwriter browser with the
+ * bundled extension preloaded. This enables screen recording without a manual
+ * extension click on fresh automation sessions.
  */
 export function getChromeRestartCommand(): string {
-  const platform = os.platform()
-  const extensionFlags = EXTENSION_IDS.map((id) => `--allowlisted-extension-id=${id}`).join(' ')
-  // --profile-directory=Default skips the profile picker on startup, preventing Chrome from hanging
-  const flags = `${extensionFlags} --auto-accept-this-tab-capture --profile-directory=Default`
-
-  if (platform === 'darwin') {
-    return `osascript -e 'quit app "Google Chrome"' && sleep 1 && open -a "Google Chrome" --args ${flags}`
-  }
-  if (platform === 'win32') {
-    return `taskkill /IM chrome.exe /F & timeout /t 1 & start chrome.exe ${flags}`
-  }
-  // Linux
-  return `pkill chrome; sleep 1; google-chrome ${flags}`
+  const headlessFlag = shouldUseHeadlessByDefault({ platform: os.platform() }) ? ' --headless' : ''
+  return `playwriter browser start${headlessFlag}`
 }
 
 const DEFAULT_ASPECT_RATIO = { width: 16, height: 9 }
@@ -331,8 +317,7 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
       const restartCmd = getChromeRestartCommand()
       throw new Error(
         `Failed to start recording: ${errorMsg}\n\n` +
-          `For automated recording, Chrome must be restarted with special flags.\n` +
-          `WARNING: This will close all Chrome windows. Save your work first!\n\n` +
+          `For automated recording, start a managed Playwriter browser with the bundled extension loaded:\n\n` +
           `  ${restartCmd}\n\n` +
           `Or click the Playwriter extension icon on the tab once to grant permission.`,
       )

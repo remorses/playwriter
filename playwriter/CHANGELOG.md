@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.96
+
+1. **Document managed-browser recording permissions** — `playwriter browser start` now clearly reports that recording/tab-capture flags are enabled, and the skill docs now explain that `recording.start()` does not require a manual extension click when using the managed browser flow.
+
+## 0.0.95
+
+1. **Skip the welcome tab for bundled automation builds** — the Playwriter CLI now packages an extension build with `welcome.html` disabled on install, so fresh managed browser profiles do not waste a tab in headless and AVPS flows.
+
+## 0.0.94
+
+1. **Make `browser start` work from source checkouts** — runtime package path resolution now falls back to the local `playwriter/` package directory before using installed-package resolution, so `tsx playwriter/src/cli.ts browser start` works during development.
+2. **Fall back to Playwright's managed Chromium** — browser autodiscovery now also considers the Chromium / Chrome for Testing binary installed by `@xmorse/playwright-core`, so the command succeeds even when no system-wide Chromium app is installed.
+
+## 0.0.93
+
+1. **Show searched browser paths on launch failures** — `playwriter browser start` now prints every Chrome for Testing / Chromium path it checked, making it much easier to debug autodiscovery issues on local machines and AVPS hosts.
+
+## 0.0.92
+
+1. **Add `playwriter browser start`** — the CLI can now launch a managed Chrome for Testing or Chromium instance with the bundled Playwriter extension preloaded, making fresh AVPS/VPS automation setups much easier.
+2. **Bundle the extension into the npm package** — Playwriter now builds and ships an unpacked extension copy inside `dist/extension`, resolved at runtime from the installed package path so the CLI can side-load it without depending on a separate checkout.
+
 ## 0.0.91
 
 1. **Stabilize external accessibility snapshot coverage** — Hacker News and shadcn snapshot regression tests now wait for stable page content before capturing the AX tree, avoiding flaky empty interactive snapshots from live pages.
