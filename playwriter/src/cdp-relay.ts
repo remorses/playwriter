@@ -1882,18 +1882,31 @@ export async function startPlayWriterCDPRelayServer({
       cwd?: string
       /** Direct CDP WebSocket URL — bypasses extension, connects straight to Chrome */
       cdpEndpoint?: string
+      /** Browser name from discovery (e.g. "Chrome", "Brave") */
+      browser?: string
+      /** Profile info from discovery */
+      profiles?: Array<{ name: string; email: string }>
     }
     const sessionId = String(nextSessionNumber++)
     const cwd = body.cwd
 
     // Direct CDP mode: skip extension lookup, pass direct WebSocket URL to executor
     if (body.cdpEndpoint) {
+      if (!body.cdpEndpoint.startsWith('ws://') && !body.cdpEndpoint.startsWith('wss://')) {
+        return c.json({ error: `Invalid cdpEndpoint: must start with ws:// or wss:// (got: ${body.cdpEndpoint})` }, 400)
+      }
+      // Use first profile from discovery for session metadata (if available)
+      const firstProfile = body.profiles?.[0]
       const manager = await getExecutorManager()
       const executor = manager.getExecutor({
         sessionId,
         cwd,
         cdpConfig: { directCdpUrl: body.cdpEndpoint },
-        sessionMetadata: { extensionId: null, browser: null, profile: null },
+        sessionMetadata: {
+          extensionId: null,
+          browser: body.browser || null,
+          profile: firstProfile ? { email: firstProfile.email, id: firstProfile.name } : null,
+        },
       })
       const metadata = executor.getSessionMetadata()
       return c.json({

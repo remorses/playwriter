@@ -108,7 +108,7 @@ cli
   .command('', 'Start the MCP server or controls the browser with -e')
   .option('--host <host>', 'Remote relay server host to connect to (or use PLAYWRITER_HOST env var)')
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
-  .option('--direct [endpoint]', 'Use direct CDP connection for MCP (auto-discover or ws:// endpoint, or use PLAYWRITER_DIRECT env var)')
+  .option('--direct [endpoint]', 'Use direct CDP connection without the extension. Enable debugging first at chrome://inspect/#remote-debugging or launch Chrome with --remote-debugging-port=9222. Auto-discovers instances or accepts an explicit ws:// endpoint (or use PLAYWRITER_DIRECT env var)')
   .option('-s, --session <name>', 'Session ID (required for -e, get one with `playwriter session new`)')
   .option('-e, --eval <code>', 'Execute JavaScript code and exit, read https://playwriter.dev/SKILL.md for usage')
   .option('--timeout <ms>', 'Execution timeout in milliseconds', { default: 10000 })
@@ -300,13 +300,15 @@ interface BrowserOption {
   extensionId?: string | null
   /** For direct CDP entries */
   wsUrl?: string
+  /** Raw profile data from discovery (for passing to relay) */
+  profiles?: Array<{ name: string; email: string }>
 }
 
 cli
   .command('session new', 'Create a new session and print the session ID')
   .option('--host <host>', 'Remote relay server host')
   .option('--browser <key>', 'Browser key when multiple browsers are available')
-  .option('--direct [endpoint]', 'Use direct CDP connection (auto-discover or specify ws:// endpoint)')
+  .option('--direct [endpoint]', 'Use direct CDP connection without the extension. Enable debugging first at chrome://inspect/#remote-debugging or launch Chrome with --remote-debugging-port=9222. Auto-discovers instances or accepts an explicit ws:// endpoint')
   .action(async (options: { host?: string; browser?: string; direct?: boolean | string }) => {
     const isLocal = !options.host && !process.env.PLAYWRITER_HOST
     const directEndpoint = typeof options.direct === 'string' ? options.direct : null
@@ -345,7 +347,7 @@ cli
       if (instances.length === 1 && !options.browser) {
         const instance = instances[0]
         const serverUrl = await getServerUrl(options.host)
-        const result = await createDirectSession({ serverUrl, cdpEndpoint: instance.wsUrl })
+        const result = await createDirectSession({ serverUrl, cdpEndpoint: instance.wsUrl, browser: instance.browser, profiles: instance.profiles })
         const profileLabel = formatInstanceProfiles(instance)
         console.log(
           `Session ${result.id} created (direct CDP, ${instance.browser}${profileLabel}). Use with: playwriter -s ${result.id} -e "..."`,
@@ -369,7 +371,7 @@ cli
           process.exit(1)
         }
         const serverUrl = await getServerUrl(options.host)
-        const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl! })
+        const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles })
         console.log(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
         console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
         return
@@ -447,9 +449,12 @@ cli
       return
     }
 
-    // Multiple extensions: also discover direct CDP instances and show unified table
-    console.log(pc.dim('Discovering additional Chrome instances...'))
-    const directInstances = await discoverChromeInstances()
+    // Multiple extensions: also discover direct CDP instances and show unified table.
+    // Only discover locally — remote relay can't reach local Chrome debug ports.
+    const directInstances = isLocal ? await (async () => {
+      console.log(pc.dim('Discovering additional Chrome instances...'))
+      return await discoverChromeInstances()
+    })() : []
 
     const allOptions: BrowserOption[] = [
       ...extensions.map((ext) => {
@@ -479,7 +484,7 @@ cli
       try {
         const serverUrl = await getServerUrl(options.host)
         if (selected.type === 'direct') {
-          const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl! })
+          const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles })
           console.log(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
           console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
         } else {
@@ -520,15 +525,19 @@ async function ensureRelayForSessionCreation(isLocal: boolean): Promise<void> {
 async function createDirectSession({
   serverUrl,
   cdpEndpoint,
+  browser,
+  profiles,
 }: {
   serverUrl: string
   cdpEndpoint: string
+  browser?: string
+  profiles?: Array<{ name: string; email: string }>
 }): Promise<{ id: string }> {
   const cwd = process.cwd()
   const response = await fetch(`${serverUrl}/cli/session/new`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cdpEndpoint, cwd }),
+    body: JSON.stringify({ cdpEndpoint, cwd, browser, profiles }),
   })
   if (!response.ok) {
     const text = await response.text()
@@ -544,6 +553,7 @@ function instanceToBrowserOption(instance: DiscoveredInstance): BrowserOption {
     browser: instance.browser,
     profile: formatInstanceProfiles(instance),
     wsUrl: instance.wsUrl,
+    profiles: instance.profiles,
   }
 }
 
