@@ -869,6 +869,17 @@ function isTextRole(role: string): boolean {
   return role === 'statictext' || role === 'inlinetextbox'
 }
 
+// Per HTML spec, contenteditable is editable when the attribute is present
+// with value "true", "" (empty string), or "plaintext-only". Bare attribute
+// (no value) is also treated as empty string by the browser DOM parser.
+function isContentEditable(value: string | undefined | null): boolean {
+  if (value == null) {
+    return false
+  }
+  const v = value.trim().toLowerCase()
+  return v === '' || v === 'true' || v === 'plaintext-only'
+}
+
 function isSubstringOfAny(needle: string, haystack: Set<string>): boolean {
   for (const str of haystack) {
     if (str.includes(needle)) {
@@ -1033,6 +1044,15 @@ export async function getAriaSnapshot({
       axById.set(node.nodeId, node)
     }
 
+    // Index AX nodes by backendDOMNodeId for O(1) lookups during promotion
+    // and root finding (instead of repeated O(n) axNodes.find() calls)
+    const axByBackendId = new Map<Protocol.DOM.BackendNodeId, Protocol.Accessibility.AXNode>()
+    for (const node of axNodes) {
+      if (node.backendDOMNodeId) {
+        axByBackendId.set(node.backendDOMNodeId, node)
+      }
+    }
+
     // Promote contenteditable elements that Chrome's AX tree doesn't classify as
     // interactive. Rich text editors (ProseMirror, Tiptap, Slate, Lexical, etc.) use
     // bare <div contenteditable="true"> without role="textbox", so Chrome reports
@@ -1041,12 +1061,10 @@ export async function getAriaSnapshot({
     // interactive elements the AI can target.
     const promotedContentEditableIds = new Set<Protocol.DOM.BackendNodeId>()
     for (const [, domInfo] of domByBackendId) {
-      if (domInfo.attributes.get('contenteditable') !== 'true') {
+      if (!isContentEditable(domInfo.attributes.get('contenteditable'))) {
         continue
       }
-      const axNode = axNodes.find((n) => {
-        return n.backendDOMNodeId === domInfo.backendNodeId
-      })
+      const axNode = axByBackendId.get(domInfo.backendNodeId)
       if (!axNode) {
         continue
       }
@@ -1060,9 +1078,7 @@ export async function getAriaSnapshot({
 
     const findRootAxNodeId = (): Protocol.Accessibility.AXNodeId | null => {
       if (scopeRootBackendId) {
-        const scoped = axNodes.find((node) => {
-          return node.backendDOMNodeId === scopeRootBackendId
-        })
+        const scoped = axByBackendId.get(scopeRootBackendId)
         if (scoped) {
           return scoped.nodeId
         }
@@ -1115,6 +1131,12 @@ export async function getAriaSnapshot({
       let selector: string | undefined
       if (stable && count === 0) {
         selector = buildLocatorFromStable(stable)
+      }
+      // For promoted contenteditable elements without a stable selector, store
+      // [contenteditable="true"] so getSelectorForRef() doesn't fall back to
+      // role=textbox which Playwright can't match on bare contenteditable divs.
+      if (!selector && options.backendNodeId != null && promotedContentEditableIds.has(options.backendNodeId)) {
+        selector = '[contenteditable="true"]'
       }
 
       refs.push({ ref, role: options.role, name: options.name, selector, backendNodeId: options.backendNodeId })

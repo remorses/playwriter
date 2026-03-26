@@ -163,7 +163,7 @@ describe('aria-snapshot', () => {
     // Click on the editor and type content
     await editor.click()
     // Select all existing content and replace it
-    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type('Hello from playwriter test!')
 
     const content = await editor.innerText()
@@ -193,6 +193,14 @@ describe('aria-snapshot', () => {
        style="border: 1px solid #ccc; padding: 8px; min-height: 60px;">
     <p>Bare ProseMirror-style editor, no role, no id.</p>
   </div>
+  <div contenteditable=""
+       style="border: 1px solid #ccc; padding: 8px; min-height: 60px;">
+    <p>Editor with empty contenteditable attr.</p>
+  </div>
+  <div contenteditable="plaintext-only"
+       style="border: 1px solid #ccc; padding: 8px; min-height: 60px;">
+    <p>Plaintext-only editor.</p>
+  </div>
   <div contenteditable="true" role="textbox" aria-label="Labeled editor"
        style="border: 1px solid #ccc; padding: 8px; min-height: 60px;">
     <p>Editor with explicit role=textbox.</p>
@@ -211,12 +219,12 @@ describe('aria-snapshot', () => {
       console.log('\n--- CONTENTEDITABLE INTERACTIVE SNAPSHOT ---')
       console.log(interactiveSnapshot)
 
-      // All three contenteditable divs should appear as textbox
+      // All contenteditable divs should appear as textbox
       const textboxLines = interactiveSnapshot.split('\n').filter((line) => {
         return line.includes('textbox')
       })
-      // 3 contenteditable + 1 input = 4 textboxes
-      expect(textboxLines.length).toBeGreaterThanOrEqual(4)
+      // 5 contenteditable (id, bare, empty-attr, plaintext-only, explicit-role) + 1 input = 6
+      expect(textboxLines.length).toBeGreaterThanOrEqual(6)
 
       // The editor with id should use [id="editor-with-id"] as locator
       expect(interactiveSnapshot).toContain('[id="editor-with-id"]')
@@ -231,7 +239,7 @@ describe('aria-snapshot', () => {
 
       // Click the first bare contenteditable and type
       await bareEditors.first().click()
-      await page.keyboard.press('Meta+A')
+      await page.keyboard.press('ControlOrMeta+A')
       await page.keyboard.type('Typed via locator!')
 
       const content = await bareEditors.first().innerText()
