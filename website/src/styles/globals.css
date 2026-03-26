@@ -412,6 +412,9 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden; /* prevent content blowing out the grid on mobile */
 }
 
 /* Mobile: aside renders inline as a styled callout */
@@ -441,6 +444,7 @@
 
   .editorial-section-content {
     grid-column: 1; /* first subgrid column = parent column 3 (520px) */
+    overflow: visible; /* allow bleed (negative margins) on desktop */
   }
 
   .editorial-section-aside {
