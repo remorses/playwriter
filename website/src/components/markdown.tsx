@@ -507,6 +507,21 @@ export function Code({ children }: { children: React.ReactNode }) {
    Layout
    ========================================================================= */
 
+export function Bleed({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        marginLeft: 'calc(-1 * var(--bleed-image))',
+        marginRight: 'calc(-1 * var(--bleed-image))',
+        display: 'flex',
+        justifyContent: 'center',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 export function Divider() {
   return (
     <div style={{ padding: '24px 0', display: 'flex', alignItems: 'center' }}>
@@ -593,13 +608,17 @@ export function CodeBlock({
   lineHeight?: string
   showLineNumbers?: boolean
 }) {
-  const codeRef = useRef<HTMLElement>(null)
   const lines = children.split('\n')
 
-  useEffect(() => {
-    if (codeRef.current && lang) {
-      Prism.highlightElement(codeRef.current)
+  /* Use Prism.highlight() to get highlighted HTML as a string. Works on both
+     server and client (no DOM dependency), avoiding hydration mismatch issues
+     that occur with useEffect + highlightElement. */
+  const highlightedHtml = useMemo(() => {
+    const grammar = lang ? Prism.languages[lang] : undefined
+    if (!grammar) {
+      return undefined
     }
+    return Prism.highlight(children, grammar, lang)
   }, [children, lang])
 
   return (
@@ -608,7 +627,6 @@ export function CodeBlock({
         <pre
           className='overflow-x-auto'
           style={{
-            // background: "var(--code-bg)",
             borderRadius: '8px',
             margin: 0,
             padding: 0,
@@ -648,13 +666,20 @@ export function CodeBlock({
                 })}
               </span>
             )}
-            <code
-              ref={codeRef}
-              className={lang ? `language-${lang}` : undefined}
-              style={{ whiteSpace: 'pre', background: 'none', padding: 0, lineHeight }}
-            >
-              {children}
-            </code>
+            {highlightedHtml ? (
+              <code
+                className={lang ? `language-${lang}` : undefined}
+                style={{ whiteSpace: 'pre', background: 'none', padding: 0, lineHeight }}
+                dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+              />
+            ) : (
+              <code
+                className={lang ? `language-${lang}` : undefined}
+                style={{ whiteSpace: 'pre', background: 'none', padding: 0, lineHeight }}
+              >
+                {children}
+              </code>
+            )}
           </div>
         </pre>
       </div>
@@ -694,7 +719,7 @@ export function PixelatedImage({
    * <PixelatedImage placeholder={placeholderScreenshot} src="/screenshot@2x.png" ... />
    * ```
    */
-  placeholder: string
+  placeholder?: string
   alt: string
   width: number
   height: number
@@ -724,22 +749,24 @@ export function PixelatedImage({
       }}
     >
       {/* Placeholder: tiny image rendered with nearest-neighbor sampling */}
-      <img
-        src={placeholder}
-        alt=''
-        aria-hidden
-        width={width}
-        height={height}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          imageRendering: 'pixelated',
-          zIndex: 0,
-        }}
-      />
+      {placeholder && (
+        <img
+          src={placeholder}
+          alt=''
+          aria-hidden
+          width={width}
+          height={height}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            imageRendering: 'pixelated',
+            zIndex: 0,
+          }}
+        />
+      )}
       {/* Real image: starts invisible, fades in over the placeholder */}
       <img
         ref={imgRef}
@@ -755,7 +782,7 @@ export function PixelatedImage({
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          opacity: loaded ? 1 : 0,
+          opacity: (!placeholder || loaded) ? 1 : 0,
           transition: 'opacity 0.4s ease',
           zIndex: 1,
         }}
@@ -1276,6 +1303,7 @@ export function EditorialPage({
               alignItems: 'center',
               justifyContent: 'space-between',
               height: '44px',
+              paddingTop: '12px',
           }}
         >
           <a
@@ -1414,7 +1442,7 @@ export function EditorialPage({
         }}
       >
         <div style={{ height: '80px' }} />
-        <article className='editorial-article flex flex-col gap-[32px]'>{children}</article>
+        <article className='editorial-article flex flex-col gap-[20px]'>{children}</article>
       </div>
 
       {/* Right sidebar: CTA banner, sticky */}

@@ -51,7 +51,7 @@
     Courier, monospace;
 
   /* Editorial type scale */
-  --type-body-size: 15px;
+  --type-body-size: 14px;
   --type-heading-1-size: 15px;
   --type-heading-2-size: 14px;
   --type-heading-3-size: 13px;
@@ -59,7 +59,8 @@
   --type-toc-size: 13px;
 
   /* Bleed: code blocks & images extend beyond prose column. */
-  --bleed: 16px;
+  --bleed: 44px;
+  --bleed-image: 48px;
 
   /* TOC sidebar left offset — shared with tab bar for alignment */
   --toc-left: max(1rem, calc((100vw - 550px) / 2 - 280px));
