@@ -1,3 +1,4 @@
+'use client'
 /*
  * Editorial markdown components.
  *
@@ -1107,10 +1108,10 @@ export function SectionRow({
   aside?: React.ReactNode
 }) {
   return (
-    <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[3/-1]'>
+    <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[2/-1]'>
       <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible'>{content}</div>
       {aside && (
-        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) bg-(--code-bg) text-(length:--type-toc-size) leading-[1.5] text-(color:--text-tree-label) lg:col-[3] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
+        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) bg-(--code-bg) text-(length:--type-toc-size) leading-[1.5] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
           {aside}
         </div>
       )}
@@ -1368,7 +1369,7 @@ export function EditorialPage({
         )}
       </div>
 
-      <div className='grid grid-cols-1 max-w-full mx-auto px-(--mobile-padding) lg:grid-cols-[var(--grid-toc-width)_var(--grid-gap)_var(--grid-content-width)_var(--grid-gap)_var(--grid-sidebar-width)] lg:max-w-(--grid-max-width) lg:px-0'>
+      <div className='grid grid-cols-1 max-w-full mx-auto px-(--mobile-padding) lg:grid-cols-[var(--grid-toc-width)_var(--grid-content-width)_var(--grid-sidebar-width)] lg:gap-x-(--grid-gap) lg:max-w-(--grid-max-width) lg:px-0'>
         {/* TOC sidebar: sticky within its grid cell */}
         <div className='slot-sidebar-left'>
           <div
@@ -1385,7 +1386,7 @@ export function EditorialPage({
           <>
             {/* Section-based layout: each section is a subgrid row with
                 content in column 3 and optional aside in column 5 (sticky). */}
-            <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[3/-1]'>
+            <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[2/-1]'>
               <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible'>
                 <div style={{ height: 'var(--content-top-gap)' }} />
               </div>
@@ -1397,7 +1398,7 @@ export function EditorialPage({
         ) : (
           <>
             {/* Flat layout: single article column + optional static sidebar */}
-            <div className='slot-main pb-24 lg:col-[3]'>
+            <div className='slot-main pb-24 lg:col-[2]'>
               <div style={{ height: 'var(--content-top-gap)' }} />
               <article className='flex flex-col gap-[20px]'>{children}</article>
             </div>

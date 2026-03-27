@@ -387,14 +387,13 @@
 .slot-main {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
 }
 
 .slot-sidebar-right {
   display: none;
   @variant lg {
     display: block;
-    grid-column: 5;
+    grid-column: 3;
   }
 }
 

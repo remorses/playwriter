@@ -17,7 +17,7 @@ import dedent from 'string-dedent'
 import { LOG_FILE_PATH, VERSION, parseRelayHost } from './utils.js'
 import { ensureRelayServer, RELAY_PORT } from './relay-client.js'
 import { PlaywrightExecutor, CodeExecutionTimeoutError } from './executor.js'
-import { discoverChromeInstances } from './chrome-discovery.js'
+import { discoverChromeInstances, resolveDirectInput } from './chrome-discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -90,8 +90,9 @@ async function ensureRelayServerForMcp(): Promise<void> {
 
 /**
  * Resolve direct CDP config from PLAYWRITER_DIRECT env var.
- * - "auto": discover Chrome instances, use the first one
- * - "ws://...": use explicit WebSocket endpoint
+ * - "auto" / "1" / "true": auto-discover Chrome on default port 9222
+ * - "ws://..." / "wss://...": use explicit WebSocket endpoint
+ * - "host:port": resolve to ws:// URL via HTTP probe + DevToolsActivePort fallback
  */
 async function getDirectCdpConfig(): Promise<{ directCdpUrl: string } | null> {
   const directEnv = process.env.PLAYWRITER_DIRECT
@@ -99,20 +100,23 @@ async function getDirectCdpConfig(): Promise<{ directCdpUrl: string } | null> {
     return null
   }
 
-  if (directEnv.startsWith('ws://') || directEnv.startsWith('wss://')) {
-    return { directCdpUrl: directEnv }
+  // Auto-discover: check default port 9222
+  if (directEnv === 'auto' || directEnv === '1' || directEnv === 'true') {
+    const instances = await discoverChromeInstances()
+    if (instances.length === 0) {
+      throw new Error(
+        'PLAYWRITER_DIRECT is set but no Chrome found on port 9222. ' +
+          'Enable debugging at chrome://inspect/#remote-debugging or launch with --remote-debugging-port=9222.',
+      )
+    }
+    mcpLog(`Direct CDP: using ${instances[0].browser} on port ${instances[0].port}`)
+    return { directCdpUrl: instances[0].wsUrl }
   }
 
-  // "auto" or any truthy value: discover Chrome instances
-  const instances = await discoverChromeInstances()
-  if (instances.length === 0) {
-    throw new Error(
-      'PLAYWRITER_DIRECT is set but no Chrome instances with debugging enabled were found. ' +
-        'Enable debugging at chrome://inspect/#remote-debugging or launch with --remote-debugging-port=9222.',
-    )
-  }
-  mcpLog(`Direct CDP: found ${instances.length} instance(s), using ${instances[0].browser} on port ${instances[0].port}`)
-  return { directCdpUrl: instances[0].wsUrl }
+  // ws://, wss://, or host:port — resolveDirectInput handles all three
+  const directCdpUrl = await resolveDirectInput(directEnv)
+  mcpLog(`Direct CDP: resolved ${directEnv} → ${directCdpUrl}`)
+  return { directCdpUrl }
 }
 
 async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {

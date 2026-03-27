@@ -81,9 +81,9 @@ slot-page
 │  └──────────────────────────────┴────────────────────────────────────────┘ │
 │ slot-tabbar                                                          tabs  │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ slot-sidebar-left   gap   slot-main                       gap  slot-       │
-│ (TOC sticky)              (article + section rows)            sidebar-     │
-│                                                               right        │
+│ slot-sidebar-left │ slot-main                │ slot-sidebar-right             │
+│ (TOC sticky)      │ (article + section rows) │                               │
+│                   │← gap-x: --grid-gap (50px)→│                              │
 └────────────────────────────────────────────────────────────────────────────┘
 
 Mobile (< lg)

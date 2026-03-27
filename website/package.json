@@ -4,48 +4,32 @@
   "type": "module",
   "scripts": {
     "placeholders": "tsx scripts/generate-placeholders.ts",
-    "build": "tsx scripts/generate-placeholders.ts && react-router build",
-    "dev": "react-router dev --port 8044",
-    "typecheck": "react-router typegen && tsc"
+    "build": "tsx scripts/generate-placeholders.ts && vite build",
+    "dev": "vite --port 8044",
+    "typecheck": "tsc"
   },
   "exports": {
     "./*": "./*"
   },
   "dependencies": {
-    "@radix-ui/react-slot": "^1.2.4",
-    "@react-router/fs-routes": "^7.11.0",
-    "@react-router/node": "^7.11.0",
-    "@sentry/node": "^10.32.1",
     "@tailwindcss/typography": "^0.5.19",
     "@types/prismjs": "^1.26.6",
-    "@vercel/react-router": "^1.2.4",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "isbot": "^5.1.32",
-    "lucide-react": "^0.562.0",
     "prismjs": "^1.30.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-router": "^7.11.0",
     "safe-mdx": "^1.3.9",
-    "sentries": "^0.2.2",
-    "tailwind-merge": "^3.4.0",
-    "tw-animate-css": "^1.4.0"
+    "spiceflow": "1.18.0-rsc.16"
   },
   "devDependencies": {
-    "@react-router/dev": "^7.11.0",
     "@tailwindcss/vite": "^4.2.0",
     "@types/mdast": "^4.0.4",
     "@types/node": "^25.0.3",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.2",
-    "@xmorse/deployment-utils": "^0.7.2",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
-    "vite-plugin-environment": "^1.1.3",
     "vite-tsconfig-paths": "^6.0.3",
     "vitest": "^4.0.16"
   }

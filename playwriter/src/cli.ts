@@ -29,7 +29,7 @@ import {
   getExtensionStatus,
   type ExtensionStatus,
 } from './relay-client.js'
-import { discoverChromeInstances, type DiscoveredInstance } from './chrome-discovery.js'
+import { discoverChromeInstances, resolveDirectInput, type DiscoveredInstance } from './chrome-discovery.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -305,11 +305,18 @@ cli
     const isLocal = !options.host && !process.env.PLAYWRITER_HOST
     const directEndpoint = typeof options.direct === 'string' ? options.direct : null
 
-    // If --direct with explicit endpoint, skip all discovery
+    // If --direct with explicit endpoint, resolve it (handles host:port → ws://) then skip discovery
     if (directEndpoint) {
+      let cdpEndpoint: string
+      try {
+        cdpEndpoint = await resolveDirectInput(directEndpoint)
+      } catch (error: any) {
+        console.error(`Error: ${error.message}`)
+        process.exit(1)
+      }
       await ensureRelayForSessionCreation(isLocal)
       const serverUrl = await getServerUrl(options.host)
-      const result = await createDirectSession({ serverUrl, cdpEndpoint: directEndpoint })
+      const result = await createDirectSession({ serverUrl, cdpEndpoint })
       console.log(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
       console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
       return
@@ -561,19 +568,23 @@ function formatInstanceProfiles(instance: DiscoveredInstance): string {
 }
 
 function printBrowserTable(options: BrowserOption[]): void {
+  const typeLabels = options.map((opt) => {
+    return opt.type === 'direct' ? '--direct' : opt.type
+  })
   const keyWidth = Math.max(3, ...options.map((opt) => opt.key.length))
-  const typeWidth = Math.max(4, ...options.map((opt) => opt.type.length))
+  const typeWidth = Math.max(4, ...typeLabels.map((t) => t.length))
   const browserWidth = Math.max(7, ...options.map((opt) => opt.browser.length))
 
   console.log(
     'KEY'.padEnd(keyWidth) + '  ' + 'TYPE'.padEnd(typeWidth) + '  ' + 'BROWSER'.padEnd(browserWidth) + '  ' + 'PROFILE',
   )
   console.log('-'.repeat(keyWidth + typeWidth + browserWidth + 20))
-  for (const opt of options) {
+  for (let i = 0; i < options.length; i++) {
+    const opt = options[i]
     console.log(
       opt.key.padEnd(keyWidth) +
         '  ' +
-        opt.type.padEnd(typeWidth) +
+        typeLabels[i].padEnd(typeWidth) +
         '  ' +
         opt.browser.padEnd(browserWidth) +
         '  ' +
@@ -833,34 +844,46 @@ cli
   })
 
 cli
-  .command('browser list', 'Discover Chrome/Chromium instances with debugging enabled')
-  .action(async () => {
-    console.log(pc.dim('Scanning for Chrome instances with debugging enabled...\n'))
-    const instances = await discoverChromeInstances()
+  .command('browser list', 'List all available browsers: extension-connected and direct CDP on port 9222')
+  .option('--host <host>', z.string().describe('Remote relay server host'))
+  .action(async (options) => {
+    const isLocal = !options.host && !process.env.PLAYWRITER_HOST
 
-    if (instances.length === 0) {
-      console.log('No Chrome instances with debugging enabled found.\n')
-      console.log('Enable debugging in one of these ways:')
-      console.log('  1. Open chrome://inspect/#remote-debugging in Chrome')
-      console.log('  2. Launch Chrome with: chrome --remote-debugging-port=9222')
+    // Start relay if local so the extension can connect, then fetch in parallel
+    if (isLocal) {
+      await ensureRelayServer({ logger: console, env: cliRelayEnv })
+    }
+
+    const [extensions, directInstances] = await Promise.all([
+      isLocal
+        ? waitForConnectedExtensions({ timeoutMs: 2000, pollIntervalMs: 200, logger: console })
+        : fetchExtensionsStatus(options.host),
+      isLocal ? discoverChromeInstances() : Promise.resolve([] as DiscoveredInstance[]),
+    ])
+
+    const allOptions: BrowserOption[] = [
+      ...extensions.map((ext) => {
+        return {
+          key: ext.stableKey || ext.extensionId,
+          type: 'extension' as const,
+          browser: ext.browser || 'Chrome',
+          profile: ext.profile?.email || '(not signed in)',
+          extensionId: ext.extensionId === 'default' ? null : ext.stableKey || ext.extensionId,
+        }
+      }),
+      ...directInstances.map(instanceToBrowserOption),
+    ]
+
+    if (allOptions.length === 0) {
+      console.log('No browsers detected.\n')
+      console.log('  Extension: click the Playwriter icon on a tab to connect')
+      console.log('  Direct:    open chrome://inspect/#remote-debugging in Chrome')
       return
     }
 
-    const portWidth = Math.max(4, ...instances.map((i) => String(i.port).length))
-    const browserWidth = Math.max(7, ...instances.map((i) => i.browser.length))
-
-    console.log('PORT'.padEnd(portWidth) + '  ' + 'BROWSER'.padEnd(browserWidth) + '  ' + 'PROFILES')
-    console.log('-'.repeat(portWidth + browserWidth + 30))
-
-    for (const instance of instances) {
-      const profileLabel = formatInstanceProfiles(instance)
-      console.log(
-        String(instance.port).padEnd(portWidth) + '  ' + instance.browser.padEnd(browserWidth) + '  ' + profileLabel,
-      )
-    }
-
+    printBrowserTable(allOptions)
     console.log('')
-    console.log(pc.dim('Use with: playwriter session new --direct'))
+    console.log(pc.dim('Use with: playwriter session new [--browser <key>]'))
   })
 
 cli.command('logfile', 'Print the path to the relay server log file').action(() => {
