@@ -35,7 +35,6 @@ const LETTER_SPACING = { prose: '-0.09px', code: '0.01em' } as const
 /** Shared prose style — body text, lists, captions. Spread and override per component. */
 const proseStyle = {
   fontFamily: 'var(--font-primary)',
-  fontSize: 'var(--type-body-size)',
   fontWeight: WEIGHT.prose,
   lineHeight: LINE_HEIGHT.prose,
   letterSpacing: LETTER_SPACING.prose,
@@ -1401,9 +1400,9 @@ export function Hero({ children, ...props }: { children: React.ReactNode } & Rea
 export function SectionRow({ content, aside }: { content: React.ReactNode; aside?: React.ReactNode }) {
   return (
     <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[2/-1]'>
-      <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible'>{content}</div>
+      <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible text-(length:--type-body-size)'>{content}</div>
       {aside && (
-        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) border border-(--code-bg) text-(length:--type-body-size) leading-[1.6] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
+        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) border border-(--code-bg) text-(length:--type-toc-size) leading-[1.5] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
           {aside}
         </div>
       )}
@@ -1434,9 +1433,9 @@ export function SidebarBanner({
         border: '1px solid var(--code-bg)',
         borderRadius: 'var(--border-radius-md)',
         padding: '10px',
-        fontSize: 'var(--type-body-size)',
+        fontSize: 'var(--type-toc-size)',
         fontWeight: WEIGHT.prose,
-        lineHeight: LINE_HEIGHT.prose,
+        lineHeight: LINE_HEIGHT.heading,
         color: 'var(--text-tree-label)',
         overflow: 'visible',
       }}
@@ -1689,7 +1688,7 @@ export function EditorialPage({
             {/* Section-based layout: each section is a subgrid row with
                 content in column 3 and optional aside in column 5 (sticky). */}
             <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[2/-1]'>
-              <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible'></div>
+              <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible text-(length:--type-body-size)'></div>
             </div>
             {sections.map((section, i) => {
               return <SectionRow key={i} content={section.content} aside={section.aside} />
@@ -1698,7 +1697,7 @@ export function EditorialPage({
         ) : (
           <>
             {/* Flat layout: single article column + optional static sidebar */}
-            <div className='slot-main pb-24 lg:col-[2]'>
+            <div className='slot-main pb-24 lg:col-[2] text-(length:--type-body-size)'>
               <article className='flex flex-col gap-[20px]'>{children}</article>
             </div>
 
