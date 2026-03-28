@@ -7,7 +7,7 @@
  * --link-accent, --page-border.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-jsx'
 import 'prismjs/components/prism-tsx'
@@ -147,8 +147,31 @@ function prepareTocItems({ items }: { items: TocItem[] }): PreparedTocItem[] {
   })
 }
 
-function useActiveTocId({ defaultId }: { defaultId: string }) {
-  const [activeId, setActiveId] = useState(defaultId)
+/** Read location.hash without the leading '#'. Subscribes to hashchange so
+ *  the TOC re-highlights when the user clicks an anchor link. Server snapshot
+ *  returns '' since there's no location during SSR. */
+function useLocationHash(): string {
+  return useSyncExternalStore(
+    (callback) => {
+      window.addEventListener('hashchange', callback)
+      return () => {
+        window.removeEventListener('hashchange', callback)
+      }
+    },
+    () => {
+      return window.location.hash.replace(/^#/, '')
+    },
+    () => {
+      return ''
+    },
+  )
+}
+
+function useActiveTocId({ fallbackId }: { fallbackId: string }) {
+  const hash = useLocationHash()
+  const [activeId, setActiveId] = useState(() => {
+    return hash || fallbackId
+  })
 
   useEffect(() => {
     const headings = document.querySelectorAll<HTMLElement>('[data-toc-heading="true"][id]')
@@ -257,10 +280,9 @@ function TocLink({
 }
 
 export function TableOfContents({ items, logo }: { items: TocItem[]; logo?: string }) {
-  // Default active to first item
   const firstHref = items[0]?.href ?? ''
-  const defaultId = firstHref.startsWith('#') ? firstHref.slice(1) : firstHref
-  const activeId = useActiveTocId({ defaultId })
+  const fallbackId = firstHref.startsWith('#') ? firstHref.slice(1) : firstHref
+  const activeId = useActiveTocId({ fallbackId })
 
   const preparedItems = useMemo(() => {
     return prepareTocItems({ items })
