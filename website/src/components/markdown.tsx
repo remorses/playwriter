@@ -42,6 +42,37 @@ const proseStyle = {
   margin: 0,
 } satisfies React.CSSProperties
 
+function ChevronIcon({ expanded, style }: { expanded: boolean; style?: React.CSSProperties }) {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        alignSelf: 'center',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '4px',
+        margin: '-4px',
+        cursor: 'pointer',
+        ...style,
+      }}
+    >
+      <svg
+        aria-hidden='true'
+        viewBox='0 0 16 16'
+        width='12'
+        height='12'
+        style={{
+          transition: 'transform 0.15s ease',
+          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+        }}
+      >
+        <path d='M6 4l4 4-4 4' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+      </svg>
+    </span>
+  )
+}
+
 /* =========================================================================
    TOC sidebar (fixed left)
    ========================================================================= */
@@ -303,6 +334,7 @@ function TocLink({
   item,
   isActive,
   chevron,
+  onToggle,
   dimmed,
   isHighlighted,
   linkRef,
@@ -310,6 +342,7 @@ function TocLink({
   item: FlatTocItem
   isActive: boolean
   chevron?: { expanded: boolean }
+  onToggle?: () => void
   /** Search: dim non-matching items to opacity 0.3 */
   dimmed?: boolean
   /** Search: arrow-key highlighted item */
@@ -324,8 +357,7 @@ function TocLink({
       : 'var(--text-tree-label)'
   const defaultPrefixColor = effectiveActive ? 'var(--text-secondary)' : 'var(--text-tertiary)'
   const bg = isHighlighted ? 'var(--code-bg)' : effectiveActive ? 'var(--code-bg)' : 'transparent'
-  /* visualLevel 0 or page nodes get heading weight, everything else prose */
-  const fontWeight = item.visualLevel === 0 || item.type === 'page' ? WEIGHT.heading : WEIGHT.prose
+  const fontWeight = WEIGHT.regular
   return (
     <a
       ref={linkRef}
@@ -337,7 +369,6 @@ function TocLink({
         alignItems: 'flex-start',
         fontSize: 'var(--type-toc-size)',
         fontWeight,
-        lineHeight: LINE_HEIGHT.prose,
         letterSpacing: 'normal',
         padding: '2px 8px',
         color: defaultColor,
@@ -345,7 +376,6 @@ function TocLink({
         transition: 'color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease',
         borderRadius: '6px',
         background: bg,
-        textTransform: 'lowercase',
         opacity: dimmed ? 0.3 : 1,
       }}
       onMouseEnter={(e) => {
@@ -363,6 +393,20 @@ function TocLink({
         {item.prefix}
       </span>
       <span style={{ overflowWrap: 'anywhere', fontFamily: 'var(--font-primary)', flex: 1 }}>{item.label}</span>
+      {chevron && (
+        <span
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onToggle?.()
+          }}
+        >
+          <ChevronIcon
+            expanded={chevron.expanded}
+            style={{ color: defaultPrefixColor, marginLeft: '4px' }}
+          />
+        </span>
+      )}
     </a>
   )
 }
@@ -549,7 +593,6 @@ export function TableOfContents({ items, logo }: { items: FlatTocItem[]; logo?: 
   return (
     <aside
       style={{
-        width: 'fit-content',
         maxWidth: 'var(--grid-toc-width)',
         display: 'flex',
         flexDirection: 'column',
@@ -619,7 +662,7 @@ export function TableOfContents({ items, logo }: { items: FlatTocItem[]; logo?: 
       </div>
 
       <nav aria-label='Table of contents' style={{ overflowY: 'auto', minHeight: 0, paddingRight: '4px' }}>
-        {visibleItems.map((item) => {
+        {visibleItems.map((item, i) => {
           const isExpandable = expandableHrefs.has(item.href)
           const isExpanded =
             expanded.has(item.href) ||
@@ -627,18 +670,14 @@ export function TableOfContents({ items, logo }: { items: FlatTocItem[]; logo?: 
           const isDimmed = isSearchActive && searchState.dimmedHrefs?.has(item.href)
           const highlightedHref = isSearchActive ? searchState.focusableHrefs?.[highlightedIndex] : undefined
           const isHighlighted = highlightedHref === item.href
-          /* Extract fragment for active heading comparison */
           const fragment = item.href.includes('#') ? item.href.slice(item.href.indexOf('#')) : item.href
           return (
-            <div
-              key={item.href}
-              onClick={isExpandable ? () => { toggle(item.href) } : undefined}
-              style={{ cursor: isExpandable ? 'pointer' : undefined }}
-            >
+            <div key={item.href} style={item.visualLevel === 0 && i > 0 ? { marginTop: '6px' } : undefined}>
               <TocLink
                 item={item}
                 isActive={`#${activeId}` === fragment}
                 chevron={isExpandable ? { expanded: isExpanded } : undefined}
+                onToggle={isExpandable ? () => { toggle(item.href) } : undefined}
                 dimmed={isDimmed || false}
                 isHighlighted={isHighlighted}
                 linkRef={isHighlighted ? highlightedRef : undefined}
