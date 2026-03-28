@@ -150,64 +150,74 @@ function prepareTocItems({ items }: { items: TocItem[] }): PreparedTocItem[] {
 /** Single useSyncExternalStore that handles both initial hash and scroll-based
  *  active heading tracking. A ref holds the current value, the IntersectionObserver
  *  updates it and notifies React via the subscribe callback. Server snapshot
- *  returns fallbackId to avoid hydration mismatch. */
+ *  returns fallbackId to avoid hydration mismatch. Hash is read inside subscribe
+ *  (not during render) to keep render pure. All callbacks are stable via useCallback. */
 function useActiveTocId({ fallbackId }: { fallbackId: string }) {
-  const hash = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '') : ''
-  const activeRef = useRef(hash || fallbackId)
+  const activeRef = useRef(fallbackId)
 
-  const activeId = useSyncExternalStore(
-    (onStoreChange) => {
-      const headings = document.querySelectorAll<HTMLElement>('[data-toc-heading="true"][id]')
-      if (headings.length === 0) {
-        return () => {}
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    const emit = (next: string) => {
+      if (activeRef.current === next) {
+        return
       }
+      activeRef.current = next
+      onStoreChange()
+    }
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          const visible: string[] = []
-          entries.forEach((entry) => {
-            if (entry.isIntersecting && entry.target.id) {
-              visible.push(entry.target.id)
-            }
-          })
+    // Read hash on first subscribe to fix flash on initial paint
+    const hash = window.location.hash.replace(/^#/, '')
+    if (hash) {
+      emit(hash)
+    }
 
-          if (visible.length > 0) {
-            const sorted = visible.sort((a, b) => {
-              const elA = document.getElementById(a)
-              const elB = document.getElementById(b)
-              if (!elA || !elB) {
-                return 0
-              }
-              return elA.getBoundingClientRect().top - elB.getBoundingClientRect().top
-            })
-            activeRef.current = sorted[sorted.length - 1]
-            onStoreChange()
+    const headings = document.querySelectorAll<HTMLElement>('[data-toc-heading="true"][id]')
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible: string[] = []
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.target.id) {
+            visible.push(entry.target.id)
           }
-        },
-        {
-          /* -80px ≈ header-row-height; accounts for sticky header covering top of viewport */
-          rootMargin: '-80px 0px -75% 0px',
-          threshold: 0,
-        },
-      )
+        })
 
-      headings.forEach((heading) => {
-        observer.observe(heading)
-      })
+        if (visible.length > 0) {
+          const sorted = visible.sort((a, b) => {
+            const elA = document.getElementById(a)
+            const elB = document.getElementById(b)
+            if (!elA || !elB) {
+              return 0
+            }
+            return elA.getBoundingClientRect().top - elB.getBoundingClientRect().top
+          })
+          emit(sorted[sorted.length - 1])
+        }
+      },
+      {
+        /* -80px ≈ header-row-height; accounts for sticky header covering top of viewport */
+        rootMargin: '-80px 0px -75% 0px',
+        threshold: 0,
+      },
+    )
 
-      return () => {
-        observer.disconnect()
-      }
-    },
-    () => {
-      return activeRef.current
-    },
-    () => {
-      return fallbackId
-    },
-  )
+    headings.forEach((heading) => {
+      observer.observe(heading)
+    })
 
-  return activeId
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
+  const getSnapshot = useCallback(() => {
+    return activeRef.current
+  }, [])
+
+  const getServerSnapshot = useCallback(() => {
+    return fallbackId
+  }, [fallbackId])
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 type TocGroup = {
