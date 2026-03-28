@@ -1403,7 +1403,7 @@ export function SectionRow({ content, aside }: { content: React.ReactNode; aside
     <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[2/-1]'>
       <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible'>{content}</div>
       {aside && (
-        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) bg-(--code-bg) text-(length:--type-toc-size) leading-[1.5] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
+        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) border border-(--code-bg) text-(length:--type-body-size) leading-[1.6] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
           {aside}
         </div>
       )}
@@ -1431,12 +1431,12 @@ export function SidebarBanner({
     <div
       style={{
         position: 'relative',
-        backgroundColor: 'var(--code-bg)',
+        border: '1px solid var(--code-bg)',
         borderRadius: 'var(--border-radius-md)',
         padding: '10px',
-        fontSize: 'var(--type-toc-size)',
+        fontSize: 'var(--type-body-size)',
         fontWeight: WEIGHT.prose,
-        lineHeight: LINE_HEIGHT.heading,
+        lineHeight: LINE_HEIGHT.prose,
         color: 'var(--text-tree-label)',
         overflow: 'visible',
       }}
