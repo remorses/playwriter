@@ -44,25 +44,6 @@ Reset a session if the browser connection is stale or broken:
 playwriter session reset <sessionId>
 ```
 
-### Start a managed browser
-
-If no Playwriter-enabled browser is running yet, start one with the bundled
-extension already loaded:
-
-```bash
-playwriter browser start
-```
-
-- Auto-detects **Chrome for Testing** first, then **Chromium**
-- On Linux without `DISPLAY` / `WAYLAND_DISPLAY`, defaults to `--headless`
-- Uses a dedicated profile under `~/.playwriter/browser-profile`
-
-Pass an explicit browser binary path if needed:
-
-```bash
-playwriter browser start /path/to/browser-binary
-```
-
 ### Direct CDP connection (--direct)
 
 Only use `--direct` when the user explicitly asks for it. This mode requires the user to accept a debugging approval dialog in Chrome, so it cannot be used autonomously.
@@ -174,19 +155,6 @@ If you find a bug, you can create a gh issue using `gh issue create -R remorses/
 Control user's Chrome browser via playwright code snippets. Prefer single-line code with semicolons between statements. Use playwriter immediately without waiting for user actions; only if you get "extension is not connected" or "no browser tabs have Playwriter enabled" should you ask the user to click the playwriter extension icon on the target tab.
 
 **When to use playwriter instead of webfetch/curl:** If a website is JS-heavy (SPAs like Instagram, Twitter, Facebook, etc.), has cookie consent modals, login walls, lazy-loaded content, carousels, or infinite scroll — **always use playwriter**. Simple fetch/webfetch will return an empty HTML shell with no content. Do NOT waste time trying curl, webfetch, or parsing raw HTML from JS-rendered sites. Go straight to playwriter: navigate with a real browser, dismiss modals, then extract what you need via `page.evaluate()` or network interception.
-
-**If no Playwriter-enabled browser is running**, start one before retrying:
-
-```bash
-playwriter browser start
-```
-
-For AVPS / VPS environments without a display server, this command automatically
-uses headless Chromium. You can also force it explicitly:
-
-```bash
-playwriter browser start --headless
-```
 
 You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs.
 
@@ -810,7 +778,7 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 **resizeImageForAgent** - shrink an image so it consumes fewer tokens when read back into context. The resized image is automatically included in the response (visible to the LLM). `await resizeImageForAgent({ input: './screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `format` (default: `'png'`), `output`. Alias: `resizeImage`.
 
-**recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` so **recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. If the browser was launched with `playwriter browser start`, the required Chrome flags are already enabled so no manual extension click is needed. Otherwise, click the Playwriter extension icon once on the tab before recording. Auto-resizes viewport to 16:9 (override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`).
+**recording.start / recording.stop** - record the page as a video at native FPS (30-60fps). Uses `chrome.tabCapture` so **recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Click the Playwriter extension icon once on the tab before recording to enable the required permissions. Auto-resizes viewport to 16:9 (override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`).
 
 For demos, use interaction methods (`locator.click()`, `page.mouse.move()`) instead of `goto()` to show realistic cursor motion.
 
