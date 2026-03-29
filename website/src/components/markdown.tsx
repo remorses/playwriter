@@ -356,7 +356,7 @@ function TocLink({
       ? 'var(--text-tertiary)'
       : 'var(--text-tree-label)'
   const defaultPrefixColor = effectiveActive ? 'var(--text-secondary)' : 'var(--text-tertiary)'
-  const bg = isHighlighted ? 'var(--code-bg)' : effectiveActive ? 'var(--code-bg)' : 'transparent'
+  const bg = isHighlighted ? 'var(--border-subtle)' : effectiveActive ? 'var(--border-subtle)' : 'transparent'
   const fontWeight = WEIGHT.regular
   return (
     <a
@@ -382,7 +382,7 @@ function TocLink({
       onMouseEnter={(e) => {
         if (!effectiveActive && !dimmed) {
           e.currentTarget.style.color = 'var(--text-primary)'
-          e.currentTarget.style.background = 'var(--code-bg)'
+          e.currentTarget.style.background = 'var(--border-subtle)'
         }
       }}
       onMouseLeave={(e) => {
@@ -1452,7 +1452,7 @@ export function SectionRow({ content, aside }: { content: React.ReactNode; aside
     <div className='contents lg:grid lg:grid-cols-subgrid lg:col-[2/-1]'>
       <div className='slot-main flex flex-col gap-5 lg:col-[1] lg:overflow-visible text-(length:--type-body-size)'>{content}</div>
       {aside && (
-        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) border border-(--code-bg) text-(length:--type-toc-size) leading-[1.5] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
+        <div className='flex flex-col gap-3 my-2 p-3 rounded-(--border-radius-md) border border-(--border-subtle) text-(length:--type-toc-size) leading-[1.5] text-(color:--text-tree-label) lg:col-[2] lg:sticky lg:top-(--sticky-top) lg:self-start lg:max-h-[calc(100vh-var(--header-height))] lg:overflow-y-auto lg:my-0'>
           {aside}
         </div>
       )}
@@ -1480,7 +1480,7 @@ export function SidebarBanner({
     <div
       style={{
         position: 'relative',
-        border: '1px solid var(--code-bg)',
+        border: '1px solid var(--border-subtle)',
         borderRadius: 'var(--border-radius-md)',
         padding: '10px',
         fontSize: 'var(--type-toc-size)',
