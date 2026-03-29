@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.102
+
+1. **`browser` exposed in sandbox** — user code can now call `browser.contexts()` to access pages from all open Chrome profiles when using `--direct` mode. The `browser` variable is available alongside `page`, `context`, etc. in all sandbox code.
+2. **`browser start` deprecated and hidden from `--help`** — the command still works if called directly but no longer appears in the help output. Use `session new --direct` for headless automation flows instead.
+3. **`PLAYWRITER_DIRECT` only accepts `'1'`** — removed `'auto'` and `'true'` aliases. The standard boolean env var pattern (`PLAYWRITER_DIRECT=1`) is the only accepted value for auto-discovery. Explicit `ws://` endpoints still work as before.
+
 ## 0.0.101
 
 1. **Chrome 136+ direct CDP discovery** — `playwriter browser list` and `--direct` auto-discovery now detect Chrome instances where `/json/version` returns 404 (Chrome 136+ with `chrome://inspect` debugging). Previously these were silently ignored. Discovery uses HTTP-only probing and never triggers Chrome's approval dialog.
