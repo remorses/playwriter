@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.100
+
+1. **`resizeImageForAgent` now defaults to PNG** — previously defaulted to JPEG, which caused `image/png` vs `image/jpeg` mismatch errors when MCP clients assumed PNG. All images emitted by playwriter are now consistently PNG unless explicitly overridden with `format: 'jpeg'`.
+
 ## 0.0.99
 
 1. **Kitty Graphics Protocol support in CLI** — when `AGENT_GRAPHICS=kitty` is set, the CLI now emits screenshots and resized images as Kitty Graphics Protocol escape sequences to stdout. Agents with `kitty-graphics-agent` (or compatible parsers) automatically extract the PNG images and pass them to the LLM as media parts — no extra tool call or file reading needed.

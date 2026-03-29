@@ -165,7 +165,7 @@ export async function resizeImageForAgent(options: ResizeImageOptions): Promise<
     }
   })()
 
-  const fmt = options.format ?? 'jpeg'
+  const fmt = options.format ?? 'png'
   const pipeline = sharp(inputBuffer).resize(resizeOpts)
   const buffer = await (fmt === 'png' ? pipeline.png() : pipeline.jpeg({ quality })).toBuffer()
 
