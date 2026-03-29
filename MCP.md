@@ -67,7 +67,7 @@ Connect directly to Chrome's DevTools Protocol without the extension. Set `PLAYW
       "command": "npx",
       "args": ["-y", "playwriter@latest"],
       "env": {
-        "PLAYWRITER_DIRECT": "auto"
+        "PLAYWRITER_DIRECT": "1"
       }
     }
   }

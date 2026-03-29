@@ -102,7 +102,7 @@ async function getDirectCdpConfig(): Promise<{ directCdpUrl: string } | null> {
   }
 
   // Auto-discover: check default port 9222
-  if (directEnv === 'auto' || directEnv === '1' || directEnv === 'true') {
+  if (directEnv === '1') {
     const instances = await discoverChromeInstances()
     if (instances.length === 0) {
       throw new Error(

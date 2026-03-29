@@ -3,7 +3,7 @@
 ## 0.0.101
 
 1. **Chrome 136+ direct CDP discovery** — `playwriter browser list` and `--direct` auto-discovery now detect Chrome instances where `/json/version` returns 404 (Chrome 136+ with `chrome://inspect` debugging). Previously these were silently ignored. Discovery uses HTTP-only probing and never triggers Chrome's approval dialog.
-2. **`--direct` moved to `session new` only** — removed the `--direct` flag from the root command. For MCP, use the `PLAYWRITER_DIRECT` env var instead.
+2. **`--direct` moved to `session new` only** — removed the `--direct` flag from the root command. For MCP, set `PLAYWRITER_DIRECT=1` env var instead.
 3. **Unique WS paths per session** — direct CDP connections now use the session ID (CLI) or a UUID (MCP) as the WebSocket path segment, making connections traceable.
 
 ## 0.0.100
@@ -20,7 +20,7 @@
 
 1. **Direct CDP connection mode** — new `--direct` flag on `session new` connects to Chrome's built-in debugging WebSocket without needing the Playwriter extension. Works with any Chromium-based browser (Chrome, Brave, Ghost Browser, Arc, Edge, etc.) that has debugging enabled via `chrome://inspect/#remote-debugging` or `--remote-debugging-port`. Auto-discovers instances via DevToolsActivePort files and port scanning (9222-9229). Recording is unavailable in this mode.
 2. **`playwriter browser list` command** — lists all Chrome/Chromium instances with debugging enabled, showing port, browser name, and profile info.
-3. **MCP direct mode** — set `PLAYWRITER_DIRECT=auto` or `PLAYWRITER_DIRECT=ws://...` env var to start the MCP server in direct CDP mode without a relay server.
+3. **MCP direct mode** — set `PLAYWRITER_DIRECT=1` or `PLAYWRITER_DIRECT=ws://...` env var to start the MCP server in direct CDP mode without a relay server.
 4. **Multi-browser table includes direct instances** — when multiple extensions are connected, `session new` now also discovers and shows direct CDP instances in the unified selection table.
 
 ## 0.0.97

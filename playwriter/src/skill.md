@@ -63,44 +63,23 @@ Pass an explicit browser binary path if needed:
 playwriter browser start /path/to/browser-binary
 ```
 
-### Direct CDP connection (no extension needed)
+### Direct CDP connection (--direct)
 
-Connect directly to Chrome's DevTools Protocol without installing the extension.
-Works with any Chromium-based browser (Chrome, Brave, Ghost Browser, Arc, Edge, etc.).
+Only use `--direct` when the user explicitly asks for it. This mode requires the user to accept a debugging approval dialog in Chrome, so it cannot be used autonomously.
 
-First, enable debugging in Chrome:
+`--direct` connects to Chrome's DevTools Protocol without the extension. Unlike extension mode, it gives access to **all existing pages** in the browser — no need to enable per tab. Works with any Chromium browser (Chrome, Brave, Arc, Edge, etc.).
+
+The user must first enable debugging in Chrome:
 - Open `chrome://inspect/#remote-debugging` in Chrome, or
 - Launch Chrome with `chrome --remote-debugging-port=9222`
 
-Then create a session with `--direct`:
+Then create a session:
 
 ```bash
-# Auto-discover Chrome instances with debugging enabled
 playwriter session new --direct
-
-# Or specify an explicit WebSocket endpoint
-playwriter session new --direct ws://127.0.0.1:9222/devtools/browser/abc123
 ```
 
-List all discoverable Chrome instances:
-
-```bash
-playwriter browser list
-```
-
-**Limitations in direct mode:** screen recording (`recording.start/stop`) is unavailable since it requires the Chrome extension's `tabCapture` API.
-
-For MCP, set the `PLAYWRITER_DIRECT` env var in your MCP client config:
-
-```bash
-# Auto-discover Chrome on port 9222
-PLAYWRITER_DIRECT=auto playwriter
-
-# Explicit endpoint
-PLAYWRITER_DIRECT=ws://127.0.0.1:9222/devtools/browser/abc playwriter
-```
-
-Chrome 136+ may show an approval dialog the first time a direct connection is made.
+**Limitations:** screen recording (`recording.start/stop`) is unavailable in direct mode.
 
 ### Execute code
 
