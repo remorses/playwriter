@@ -1,7 +1,6 @@
 import { describe, test, expect } from 'vitest'
 import type { Root } from 'mdast'
-import { flattenTocTree, type TocTreeNode } from './markdown.js'
-import { slugify, extractText, generateTocTree } from './toc-tree.js'
+import { slugify, extractText, generateTocTree, flattenTocTree, type TocTreeNode } from './toc-tree.js'
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 
@@ -277,10 +276,10 @@ describe('flattenTocTree', () => {
     expect(formatFlat(flat)).toMatchInlineSnapshot(`
       [
         "L1 "├─ " Getting Started (#getting-started)",
-        "L2 "│  ├─ " Install (#install)",
-        "L2 "│  └─ " Config (#config)",
+        "L2 "│ ├─ " Install (#install)",
+        "L2 "│ └─ " Config (#config)",
         "L1 "└─ " API (#api)",
-        "L2 "   └─ " Methods (#methods)",
+        "L2 "  └─ " Methods (#methods)",
       ]
     `)
   })
@@ -300,7 +299,7 @@ describe('flattenTocTree', () => {
       [
         "L0 Docs (/docs)",
         "L2 "└─ " Intro (/docs#intro)",
-        "L3 "   └─ " Background (/docs#background)",
+        "L3 "  └─ " Background (/docs#background)",
       ]
     `)
   })
@@ -325,10 +324,10 @@ describe('flattenTocTree', () => {
       [
         "L0 Docs (/docs)",
         "L1 "└─ " Guides (/guides)",
-        "L2 "   └─ " Auth (/auth)",
-        "L3 "      ├─ " Overview (/auth#overview)",
-        "L3 "      ├─ " OAuth (/auth#oauth)",
-        "L3 "      └─ " Providers (/auth#providers)",
+        "L2 "  └─ " Auth (/auth)",
+        "L3 "    ├─ " Overview (/auth#overview)",
+        "L3 "    ├─ " OAuth (/auth#oauth)",
+        "L3 "    └─ " Providers (/auth#providers)",
       ]
     `)
   })
@@ -357,7 +356,7 @@ describe('flattenTocTree', () => {
         "L2 "└─ " Section 1 (/a#s1)",
         "L0 Page B (/b)",
         "L2 "└─ " Section 2 (/b#s2)",
-        "L3 "   └─ " Detail (/b#detail)",
+        "L3 "  └─ " Detail (/b#detail)",
       ]
     `)
   })
@@ -411,7 +410,7 @@ describe('flattenTocTree', () => {
     expect(formatFlat(flat)).toMatchInlineSnapshot(`
       [
         "L1 "└─ " Parent (#parent)",
-        "L3 "   └─ " Deep Child (#deep)",
+        "L3 "  └─ " Deep Child (#deep)",
       ]
     `)
   })
@@ -440,8 +439,8 @@ describe('mdast → tree → flat pipeline', () => {
         "L1 "└─ " Configuration (#configuration)",
         "L0 API (#api)",
         "L1 "└─ " Methods (#methods)",
-        "L2 "   ├─ " execute() (#execute)",
-        "L2 "   └─ " snapshot() (#snapshot)",
+        "L2 "  ├─ " execute() (#execute)",
+        "L2 "  └─ " snapshot() (#snapshot)",
         "L0 FAQ (#faq)",
       ]
     `)
