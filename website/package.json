@@ -19,7 +19,7 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "safe-mdx": "^1.3.9",
-    "spiceflow": "1.18.0-rsc.18"
+    "spiceflow": "1.18.0-rsc.22"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.0",

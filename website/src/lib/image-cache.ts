@@ -86,7 +86,11 @@ export async function buildImageManifest({
   const srcs = collectImageSrcs(mdast)
   const manifest: Record<string, ImageMeta> = {}
 
-  fs.mkdirSync(cacheDir, { recursive: true })
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true })
+  } catch (e) {
+    console.error('image-cache: cannot create cache dir (read-only fs?)', e)
+  }
 
   await Promise.all(
     srcs.map(async (src) => {
@@ -160,9 +164,13 @@ async function getOrGenerateImageMeta({
     placeholder: `data:image/png;base64,${placeholderBuf.toString('base64')}`,
   }
 
-  /* Write cache */
-  const entry: CacheEntry = { ...meta, mtime: stat.mtimeMs }
-  fs.writeFileSync(cachePath, JSON.stringify(entry))
+  /* Write cache — logs on failure (Vercel has read-only fs) */
+  try {
+    const entry: CacheEntry = { ...meta, mtime: stat.mtimeMs }
+    fs.writeFileSync(cachePath, JSON.stringify(entry))
+  } catch (e) {
+    console.error(`image-cache: cannot write ${cachePath} (read-only fs?)`, e)
+  }
 
   return meta
 }
