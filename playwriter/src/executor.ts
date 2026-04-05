@@ -422,6 +422,9 @@ export class PlaywrightExecutor {
     const warning = getExtensionOutdatedWarning(playwriterVersion)
     if (warning) {
       this.logger.log(warning)
+      // Enqueue so MCP agents see version-skew messages in their next execute
+      // response — logger.log alone only reaches stdout, not the LLM.
+      this.enqueueWarning(warning)
       this.hasWarnedExtensionOutdated = true
     }
   }
@@ -433,7 +436,7 @@ export class PlaywrightExecutor {
     this.pagesWithListeners.add(page)
     this.setupPageCloseDetection(page)
     this.setupPageConsoleListener(page)
-    this.setupPopupDetection(page)
+    this.setupNewPageLogging(page)
   }
 
   private setupPageCloseDetection(page: Page) {
@@ -495,20 +498,21 @@ export class PlaywrightExecutor {
     })
   }
 
-  private setupPopupDetection(page: Page) {
-    // Listen for popup events (window.open, target=_blank) on each page.
-    // This is more reliable than checking page.opener() on context 'page' event,
-    // which also fires for context.newPage() and CDP reconnection scenarios.
+  private setupNewPageLogging(page: Page) {
+    // page.on('popup') fires for window.open, target=_blank, and cmd+click
+    // (but not context.newPage() or CDP reconnection). The extension
+    // auto-relocates popups to tabs, so these pages are controllable via
+    // context.pages(). Enqueue synchronously so the warning lands in the
+    // enclosing execute() call's scope. initialUrl may be 'about:blank'
+    // for blank-then-scripted popups.
     page.on('popup', (popup) => {
-      const context = page.context()
-      const pages = context.pages()
+      const pages = popup.context().pages()
       const rawIndex = pages.indexOf(popup)
       const pageIndex = rawIndex >= 0 ? String(rawIndex) : 'unknown'
-      const url = popup.url()
+      const initialUrl = popup.url() || 'about:blank'
       this.enqueueWarning(
-        `Popup window detected (page index ${pageIndex}, url: ${url}). ` +
-          `Popup windows cannot be controlled by playwriter. ` +
-          `Repeat the interaction in a way that does not open a popup, or navigate to the URL directly in a new tab.`,
+        `New page opened from current page (index ${pageIndex}, initial url: ${initialUrl}). ` +
+          `Access it via context.pages()[${pageIndex}] to interact with it.`,
       )
     })
   }

@@ -1361,6 +1361,23 @@ async function connectTab(tabId: number): Promise<void> {
       logger.debug(`WS connection failed, keeping tab ${tabId} in connecting state for retry`)
       // Tab stays in 'connecting' state - maintainLoop will retry when WS becomes available
     } else {
+      // If the tab was closed mid-attach, don't write an error entry —
+      // onTabRemoved already deleted it and we'd leak a dead tabId.
+      let tabStillExists = true
+      try {
+        await chrome.tabs.get(tabId)
+      } catch {
+        tabStillExists = false
+      }
+      if (!tabStillExists) {
+        logger.debug(`Tab ${tabId} was closed during connect, dropping error state`)
+        store.setState((state) => {
+          const newTabs = new Map(state.tabs)
+          newTabs.delete(tabId)
+          return { tabs: newTabs }
+        })
+        return
+      }
       store.setState((state) => {
         const newTabs = new Map(state.tabs)
         newTabs.set(tabId, { state: 'error', errorText: `Error: ${error.message}` })
@@ -1578,6 +1595,7 @@ async function updateIcons(): Promise<void> {
 }
 
 async function onTabRemoved(tabId: number): Promise<void> {
+  popupSourceTabMap.delete(tabId)
   const { tabs } = store.getState()
   if (!tabs.has(tabId)) return
   logger.debug(`Connected tab ${tabId} was closed, disconnecting`)
@@ -1762,6 +1780,108 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       .catch((e) => {
         logger.debug('onTabUpdated handler error:', e)
       })
+  }
+})
+
+// Track every new tab's source (opener) tab via webNavigation.
+// chrome.tabs.Tab.openerTabId is unreliable for window.open popups — on
+// Chromium 145 it is left null. onCreatedNavigationTarget gives a reliable
+// source_tab_id → new_tab_id mapping for every window.open / target=_blank
+// / cmd+click. Entries expire after 10s to cap memory for plain-new-tab
+// cases that never trigger windows.onCreated.
+const popupSourceTabMap = new Map<number, number>()
+
+chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+  popupSourceTabMap.set(details.tabId, details.sourceTabId)
+  setTimeout(() => {
+    popupSourceTabMap.delete(details.tabId)
+  }, 10000)
+})
+
+// Relocate popup windows opened by a Playwriter-connected tab into the
+// source tab's window as a regular tab, since Playwriter cannot attach
+// its debugger to separate popup windows. When the source tab is NOT
+// connected, leave the popup alone so unrelated sites keep normal Chrome
+// popup behavior. After relocation, auto-attach Playwriter to the new
+// tab so it appears in context.pages().
+chrome.windows.onCreated.addListener(async (popupWindow) => {
+  if (popupWindow.type !== 'popup' || popupWindow.id === undefined) {
+    return
+  }
+  try {
+    // Retry tab discovery — windows.onCreated can fire before
+    // chrome.tabs.query({ windowId }) sees the new popup tab.
+    let popupTabs: chrome.tabs.Tab[] = []
+    for (let attempt = 0; attempt < 5; attempt++) {
+      popupTabs = await chrome.tabs.query({ windowId: popupWindow.id })
+      if (popupTabs.length > 0) break
+      await sleep(20)
+    }
+    const tabIds = popupTabs
+      .map((t) => t.id)
+      .filter((id): id is number => {
+        return id !== undefined
+      })
+    if (tabIds.length === 0) {
+      logger.debug(`Popup window ${popupWindow.id} has no tabs after retry, skipping`)
+      return
+    }
+
+    const { tabs: connectedTabs } = store.getState()
+    let sourceTabId: number | undefined
+    for (const tabId of tabIds) {
+      const candidate = popupSourceTabMap.get(tabId)
+      if (candidate !== undefined && connectedTabs.has(candidate)) {
+        sourceTabId = candidate
+        break
+      }
+    }
+    for (const tabId of tabIds) {
+      popupSourceTabMap.delete(tabId)
+    }
+    if (sourceTabId === undefined) {
+      logger.debug(
+        `Popup window ${popupWindow.id} not opened by a Playwriter-connected tab, leaving alone (tabs=${JSON.stringify(tabIds)})`,
+      )
+      return
+    }
+
+    let destinationWindowId: number
+    try {
+      const sourceTab = await chrome.tabs.get(sourceTabId)
+      if (sourceTab.windowId === undefined) {
+        const focused = await chrome.windows.getLastFocused({ populate: false })
+        if (focused.id === undefined || focused.id === popupWindow.id) {
+          return
+        }
+        destinationWindowId = focused.id
+      } else {
+        destinationWindowId = sourceTab.windowId
+      }
+    } catch (e) {
+      logger.debug(`Source tab ${sourceTabId} no longer exists, skipping relocation:`, e)
+      return
+    }
+
+    logger.debug(
+      `Relocating ${tabIds.length} popup tab(s) from window ${popupWindow.id} into source window ${destinationWindowId} (sourceTabId=${sourceTabId})`,
+    )
+    await chrome.tabs.move(tabIds, { windowId: destinationWindowId, index: -1 })
+    try {
+      await chrome.windows.remove(popupWindow.id)
+    } catch {
+      // Chrome may have already closed the empty popup window.
+    }
+    for (const tabId of tabIds) {
+      if (connectedTabs.has(tabId)) continue
+      try {
+        await connectTab(tabId)
+      } catch (e) {
+        logger.warn(`Failed to auto-connect relocated popup tab ${tabId}:`, e)
+      }
+    }
+  } catch (e) {
+    logger.warn('Failed to relocate popup window:', e)
   }
 })
 

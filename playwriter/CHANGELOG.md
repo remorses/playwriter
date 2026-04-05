@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.104
+
+1. **Executor logs new pages instead of unreachable popups**. Previously, when a page opened another via `window.open` or `target="_blank"`, the executor emitted `[WARNING] Popup window detected ... cannot be controlled by playwriter` and told the agent to retry. Paired with the extension 0.0.80 change (popups are auto-relocated to tabs in the source tab's window), the warning is now `[WARNING] New page opened from current page (index N, initial url: ...)` pointing the agent at the new tab to interact with it.
+2. **Minimum extension version check**. If the user has an outdated Playwriter extension (< 0.0.80) that doesn't support popup relocation, the CLI/MCP now emits a warning telling them to update the extension via `chrome://extensions`. The warning is also enqueued into the MCP agent's warning stream so the agent knows why popup behavior is broken.
+3. **Skill docs updated**. Removed the section instructing agents to use `cmd+click` (`{ modifiers: ['Meta'] }`) to work around popup windows during OAuth flows — the extension now handles this automatically. Added a short note under "working with pages" explaining popup auto-relocation.
+
 ## 0.0.103
 
 1. **Auto-returned Playwright handles are silently skipped** (#82). `await page.goto(url)` and similar single-expression code previously dumped the Playwright Response object, which is useless output — it's a programmatic handle, not display data. That same dump also leaked every process env var because `util.inspect` traversed `_connection._platform.env` at depth 4 (secrets, API keys, tokens). The CLI now skips return values that are Playwright handles (Response, Page, Browser, Request, Frame, BrowserContext, etc.) entirely. Return specific fields (`return response.url()`) or `console.log(response)` to see data.

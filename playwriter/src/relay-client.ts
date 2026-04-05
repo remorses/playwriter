@@ -173,6 +173,13 @@ export function compareVersions(v1: string, v2: string): number {
 }
 
 /**
+ * Minimum bundled playwriter version the CLI/MCP requires from the extension.
+ * Bump when a new extension-side capability is relied upon. 0.0.104 added
+ * popup-window relocation via chrome.windows.onCreated.
+ */
+const MIN_EXTENSION_PLAYWRITER_VERSION = '0.0.104'
+
+/**
  * Check if the running playwriter package is older than the version the extension was built with.
  * The extension bundles the playwriter version at build time. If the extension reports a newer
  * version, it means the user's CLI/MCP needs updating.
@@ -184,6 +191,9 @@ export function getExtensionOutdatedWarning(extensionPlaywriterVersion: string |
   }
   if (compareVersions(extensionPlaywriterVersion, VERSION) > 0) {
     return `Playwriter ${VERSION} is outdated (extension requires ${extensionPlaywriterVersion}). Run \`npm install -g playwriter@latest\` or update the playwriter package in your project.`
+  }
+  if (compareVersions(extensionPlaywriterVersion, MIN_EXTENSION_PLAYWRITER_VERSION) < 0) {
+    return `Playwriter extension is outdated (extension: ${extensionPlaywriterVersion}, CLI/MCP requires at least ${MIN_EXTENSION_PLAYWRITER_VERSION}). Update the Playwriter Chrome extension via chrome://extensions — without this update, popup windows opened via window.open will not be controllable.`
   }
   return null
 }

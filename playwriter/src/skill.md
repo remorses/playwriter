@@ -207,7 +207,7 @@ You can collaborate with the user - they can help with captchas, difficult eleme
 - **Clean up listeners**: call `state.page.removeAllListeners()` at end of message to prevent leaks
 - **CDP sessions**: use `getCDPSession({ page: state.page })` not `state.page.context().newCDPSession()` - NEVER use `newCDPSession()` method, it doesn't work through playwriter relay
 - **Wait for load**: use `state.page.waitForLoadState('domcontentloaded')` not `state.page.waitForEvent('load')` - waitForEvent times out if already loaded
-- **Minimize timeouts**: prefer proper waits (`waitForSelector`, `waitForPageLoad`) over `state.page.waitForTimeout()`. Short timeouts (1-2s) are acceptable for non-deterministic events like popups, animations, or tab opens where no specific selector is available
+- **Minimize timeouts**: prefer proper waits (`waitForSelector`, `waitForPageLoad`) over `state.page.waitForTimeout()`. Short timeouts (1-2s) are acceptable for non-deterministic events like animations, tab opens, or async UI updates where no specific selector is available
 - **Snapshot before screenshot**: always use `snapshot()` first to understand page state (text-based, fast, cheap). Only use `screenshot` when you specifically need visual/spatial information. Never take a screenshot just to check if a page loaded or to read text content — snapshot gives you that instantly without burning image tokens
 - **Snapshot replaces page.evaluate() for inspection**: do NOT write `page.evaluate()` calls to manually query class names, bounding boxes, child counts, or visibility flags. `snapshot()` already shows every interactive element with its text, role, and a ready-to-use locator. If you catch yourself writing `document.querySelector` or `getBoundingClientRect` inside evaluate — stop and use `snapshot()` instead. Reserve `page.evaluate()` for actions that modify page state (e.g., `localStorage.clear()`, scroll manipulation) or extract non-DOM data (e.g., `window.__CONFIG__`)
 
@@ -348,18 +348,15 @@ await snapshot({ page: state.page, search: /cookie|consent|accept/i }).then(cons
 ```
 
 **10. Login buttons that open popups**
-Playwriter cannot control popup windows. Use cmd+click to open in a new tab instead:
+Popup windows (`window.open` with features, OAuth buttons) are auto-relocated to tabs in the main window by the Playwriter extension. The new tab appears in `context.pages()` and is fully controllable. You will receive a `[WARNING] New page opened from current page (index N, initial url: ...)` message pointing to the new tab — the `initial url` may be `about:blank` for blank-then-scripted popups, so check `context.pages()[N].url()` for the final URL:
 
 ```js
-await state.page.locator('button:has-text("Login with Google")').click({ modifiers: ['Meta'] })
-await state.page.waitForTimeout(2000)
+await state.page.locator('button:has-text("Login with Google")').click()
+await state.page.waitForTimeout(1000)
 
-// Verify new tab opened - last page should be the login page
+// New tab is the last page in the context
 const pages = context.pages()
 const loginPage = pages[pages.length - 1]
-if (loginPage.url() === state.page.url()) {
-  throw new Error('Cmd+click did not open new tab - login may have opened as popup')
-}
 
 // Complete login flow in loginPage, cookies are shared with original page
 await loginPage.locator('[data-email]').first().click()
@@ -540,6 +537,10 @@ state.targetPage = pages[0]
 ```js
 context.pages().map((p) => p.url())
 ```
+
+**Popup windows become tabs automatically:**
+
+The extension intercepts Chrome popup windows (`window.open(url, '', 'width=...')`, OAuth login flows) and relocates them into the main window as regular tabs. You don't need cmd+click or `{ modifiers: ['Meta'] }` to avoid popups. When a page opens another, you receive a `[WARNING] New page opened from current page (index N, initial url: ...)` and can access it via `context.pages()[N]`.
 
 ## navigation
 
@@ -963,7 +964,7 @@ await state.page.locator('text=Login').dblclick()
 await state.page
   .locator('a')
   .first()
-  .click({ modifiers: ['Meta'] }) // cmd+click opens new tab
+  .click({ modifiers: ['Meta'] }) // cmd+click opens link in new background tab
 
 // By coordinates (when locators aren't available, e.g. canvas, maps, custom widgets)
 await state.page.mouse.click(450, 320) // left click

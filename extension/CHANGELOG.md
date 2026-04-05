@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.80
+
+### Changes
+
+- **Auto-relocate popup windows into the source tab's main window as tabs**: The extension now listens for `chrome.webNavigation.onCreatedNavigationTarget` to map every new tab to its source tab, and for `chrome.windows.onCreated` with `type === 'popup'` to relocate popups. When the popup was opened by a Playwriter-connected tab, the tab is moved into the source tab's window (at the end of the tab strip), the empty popup window is closed, and Playwriter auto-attaches so the tab appears in `context.pages()`. Focus is not stolen — the user's active tab stays active. When no Playwriter tab is connected to the source, the popup is left alone — unrelated sites keep normal Chrome popup behavior. Agents no longer need the `cmd+click` (`{ modifiers: ['Meta'] }`) workaround to control OAuth login flows.
+- **New `webNavigation` permission**: required to track source-tab → new-tab correlations. `chrome.tabs.Tab.openerTabId` is unreliable for popup-window tabs (Chromium 145 leaves it null), so the extension uses `webNavigation.onCreatedNavigationTarget` instead.
+- **connectTab is now tab-close-safe**: if a tab closes while `connectTab` is attaching to it, the error path no longer leaks a dead tab entry into `store.tabs`/badge/group sync state.
+
 ## 0.0.79
 
 ### Bug Fixes

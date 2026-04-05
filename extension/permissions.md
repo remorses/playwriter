@@ -32,6 +32,10 @@ In production, the extension functions perfectly without the tabs permission bec
 
 The build process (vite.config.mts) automatically removes this permission when TESTING environment variable is not set.
 
+### webNavigation
+
+Required to detect when one tab opens a new tab/window via `window.open`, `target="_blank"`, or similar navigation-triggered tab creation. The extension listens for `chrome.webNavigation.onCreatedNavigationTarget` to build a `new tab id → source tab id` mapping. When a Chrome popup window is created by a Playwriter-connected tab, the extension uses this mapping to know whether to relocate the popup into the source tab's main window so Playwright automation can control it. No URL or page content is collected — only tab-ID correlations.
+
 ### host_permissions (<all_urls>)
 
 Required to attach the debugger to tabs on any domain the user chooses to automate. This permission does not allow the extension to modify page content or inject scripts - it only enables CDP debugger attachment for automation. Users need this flexibility to test and automate workflows across all websites.
