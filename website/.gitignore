@@ -1,8 +1,8 @@
 node_modules
 /.cache
 /build
+/dist
 .env
-.react-router
 .DS_Store
 public/SKILL.md
 public/prompt.md

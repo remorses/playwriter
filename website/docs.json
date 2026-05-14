@@ -1,0 +1,54 @@
+{
+    "$schema": "https://unpkg.com/@holocron.so/vite/src/schema.json",
+  "name": "Playwriter",
+  "description": "Docs for Playwriter, the CLI and MCP that lets agents control your real Chrome browser.",
+  "logo": {
+    "light": "/playwriter-logo.svg",
+    "dark": "/playwriter-logo.svg",
+    "href": "/"
+  },
+  "favicon": {
+    "light": "/favicon-32.png",
+    "dark": "/favicon-32.png"
+  },
+  "colors": {
+    "primary": "#111827"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "pages": ["index"]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/remorses/playwriter"
+        },
+        {
+          "anchor": "Releases",
+          "href": "https://github.com/remorses/playwriter/releases"
+        }
+      ]
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Chrome Extension",
+        "href": "https://chromewebstore.google.com/detail/playwriter/jfeammnjpkecdekppnclgkkffahnhfhe"
+      }
+    ],
+    "primary": {
+      "label": "GitHub",
+      "href": "https://github.com/remorses/playwriter"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/remorses/playwriter"
+    }
+  }
+}

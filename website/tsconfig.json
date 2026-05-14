@@ -1,5 +1,5 @@
 {
-  "include": ["src"],
+  "include": ["vite.config.ts"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["vite/client", "@types/node"],
@@ -11,17 +11,8 @@
     "resolveJsonModule": true,
     "target": "ES2022",
     "strict": true,
-    "allowJs": true,
     "skipLibCheck": true,
-    "allowArbitraryExtensions": true,
-    "allowImportingTsExtensions": true,
-    "noImplicitAny": false,
-    "useUnknownInCatchVariables": false,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": {
-      "website/*": ["./*"]
-    },
     "noEmit": true
   }
 }

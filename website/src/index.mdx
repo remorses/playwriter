@@ -1,0 +1,136 @@
+---
+title: Playwriter
+description: Control your real Chrome browser with Playwright from an agent, CLI, or MCP server.
+prompt: |
+  read #holocron . migrate website to be a holocron docs website. using a mdx
+  page. remove all website only code. start from scratch, use template as
+  starting point. using playwriter as site name. only one page is fine too.
+  also read SKILL for how to write docs
+---
+
+<Hero className='my-16'>
+
+<h1 className='text-2xl my-3 font-semibold text-center'>Playwriter</h1>
+
+<p className='text-center text-balance'>Control your real Chrome browser with Playwright from an agent, CLI, or MCP server.</p>
+
+</Hero>
+
+<Aside>
+
+Playwriter is useful when a normal browser MCP fails because the site needs your
+cookies, extensions, login state, or a human nearby for captchas.
+
+</Aside>
+
+Playwriter connects agents to **your existing Chrome** instead of spawning a
+fresh browser. Your logins, cookies, extensions, and current tabs stay available,
+so automation works on the same browser you already use.
+
+<Bleed>
+  <Frame caption='Your browser, your session, with Playwright available to agents.'>
+    <img
+      src='/screenshot@2x.png'
+      alt='Playwriter controlling Chrome with accessibility labels overlay'
+      width={1280}
+      height={800}
+    />
+  </Frame>
+</Bleed>
+
+## Install
+
+Install the **Chrome extension**, then install the CLI.
+
+1. Install [Playwriter for Chrome](https://chromewebstore.google.com/detail/playwriter/jfeammnjpkecdekppnclgkkffahnhfhe)
+2. Click the extension icon on a tab. Green means the tab is connected
+3. Install the CLI
+
+```bash
+npm i -g playwriter
+```
+
+Install the **agent skill** so your coding agent knows how to use snapshots,
+stateful sessions, CDP helpers, screenshots, and recording.
+
+```bash
+npx -y skills add remorses/playwriter
+```
+
+## Quick start
+
+Create a **session**, then run Playwright code in that session. Session state is
+isolated, so multiple agents can work without sharing variables.
+
+```bash
+playwriter session new
+playwriter -s 1 -e 'await page.goto("https://example.com")'
+playwriter -s 1 -e 'console.log(await snapshot({ page }))'
+playwriter -s 1 -e 'await page.locator("aria-ref=e5").click()'
+```
+
+Use single quotes around `-e` code so your shell does not expand `$`, backticks,
+or backslashes before JavaScript sees them.
+
+## How it works
+
+The extension attaches to a tab with **chrome.debugger** and opens a WebSocket to
+a local relay on `localhost:19988`. The CLI and MCP connect to that relay and send
+Chrome DevTools Protocol commands through Playwright.
+
+```diagram
+┌───────────────────────┐       WebSocket       ┌──────────────────────┐
+│ Chrome tab            │◄─────────────────────►│ Local relay :19988   │
+│ extension enabled     │                       │ /extension + /cdp/id │
+└───────────┬───────────┘                       └──────────┬───────────┘
+            │ chrome.debugger                              │ Playwright CDP
+            ▼                                              ▼
+      Page DOM, network, JS                         CLI, MCP, agents
+```
+
+Nothing is sent to a hosted service by Playwriter. The relay is local, and the
+agent controls the same browser you can see.
+
+## Why it exists
+
+Other browser MCPs usually launch a **new Chrome**. That means no login state, no
+extensions, extra memory usage, and more bot detection. Playwriter keeps the
+browser human by using your real Chrome session.
+
+- **Logged-in sites:** fresh browser MCPs start logged out. Playwriter uses your cookies.
+- **Extensions:** fresh browser MCPs run without your extensions. Playwriter uses the ones already installed.
+- **Captchas:** fresh browser MCPs get stuck. With Playwriter, you can solve them in the shared browser.
+- **API surface:** fresh browser MCPs expose fixed tools. Playwriter exposes full Playwright.
+- **Debugging:** fresh browser MCPs are limited. Playwriter can use CDP, breakpoints, and network inspection.
+
+## Use snapshots first
+
+Accessibility **snapshots** are the main way agents inspect pages. They are text,
+small, and include locators that can be passed back to Playwright.
+
+```bash
+playwriter -s 1 -e 'console.log(await snapshot({ page }))'
+playwriter -s 1 -e 'await page.locator("aria-ref=e5").click()'
+```
+
+Use screenshots when spatial layout matters. Use snapshots for text, forms,
+buttons, links, and most page state checks.
+
+## Collaborate with agents
+
+Because Playwriter runs in **your browser**, you can help while the agent works.
+Solve captchas, dismiss cookie walls, log into accounts, or temporarily disable
+the extension on a tab and fix things manually.
+
+The agent can continue in the same session after you step in.
+
+```bash
+playwriter -s 1 -e 'state.page = page'
+playwriter -s 1 -e 'console.log(await state.page.title())'
+```
+
+## More resources
+
+- [GitHub repository](https://github.com/remorses/playwriter)
+- [Chrome Web Store extension](https://chromewebstore.google.com/detail/playwriter/jfeammnjpkecdekppnclgkkffahnhfhe)
+- [Release notes](https://github.com/remorses/playwriter/releases)

@@ -7,31 +7,16 @@
     "dev": "vite --port 8044",
     "typecheck": "tsc"
   },
-  "exports": {
-    "./*": "./*"
-  },
   "dependencies": {
-    "@orama/orama": "^3.1.18",
-    "@tailwindcss/typography": "^0.5.19",
-    "@types/prismjs": "^1.26.6",
-    "image-size": "^2.0.2",
-    "prismjs": "^1.30.0",
+    "@holocron.so/vite": "^0.7.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "safe-mdx": "^1.3.9",
-    "spiceflow": "1.18.0-rsc.22"
+    "spiceflow": "1.25.1-rsc.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.2.0",
-    "@types/mdast": "^4.0.4",
     "@types/node": "^25.0.3",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
-    "sharp": "^0.34.5",
-    "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "vite": "^8.0.3",
-    "vite-tsconfig-paths": "^6.0.3",
-    "vitest": "^4.0.16"
+    "vite": "^8.0.12"
   }
 }
