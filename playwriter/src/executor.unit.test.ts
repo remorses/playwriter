@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { shouldAutoReturn, wrapCode, isPlaywrightChannelOwner } from './executor.js'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { shouldAutoReturn, wrapCode, isPlaywrightChannelOwner, PlaywrightExecutor } from './executor.js'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('shouldAutoReturn', () => {
   it('returns true for simple expressions', () => {
@@ -164,5 +168,32 @@ describe('isPlaywrightChannelOwner', () => {
     expect(isPlaywrightChannelOwner({ _type: 'x', _guid: 'y' })).toBe(false)
     // _type must be a string
     expect(isPlaywrightChannelOwner({ _type: 123, _guid: 'y', _connection: {} })).toBe(false)
+  })
+})
+
+describe('PlaywrightExecutor relay auth', () => {
+  it('sends the relay token while checking extension status', async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ connected: true, activeTargets: 1, playwriterVersion: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const executor = new PlaywrightExecutor({
+      cdpConfig: { host: 'relay.example.test', port: 19988, token: 'secret-token' },
+      logger: { log: () => {}, error: () => {} },
+    })
+
+    const status = await (executor as any).checkExtensionStatus()
+
+    expect(status).toMatchObject({ connected: true, activeTargets: 1 })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://relay.example.test:19988/extension/status',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer secret-token' },
+      }),
+    )
   })
 })

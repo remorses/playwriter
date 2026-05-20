@@ -568,6 +568,11 @@ export class PlaywrightExecutor {
     })
   }
 
+  private relayAuthHeaders(): Record<string, string> {
+    const token = this.cdpConfig.token || process.env.PLAYWRITER_TOKEN
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  }
+
   private async checkExtensionStatus(): Promise<{
     connected: boolean
     activeTargets: number
@@ -576,13 +581,16 @@ export class PlaywrightExecutor {
     const { host = '127.0.0.1', port = 19988, extensionId } = this.cdpConfig
     const { httpBaseUrl } = parseRelayHost(host, port)
     const notConnected = { connected: false, activeTargets: 0, playwriterVersion: null }
+    const headers = this.relayAuthHeaders()
     try {
       if (extensionId) {
         const response = await fetch(`${httpBaseUrl}/extensions/status`, {
+          headers,
           signal: AbortSignal.timeout(2000),
         })
         if (!response.ok) {
           const fallback = await fetch(`${httpBaseUrl}/extension/status`, {
+            headers,
             signal: AbortSignal.timeout(2000),
           })
           if (!fallback.ok) {
@@ -616,6 +624,7 @@ export class PlaywrightExecutor {
       }
 
       const response = await fetch(`${httpBaseUrl}/extension/status`, {
+        headers,
         signal: AbortSignal.timeout(2000),
       })
       if (!response.ok) {
