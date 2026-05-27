@@ -103,11 +103,11 @@ EOF
 ```bash
 # build the extension dist for release
 cd extension && PRODUCTION=true PLAYWRITER_EXTENSION_DIST=dist-release pnpm build && cd ..
-rm -f extension.zip && cd extension && zip -r ../extension.zip dist-release && cd ..
+rm -f playwriter-*.zip && cd extension/dist-release && zip -r ../../playwriter-$(node -p "require('../manifest.json').version").zip . && cd ../..
 
-# create the release, uploading extension.zip as an asset
+# create the release, uploading the zip as an asset
 VERSION=$(node -p "require('./extension/manifest.json').version")
-gh release create "extension@$VERSION" extension.zip --title "Extension $VERSION" --latest=false --notes "$(cat <<'EOF'
+gh release create "extension@$VERSION" "playwriter-$VERSION.zip" --title "Extension $VERSION" --latest=false --notes "$(cat <<'EOF'
 paste changelog entries here
 EOF
 )"
