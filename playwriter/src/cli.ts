@@ -440,6 +440,7 @@ cli
           return opt.key === options.browser
         })
         if (!selected) {
+          handleCloudBrowserNotFound(options.browser)
           console.error(`Browser not found: ${options.browser}`)
           console.error('Available: ' + directOptions.map((opt) => opt.key).join(', '))
           process.exit(1)
@@ -490,6 +491,7 @@ cli
         if (options.browser) {
           const selected = allOptions.find((opt) => { return opt.key === options.browser })
           if (!selected) {
+            handleCloudBrowserNotFound(options.browser)
             console.error(`Browser not found: ${options.browser}`)
             console.error('Available: ' + allOptions.map((opt) => opt.key).join(', '))
             process.exit(1)
@@ -524,6 +526,9 @@ cli
         process.exit(1)
       }
 
+      if (options.browser) {
+        handleCloudBrowserNotFound(options.browser)
+      }
       console.error('No connected browsers detected. Click the Playwriter extension icon.')
       console.error(pc.dim('Tip: Use --direct to connect via Chrome DevTools Protocol instead.'))
       console.error(pc.dim('Tip: Run `playwriter cloud login` to use cloud browsers.'))
@@ -600,6 +605,7 @@ cli
         return opt.key === options.browser
       })
       if (!selected) {
+        handleCloudBrowserNotFound(options.browser)
         console.error(`Browser not found: ${options.browser}`)
         console.error('Available: ' + allOptions.map((opt) => opt.key).join(', '))
         process.exit(1)
@@ -756,6 +762,27 @@ function computeBlockProxyResources(options: { proxy?: string; customProxy?: str
   if (!proxyEnabled) return undefined // no proxy, no blocking needed
   if (options.disableProxyBandwidthAcceleration) return false
   return true
+}
+
+/** Check if user requested a cloud browser that isn't available.
+ *  Shows helpful login/subscribe instructions instead of a generic "not found" error. */
+function handleCloudBrowserNotFound(browserKey: string): boolean {
+  if (!browserKey.startsWith('cloud')) return false
+  const auth = loadCloudAuth()
+  if (!auth) {
+    console.error('Cloud browsers require authentication.')
+    console.error('')
+    console.error('  1. Run `playwriter cloud login` to authenticate with playwriter.dev')
+    console.error('  2. Subscribe at playwriter.dev/dashboard to get cloud browser sessions')
+    console.error('  3. Then run `playwriter session new --browser cloud` again')
+  } else {
+    console.error('No cloud browser sessions available.')
+    console.error('')
+    console.error('  You are logged in, but you may need an active subscription.')
+    console.error('  Run `playwriter cloud subscribe` to manage your plan.')
+    console.error('  Then run `playwriter session new --browser cloud` to start a cloud browser.')
+  }
+  process.exit(1)
 }
 
 function printCloudTip(): void {
