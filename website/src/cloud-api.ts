@@ -3,19 +3,19 @@
 // VM status is queried from Browser Use on demand (source of truth),
 // our D1 only stores the org → BU session ID mapping for multi-tenancy.
 
-import { env } from 'cloudflare:workers'
 import { Spiceflow, json } from 'spiceflow'
 import { z } from 'zod'
-import * as orm from 'drizzle-orm'
-import * as schema from 'db/schema'
 import { getDb, requireOrgSession } from './db.ts'
-import { BrowserUseClient, BrowserUseApiError } from './lib/browser-use.ts'
 import type { BrowserSession } from './lib/browser-use.ts'
-import { ACTIVE_SUBSCRIPTION_STATUSES } from './lib/billing-rules.ts'
-
-function getBrowserUse() {
-  return new BrowserUseClient({ apiKey: env.BROWSER_USE_API_KEY as string })
-}
+import {
+  getBrowserUse,
+  isPendingRow,
+  resolveActiveSession,
+  cleanupDeadSessions,
+  recordFinalCostAndDelete,
+  validateCloudAccess,
+  createCloudBrowserVM,
+} from './cloud-helpers.ts'
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -29,147 +29,6 @@ interface CloudSessionStatus {
   cdpUrl: string | null
   liveUrl: string | null
   timeoutAt: string
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-const PENDING_PREFIX = 'pending-'
-// Placeholder rows older than 2 minutes are considered stale (VM creation
-// should complete in under 60s). Fresh ones are counted as occupied slots.
-const PENDING_STALE_MS = 2 * 60_000
-
-function isPendingRow(row: typeof schema.cloudSession.$inferSelect): boolean {
-  return row.browserUseSessionId.startsWith(PENDING_PREFIX)
-}
-
-function isUniqueConstraintError(cause: unknown): boolean {
-  const message = cause instanceof Error ? cause.message : String(cause)
-  return message.includes('UNIQUE constraint failed') || message.includes('SQLITE_CONSTRAINT_UNIQUE')
-}
-
-async function claimCloudSessionSlot({
-  orgId,
-  maxSessions,
-}: {
-  orgId: string
-  maxSessions: number
-}): Promise<typeof schema.cloudSession.$inferSelect | null> {
-  const db = getDb()
-  for (let slotIndex = 1; slotIndex <= maxSessions; slotIndex++) {
-    const placeholderId = `${PENDING_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    try {
-      const [row] = await db
-        .insert(schema.cloudSession)
-        .values({
-          orgId,
-          slotIndex,
-          browserUseSessionId: placeholderId,
-        })
-        .returning()
-      if (row) return row
-    } catch (cause) {
-      if (isUniqueConstraintError(cause)) {
-        continue
-      }
-      throw new Error('Failed to claim cloud session slot', { cause })
-    }
-  }
-  return null
-}
-
-/** Check if a cloud session row represents an occupied slot.
- *  Returns true if occupied. Does NOT delete stale/dead rows itself;
- *  instead pushes their IDs into deadIds for the caller to batch-delete. */
-function checkSlotOccupied(
-  row: typeof schema.cloudSession.$inferSelect,
-  deadIds: string[],
-): 'occupied' | 'dead' | 'needs-api-check' {
-  if (isPendingRow(row)) {
-    if (Date.now() - row.createdAt < PENDING_STALE_MS) {
-      return 'occupied'
-    }
-    deadIds.push(row.id)
-    return 'dead'
-  }
-  return 'needs-api-check'
-}
-
-/** Parse Browser Use proxyCost string (e.g. "0.05") to integer cents. */
-function parseCostToCents(proxyCost: string): number {
-  const parsed = parseFloat(proxyCost)
-  if (Number.isNaN(parsed)) return 0
-  return Math.round(parsed * 100)
-}
-
-/** Record final proxy cost delta for a session being removed, then delete the row.
- *  Atomically increments org.proxySpendCents by the delta between the session's
- *  lastProxyCostCents baseline and the final BU proxyCost. If no BU session data
- *  is available (e.g. VM already gone), skips the cost update. */
-async function recordFinalCostAndDelete({
-  cloudSession,
-  buSession,
-  orgId,
-}: {
-  cloudSession: typeof schema.cloudSession.$inferSelect
-  buSession: BrowserSession | null
-  orgId: string
-}): Promise<void> {
-  const db = getDb()
-  const finalCostCents = buSession ? parseCostToCents(buSession.proxyCost) : 0
-  const deltaCents = Math.max(0, finalCostCents - cloudSession.lastProxyCostCents)
-
-  if (deltaCents > 0) {
-    // Atomic increment + delete in one batch to avoid partial state
-    await db.batch([
-      db.update(schema.org)
-        .set({
-          proxySpendCents: orm.sql`${schema.org.proxySpendCents} + ${deltaCents}`,
-          updatedAt: Date.now(),
-        })
-        .where(orm.eq(schema.org.id, orgId)),
-      db.delete(schema.cloudSession)
-        .where(orm.eq(schema.cloudSession.id, cloudSession.id)),
-    ])
-  } else {
-    await db.delete(schema.cloudSession)
-      .where(orm.eq(schema.cloudSession.id, cloudSession.id))
-  }
-}
-
-/** Check if a cloud session's BU VM is still alive. Returns null if dead.
- *  On confirmed 404: records final cost and pushes ID into deadIds for cleanup.
- *  On transient errors (500, network): leaves the row for next cron/status retry. */
-async function resolveActiveSession(
-  row: typeof schema.cloudSession.$inferSelect,
-  bu: BrowserUseClient,
-  deadIds: string[],
-): Promise<BrowserSession | null> {
-  try {
-    const vm = await bu.getBrowser(row.browserUseSessionId)
-    if (vm.status === 'active') {
-      return vm
-    }
-    // VM is stopped — record final cost and mark as dead
-    await recordFinalCostAndDelete({ cloudSession: row, buSession: vm, orgId: row.orgId })
-    deadIds.push(row.id)
-    return null
-  } catch (err) {
-    // Only treat confirmed 404 as dead. Transient errors (500, rate limit,
-    // network) leave the row intact so the next check can retry.
-    if (err instanceof BrowserUseApiError && err.status === 404) {
-      deadIds.push(row.id)
-    }
-    return null
-  }
-}
-
-/** Delete dead cloud session rows in one statement. Idempotent: concurrent
- *  requests deleting the same row is safe (DELETE by PK is a no-op if gone). */
-async function cleanupDeadSessions(deadIds: string[]): Promise<void> {
-  if (deadIds.length === 0) return
-  const db = getDb()
-  const uniqueIds = [...new Set(deadIds)]
-  await db.delete(schema.cloudSession).where(orm.inArray(schema.cloudSession.id, uniqueIds))
 }
 
 // ── Sub-app ─────────────────────────────────────────────────────────
@@ -246,153 +105,18 @@ export const cloudApp = new Spiceflow({ basePath: '/api/cloud' })
     async handler({ request }) {
       const { org } = await requireOrgSession(request)
       const body = await request.json()
-      const db = getDb()
-      const bu = getBrowserUse()
 
-      // Batch-read subscription + cloud sessions + org budget in one D1 round-trip.
-      const [activeSub, dbSessions, orgRow] = await db.batch([
-        db.query.subscription.findFirst({
-          where: {
-            orgId: org.id,
-            status: { in: [...ACTIVE_SUBSCRIPTION_STATUSES] },
-          },
-        }),
-        db.query.cloudSession.findMany({
-          where: { orgId: org.id },
-        }),
-        db.query.org.findFirst({
-          where: { id: org.id },
-          columns: { proxySpendCents: true, proxyBudgetCents: true, proxySpendPeriodStart: true },
-        }),
-      ] as const)
-      if (!activeSub) {
-        throw json(
-          { error: 'No active subscription. Run `playwriter cloud subscribe` to get started.' },
-          { status: 403 },
-        )
-      }
-
-      // Detect billing period rollover and reset spend if needed.
-      // This also handles the case where all sessions were killed by the cron
-      // (no active sessions = cron returns early = period never resets).
-      // Without this, the org would be permanently blocked after a period ends.
-      const periodRolledOver = activeSub.currentPeriodStart != null
-        && orgRow?.proxySpendPeriodStart !== activeSub.currentPeriodStart
-      let proxySpendCents = orgRow?.proxySpendCents ?? 0
-      if (periodRolledOver) {
-        proxySpendCents = 0
-        await db.update(schema.org)
-          .set({
-            proxySpendCents: 0,
-            proxySpendPeriodStart: activeSub.currentPeriodStart,
-            updatedAt: Date.now(),
-          })
-          .where(orm.eq(schema.org.id, org.id))
-      }
-
-      // Block new sessions if org exceeded their proxy spend budget
-      if (orgRow && proxySpendCents >= orgRow.proxyBudgetCents) {
-        const spentDollars = (proxySpendCents / 100).toFixed(2)
-        const budgetDollars = (orgRow.proxyBudgetCents / 100).toFixed(2)
-        throw json(
-          { error: `Proxy usage budget exceeded ($${spentDollars}/$${budgetDollars}). Contact support to increase your budget.` },
-          { status: 403 },
-        )
-      }
-
-      const maxSessions = activeSub.quantity
-      // Check each session, collecting dead IDs for batch cleanup.
-      // BU API checks run in parallel; stale pending rows are detected locally.
-      const deadIds: string[] = []
-      let freshPendingCount = 0
-      const buCheckRows: typeof dbSessions = []
-      for (const row of dbSessions) {
-        const status = checkSlotOccupied(row, deadIds)
-        if (status === 'occupied') {
-          freshPendingCount++
-        } else if (status === 'needs-api-check') {
-          buCheckRows.push(row)
-        }
-      }
-      const buResults = await Promise.all(
-        buCheckRows.map((row) => {
-          return resolveActiveSession(row, bu, deadIds)
-        }),
-      )
-      await cleanupDeadSessions(deadIds)
-      const buOccupied = buResults.filter(Boolean).length
-      const activeCount = freshPendingCount + buOccupied
-
-      if (activeCount >= maxSessions) {
-        throw json(
-          {
-            error: `Cloud session limit reached (${activeCount}/${maxSessions}). Stop an existing session or upgrade your subscription quantity.`,
-          },
-          { status: 403 },
-        )
-      }
-
-      // Claim a quota slot before creating the paid VM. The unique index on
-      // (orgId, slotIndex) makes this atomic under concurrent requests: only
-      // one request can own each subscription slot.
-      const cloudSession = await claimCloudSessionSlot({ orgId: org.id, maxSessions })
-      if (!cloudSession) {
-        throw json(
-          { error: `Cloud session limit reached. Stop an existing session or upgrade your subscription quantity.` },
-          { status: 403 },
-        )
-      }
-
-      // Now create the BU VM. If this fails, clean up the placeholder row.
-      let vm: BrowserSession
-      try {
-        vm = await bu.createBrowser({
-          // Proxy disabled by default to save cost. Pass --proxy <region> to enable.
-          proxyCountryCode: body.proxyRegion ?? null,
-          timeout: body.timeout ?? 60,
-          customProxy: body.customProxy,
-        })
-      } catch (cause) {
-        await db
-          .delete(schema.cloudSession)
-          .where(orm.eq(schema.cloudSession.id, cloudSession.id))
-          .limit(1)
-          .catch(() => {})
-        throw new Error('Failed to create cloud browser', { cause })
-      }
-
-      if (!vm.cdpUrl) {
-        // No CDP URL means the VM failed to start. Clean up both.
-        await bu.stopBrowser(vm.id).catch(() => {})
-        await db
-          .delete(schema.cloudSession)
-          .where(orm.eq(schema.cloudSession.id, cloudSession.id))
-          .limit(1)
-          .catch(() => {})
-        throw json(
-          { error: 'Browser Use returned no CDP URL. The VM may have failed to start.' },
-          { status: 502 },
-        )
-      }
-
-      // Update the placeholder with the real BU session ID.
-      // Verify the row still exists (wasn't deleted by a concurrent stale cleanup).
-      const updateResult = await db
-        .update(schema.cloudSession)
-        .set({ browserUseSessionId: vm.id })
-        .where(orm.eq(schema.cloudSession.id, cloudSession.id))
-        .limit(1)
-        .returning()
-
-      if (!updateResult.length) {
-        // Our placeholder was deleted (e.g. by a concurrent stale cleanup).
-        // Stop the VM since our slot is gone.
-        await bu.stopBrowser(vm.id).catch(() => {})
-        throw new Error('Cloud session slot was reclaimed during VM creation')
-      }
+      const { maxSessions } = await validateCloudAccess({ orgId: org.id })
+      const vm = await createCloudBrowserVM({
+        orgId: org.id,
+        maxSessions,
+        proxyRegion: body.proxyRegion,
+        timeout: body.timeout,
+        customProxy: body.customProxy,
+      })
 
       return {
-        cloudSessionId: cloudSession.id,
+        cloudSessionId: vm.cloudSessionId,
         cdpUrl: vm.cdpUrl,
         liveUrl: vm.liveUrl,
         timeoutAt: vm.timeoutAt,

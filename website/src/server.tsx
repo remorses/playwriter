@@ -12,6 +12,7 @@ import { app as holocronApp } from '@holocron.so/vite/app'
 import { getAuth, getBaseUrl, getSession, requireSession, ensureOrg, getOrgSubscription, getOrgWithSubscription, listUserApiKeys } from './db.ts'
 import { normalizeAuthRedirectPath } from './auth-redirect.ts'
 import { cloudApp } from './cloud-api.ts'
+import { handleCdpProxy } from './cdp-proxy.ts'
 import { stripeWebhookApp } from './stripe-webhook.ts'
 import { approveDevice, denyDevice, createApiKey, revokeApiKey } from './actions.tsx'
 import { enforceProxyBudgets } from './scheduled.ts'
@@ -279,6 +280,12 @@ declare module 'spiceflow/react' {
 
 export default {
   async fetch(request: Request): Promise<Response> {
+    // Handle CDP WebSocket proxy before Spiceflow routing.
+    // WebSocket upgrades to /cdp/* are intercepted here because Spiceflow
+    // doesn't handle WebSocket protocol upgrades.
+    const cdpResponse = await handleCdpProxy(request)
+    if (cdpResponse) return cdpResponse
+
     return app.handle(request)
   },
   async scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {

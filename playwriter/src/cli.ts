@@ -872,7 +872,9 @@ function parseCloudTimeout(value: string | undefined): number | undefined {
   return timeout
 }
 
-/** Connect to a cloud browser and create a playwriter session via the relay. */
+/** Connect to a cloud browser and create a playwriter session via the relay.
+ *  Uses the CDP proxy at playwriter.dev/cdp/new — the proxy handles VM creation,
+ *  billing, and quota enforcement. The relay just connects to a WSS URL. */
 async function createCloudSession({
   serverUrl,
   proxyRegion,
@@ -895,6 +897,57 @@ async function createCloudSession({
     throw new Error('Not logged in to cloud. Run `playwriter cloud login` first.')
   }
 
+  // Custom proxy requires the old HTTP API path since it has structured params
+  if (customProxy) {
+    return createCloudSessionViaApi({ client, serverUrl, proxyRegion, customProxy, timeout, blockProxyResources, token })
+  }
+
+  // Build the CDP proxy WSS URL. The proxy at playwriter.dev creates the BU VM
+  // on WebSocket connect, so no separate HTTP call is needed.
+  const cdpEndpoint = client.getCdpProxyUrl({ proxyRegion, timeout })
+
+  const cwd = process.cwd()
+  const response = await fetch(`${serverUrl}/cli/session/new`, {
+    method: 'POST',
+    headers: buildAuthHeaders({ token, json: true }),
+    body: JSON.stringify({
+      cdpEndpoint,
+      cwd,
+      browser: 'Chromium (cloud)',
+      cloud: { blockProxyResources },
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`${response.status} ${text}`)
+  }
+  const result = (await response.json()) as { id: string }
+
+  // liveUrl is not available via the proxy path (VM info isn't returned).
+  // Users can check `playwriter cloud status` for the live view URL.
+  return { id: result.id, liveUrl: null }
+}
+
+/** Fallback for custom proxy: uses the old HTTP API path since custom proxy
+ *  has structured params that can't be encoded in a query string. */
+async function createCloudSessionViaApi({
+  client,
+  serverUrl,
+  proxyRegion,
+  customProxy,
+  timeout,
+  blockProxyResources,
+  token,
+}: {
+  client: CloudClient
+  serverUrl: string
+  proxyRegion?: string
+  customProxy?: string
+  timeout?: number
+  blockProxyResources?: boolean
+  token?: string
+}): Promise<{ id: string; liveUrl: string | null }> {
   const connectResult = await client.connect({
     proxyRegion,
     customProxy: customProxy ? parseCustomProxy(customProxy) : undefined,
@@ -905,11 +958,7 @@ async function createCloudSession({
     throw new Error('Cloud browser returned no CDP URL. The VM may have failed to start.')
   }
 
-  // Normalize https:// CDP URL to wss:// for the relay
   const cdpEndpoint = await resolveDirectInput(connectResult.cdpUrl)
-
-  // Create a playwriter session via the relay using the CDP URL (same as --direct).
-  // Also pass cloud metadata so the relay can track idle timeout and auto-disconnect.
   const auth = loadCloudAuth()!
   const cwd = process.cwd()
   let response: Response
@@ -931,7 +980,6 @@ async function createCloudSession({
       }),
     })
   } catch (cause) {
-    // Relay session creation failed — stop the cloud VM so we don't leak a paid resource
     await client.disconnect(connectResult.cloudSessionId).catch(() => {})
     throw new Error('Failed to create relay session', { cause })
   }
@@ -947,7 +995,7 @@ async function createCloudSession({
 }
 
 /** Reattach to an existing running cloud browser VM instead of creating a new one.
- *  Fetches the session's cdpUrl from the cloud API and creates a relay session. */
+ *  Uses the CDP proxy reconnect URL to avoid direct BU connection. */
 async function attachExistingCloudSession({
   serverUrl,
   cloudSessionId,
@@ -964,16 +1012,8 @@ async function attachExistingCloudSession({
     throw new Error('Not logged in to cloud. Run `playwriter cloud login` first.')
   }
 
-  const session = await client.getSessionStatus(cloudSessionId)
-  if (!session || session.status !== 'active') {
-    throw new Error('Cloud session is no longer active. It may have timed out.')
-  }
-  if (!session.cdpUrl) {
-    throw new Error('Cloud session has no CDP URL available.')
-  }
-
-  const cdpEndpoint = await resolveDirectInput(session.cdpUrl)
-  const auth = loadCloudAuth()!
+  // Use the CDP proxy reconnect URL. The proxy resolves the BU cdpUrl on connect.
+  const cdpEndpoint = client.getCdpReconnectUrl(cloudSessionId)
   const cwd = process.cwd()
 
   const response = await fetch(`${serverUrl}/cli/session/new`, {
@@ -983,13 +1023,7 @@ async function attachExistingCloudSession({
       cdpEndpoint,
       cwd,
       browser: 'Chromium (cloud)',
-      cloud: {
-        cloudSessionId,
-        cloudBaseUrl: auth.baseUrl,
-        cloudToken: auth.token,
-        timeoutAt: session.timeoutAt,
-        blockProxyResources,
-      },
+      cloud: { blockProxyResources },
     }),
   })
 
@@ -999,7 +1033,8 @@ async function attachExistingCloudSession({
   }
   const result = (await response.json()) as { id: string }
 
-  return { id: result.id, liveUrl: session.liveUrl }
+  // liveUrl not available via proxy path; use `playwriter cloud status` instead
+  return { id: result.id, liveUrl: null }
 }
 
 function printBrowserTable(options: BrowserOption[]): void {

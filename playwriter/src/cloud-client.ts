@@ -151,6 +151,34 @@ export class CloudClient {
       return s.cloudSessionId === cloudSessionId
     }) ?? null
   }
+
+  /** Build a CDP proxy WebSocket URL for auto-creating a new cloud browser.
+   *  The URL includes auth token so the proxy can authenticate the upgrade.
+   *  No HTTP call is made; the VM is created lazily on WebSocket connect. */
+  getCdpProxyUrl(options?: {
+    proxyRegion?: string
+    timeout?: number
+  }): string {
+    const url = new URL('/cdp/new', this.baseUrl)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.searchParams.set('token', this.token)
+    if (options?.timeout) {
+      url.searchParams.set('timeout', String(options.timeout))
+    }
+    if (options?.proxyRegion) {
+      url.searchParams.set('proxy', options.proxyRegion)
+    }
+    return url.toString()
+  }
+
+  /** Build a CDP proxy WebSocket URL for reconnecting to an existing session.
+   *  No HTTP call is made; the proxy resolves the BU cdpUrl on connect. */
+  getCdpReconnectUrl(cloudSessionId: string): string {
+    const url = new URL(`/cdp/${cloudSessionId}`, this.baseUrl)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.searchParams.set('token', this.token)
+    return url.toString()
+  }
 }
 
 /** Create a CloudClient from saved auth, or null if not logged in. */

@@ -2035,8 +2035,11 @@ export async function startPlayWriterCDPRelayServer({
       })
       const metadata = executor.getSessionMetadata()
 
-      // Register cloud session tracking if cloud metadata was provided
-      if (body.cloud) {
+      // Register cloud session tracking only when full cloud metadata is provided
+      // (cloudSessionId + cloudBaseUrl + cloudToken). The CDP proxy path sends
+      // cloud: { blockProxyResources } without these fields, meaning the proxy
+      // handles VM lifecycle — no relay-side tracking needed.
+      if (body.cloud?.cloudSessionId && body.cloud.cloudBaseUrl && body.cloud.cloudToken) {
         cloudSessionTracking.set(sessionId, {
           cloudSessionId: body.cloud.cloudSessionId,
           cloudBaseUrl: body.cloud.cloudBaseUrl,
