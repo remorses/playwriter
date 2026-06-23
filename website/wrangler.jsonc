@@ -5,6 +5,7 @@
   "workers_dev": true,
   "compatibility_date": "2026-06-14",
   "compatibility_flags": ["nodejs_compat"],
+  "placement": { "mode": "smart" },
 
   // ── Production (top-level) ──────────────────────────────────────────
   "d1_databases": [
