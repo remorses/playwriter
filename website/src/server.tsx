@@ -8,10 +8,8 @@ import './globals.css'
 import { Spiceflow, redirect, json } from 'spiceflow'
 import { router } from 'spiceflow/react'
 import { z } from 'zod'
-import * as orm from 'drizzle-orm'
-import * as schema from 'db/schema'
 import { app as holocronApp } from '@holocron.so/vite/app'
-import { getAuth, getBaseUrl, getSession, requireSession, ensureOrg, getOrgSubscription, getOrgWithSubscription, listUserApiKeys, getDb } from './db.ts'
+import { getAuth, getBaseUrl, getSession, requireSession, ensureOrg, getOrgSubscription, getOrgWithSubscription, listUserApiKeys } from './db.ts'
 import { normalizeAuthRedirectPath } from './auth-redirect.ts'
 import { cloudApp } from './cloud-api.ts'
 import { stripeWebhookApp } from './stripe-webhook.ts'
@@ -51,76 +49,12 @@ async function createGoogleSignInRedirect(request: Pick<Request, 'headers'>, cal
   return redirectResponse
 }
 
-// Custom device/token handler: replaces better-auth's built-in endpoint because
-// the drizzle adapter doesn't implement `consumeOne` which the device plugin requires.
-// Same logic as better-auth's deviceToken route: find approved device code → delete → create session.
-async function handleDeviceToken(request: Request) {
-  const body = await request.json() as {
-    grant_type?: string
-    device_code?: string
-    client_id?: string
-  }
-  if (body.grant_type !== 'urn:ietf:params:oauth:grant-type:device_code' || !body.device_code || !body.client_id) {
-    return json({ error: 'invalid_request', error_description: 'Missing required fields' }, { status: 400 })
-  }
-  const db = getDb()
-  const deviceRecord = await db.query.deviceCode.findFirst({
-    where: { deviceCode: body.device_code },
-  })
-  if (!deviceRecord) {
-    return json({ error: 'invalid_grant', error_description: 'Invalid device code' }, { status: 400 })
-  }
-  if (deviceRecord.clientId && deviceRecord.clientId !== body.client_id) {
-    return json({ error: 'invalid_grant', error_description: 'Client ID mismatch' }, { status: 400 })
-  }
-  if (deviceRecord.expiresAt < Date.now()) {
-    await db.delete(schema.deviceCode).where(orm.eq(schema.deviceCode.id, deviceRecord.id))
-    return json({ error: 'expired_token', error_description: 'Device code has expired' }, { status: 400 })
-  }
-  if (deviceRecord.status === 'pending') {
-    return json({ error: 'authorization_pending', error_description: 'Authorization pending' }, { status: 400 })
-  }
-  if (deviceRecord.status === 'denied') {
-    await db.delete(schema.deviceCode).where(orm.eq(schema.deviceCode.id, deviceRecord.id))
-    return json({ error: 'access_denied', error_description: 'User denied authorization' }, { status: 400 })
-  }
-  if (deviceRecord.status === 'approved' && deviceRecord.userId) {
-    await db.delete(schema.deviceCode).where(orm.eq(schema.deviceCode.id, deviceRecord.id))
-    const user = await db.query.user.findFirst({ where: { id: deviceRecord.userId } })
-    if (!user) {
-      return json({ error: 'server_error', error_description: 'User not found' }, { status: 500 })
-    }
-    const sessionToken = crypto.randomUUID()
-    const expiresAt = Date.now() + 60 * 60 * 24 * 365 * 1000 // 1 year
-    await db.insert(schema.session).values({
-      userId: user.id,
-      token: sessionToken,
-      expiresAt,
-    })
-    return json({
-      access_token: sessionToken,
-      token_type: 'Bearer',
-      expires_in: 60 * 60 * 24 * 365,
-      scope: deviceRecord.scope || '',
-    }, {
-      status: 200,
-      headers: { 'Cache-Control': 'no-store', Pragma: 'no-cache' },
-    })
-  }
-  return json({ error: 'server_error', error_description: 'Invalid device code status' }, { status: 500 })
-}
-
 // ── Main app ────────────────────────────────────────────────────────
 
 export const app = new Spiceflow()
 
-  // Auth middleware: intercept /api/auth/* and forward to better-auth.
-  // Device token endpoint is handled here directly because the drizzle adapter
-  // doesn't implement `consumeOne` which better-auth's device plugin requires.
+  // Auth middleware: intercept /api/auth/* and forward to better-auth
   .use(async ({ request }, next) => {
-    if (request.parsedUrl.pathname === '/api/auth/device/token' && request.method === 'POST') {
-      return handleDeviceToken(request)
-    }
     if (request.parsedUrl.pathname.startsWith('/api/auth')) {
       const auth = getAuth()
       const res = await auth.handler(request)
@@ -278,22 +212,6 @@ export const app = new Spiceflow()
         )
       }
 
-      // Query device code directly from DB. We can't use auth.api.deviceVerify because
-      // the better-auth drizzle adapter doesn't implement `consumeOne` or `incrementOne`,
-      // which the device authorization plugin's verify/approve/token endpoints depend on.
-      const cleanUserCode = userCode.replaceAll('-', '')
-      const db = getDb()
-      const device = await db.query.deviceCode.findFirst({ where: { userCode: cleanUserCode } })
-
-      if (!device || device.expiresAt < Date.now()) {
-        return (
-          <AuthPage
-            title="Invalid Device Code"
-            description="That device code is invalid or expired. Start the CLI login flow again."
-          />
-        )
-      }
-
       const session = await getSession(request)
       if (!session) {
         throw redirect(
@@ -303,23 +221,21 @@ export const app = new Spiceflow()
         )
       }
 
-      if (device.userId && device.userId !== session.userId) {
+      // deviceVerify validates the code AND claims it for the authenticated session.
+      // MUST pass request.headers so better-auth links the device code to this user.
+      const auth = getAuth()
+      const device = await auth.api.deviceVerify({
+        query: { user_code: userCode },
+        headers: request.headers,
+      }).catch(() => null)
+
+      if (!device) {
         return (
           <AuthPage
-            title="Device Code Claimed"
-            description="That device code is already linked to a different account. Start the CLI login flow again."
+            title="Invalid Device Code"
+            description="That device code is invalid or expired. Start the CLI login flow again."
           />
         )
-      }
-
-      // Claim the device code for this user so approve/deny can validate ownership
-      if (!device.userId) {
-        await db.update(schema.deviceCode)
-          .set({ userId: session.userId })
-          .where(orm.and(
-            orm.eq(schema.deviceCode.id, device.id),
-            orm.eq(schema.deviceCode.status, 'pending'),
-          ))
       }
 
       const { DeviceActionButtons } = await import('./components/device-action-buttons.tsx')

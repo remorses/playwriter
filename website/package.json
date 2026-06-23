@@ -22,7 +22,7 @@
     "@cloudflare/vite-plugin": "^1.42.1",
     "@holocron.so/vite": "^0.21.0",
     "better-auth": "^1.6.20",
-    "better-auth-drizzle-adapter": "^1.0.4",
+    "better-auth-drizzle-adapter": "^1.0.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "db": "workspace:^",

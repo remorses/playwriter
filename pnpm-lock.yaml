@@ -462,8 +462,8 @@ importers:
         specifier: ^1.6.20
         version: 1.6.20(@opentelemetry/api@1.9.0)(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.0.8)
       better-auth-drizzle-adapter:
-        specifier: ^1.0.4
-        version: 1.0.4(better-auth@1.6.20(@opentelemetry/api@1.9.0)(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.0.8))(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))
+        specifier: ^1.0.5
+        version: 1.0.5(better-auth@1.6.20(@opentelemetry/api@1.9.0)(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.0.8))(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -3729,8 +3729,8 @@ packages:
   before-after-hook@2.2.3:
     resolution: {integrity: sha512-NzUnlZexiaH/46WDhANlyR2bXRopNg4F/zuSA3OpZnllCUgRaOF2znDioDWrmbNVsuZk6l9pMquQB38cfBZwkQ==}
 
-  better-auth-drizzle-adapter@1.0.4:
-    resolution: {integrity: sha512-GEGuIFmOUEKMVaqU2CeYJvwKDDUGQwrccRNu0h2Dtg+GypHxu7Jn9z/AMnUJ/++Or9As6WDvN6lWENbsWxRRdQ==}
+  better-auth-drizzle-adapter@1.0.5:
+    resolution: {integrity: sha512-C0Rtty8RsnQIIsvTJU3gVJaxofTa83iJnUz3ym5xRM2y61GN85l/l+G4bRURbN/hMvqD8BnWhww++A7/cZRMgw==}
     peerDependencies:
       better-auth: '>=1.6.0'
       drizzle-orm: '>=1.0.0-beta.1'
@@ -11076,7 +11076,6 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: 7.3.3(@types/node@25.2.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.20.6)(yaml@2.9.0)
-    optional: true
 
   '@vitest/mocker@4.0.8(vite@7.3.3(@types/node@25.9.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.20.6)(yaml@2.9.0))':
     dependencies:
@@ -11112,7 +11111,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.16
       tinyrainbow: 3.0.3
-      vitest: 4.0.8(@types/debug@4.1.13)(@types/node@24.10.1)(@vitest/ui@4.0.8)(jiti@2.7.0)(jsdom@27.2.0(bufferutil@4.0.9))(lightningcss@1.32.0)(tsx@4.20.6)(yaml@2.9.0)
+      vitest: 4.0.8(@types/debug@4.1.13)(@types/node@25.2.0)(@vitest/ui@4.0.8)(jiti@2.7.0)(jsdom@27.2.0(bufferutil@4.0.9))(lightningcss@1.32.0)(tsx@4.20.6)(yaml@2.9.0)
 
   '@vitest/utils@4.0.8':
     dependencies:
@@ -11353,7 +11352,7 @@ snapshots:
 
   before-after-hook@2.2.3: {}
 
-  better-auth-drizzle-adapter@1.0.4(better-auth@1.6.20(@opentelemetry/api@1.9.0)(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.0.8))(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3)):
+  better-auth-drizzle-adapter@1.0.5(better-auth@1.6.20(@opentelemetry/api@1.9.0)(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.0.8))(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3)):
     dependencies:
       better-auth: 1.6.20(@opentelemetry/api@1.9.0)(drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.0.8)
       drizzle-orm: 1.0.0-beta.22(@opentelemetry/api@1.9.0)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.4.3)
@@ -16029,7 +16028,6 @@ snapshots:
       lightningcss: 1.32.0
       tsx: 4.20.6
       yaml: 2.9.0
-    optional: true
 
   vite@7.3.3(@types/node@25.9.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.20.6)(yaml@2.9.0):
     dependencies:
@@ -16177,7 +16175,6 @@ snapshots:
       - terser
       - tsx
       - yaml
-    optional: true
 
   vitest@4.0.8(@types/debug@4.1.13)(@types/node@25.9.4)(@vitest/ui@4.0.8)(jiti@2.7.0)(jsdom@27.2.0(bufferutil@4.0.9))(lightningcss@1.32.0)(tsx@4.20.6)(yaml@2.9.0):
     dependencies:

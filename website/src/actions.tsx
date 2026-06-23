@@ -5,8 +5,6 @@
 import { getActionRequest, parseFormData, redirect } from 'spiceflow'
 import { router } from 'spiceflow/react'
 import { z } from 'zod'
-import * as orm from 'drizzle-orm'
-import * as schema from 'db/schema'
 import { getAuth, getBaseUrl, requireSession, requireOrgSession, getOrgSubscription, getDb } from './db.ts'
 import { getOrCreateStripeCustomer, getCloudPriceId, getStripe, hasExistingStripeSubscription } from './lib/stripe.ts'
 import type { BillingInterval } from './lib/billing-rules.ts'
@@ -17,44 +15,20 @@ const deviceUserCodeSchema = z.object({ userCode: z.string().min(1) })
 
 export async function approveDevice(formData: FormData) {
   const actionRequest = getActionRequest()
-  const session = await requireSession(actionRequest)
+  await requireSession(actionRequest)
   const { userCode } = parseFormData(deviceUserCodeSchema, formData)
-  await updateDeviceAuthorization({ userCode, userId: session.userId, status: 'approved' })
+  const auth = getAuth()
+  await auth.api.deviceApprove({ body: { userCode }, headers: actionRequest.headers })
   throw redirect(router.href('/device', { user_code: userCode, status: 'approved' }))
 }
 
 export async function denyDevice(formData: FormData) {
   const actionRequest = getActionRequest()
-  const session = await requireSession(actionRequest)
+  await requireSession(actionRequest)
   const { userCode } = parseFormData(deviceUserCodeSchema, formData)
-  await updateDeviceAuthorization({ userCode, userId: session.userId, status: 'denied' })
+  const auth = getAuth()
+  await auth.api.deviceDeny({ body: { userCode }, headers: actionRequest.headers })
   throw redirect(router.href('/device', { user_code: userCode, status: 'denied' }))
-}
-
-// Direct DB update instead of auth.api.deviceApprove/deviceDeny.
-// The better-auth drizzle adapter doesn't implement `consumeOne` or `incrementOne`,
-// which the device authorization plugin's verify/approve/token endpoints depend on.
-// Using direct DB queries ensures the device flow works with our adapter.
-async function updateDeviceAuthorization({ userCode, userId, status }: {
-  userCode: string
-  userId: string
-  status: 'approved' | 'denied'
-}) {
-  const cleanUserCode = userCode.replaceAll('-', '')
-  const db = getDb()
-  const device = await db.query.deviceCode.findFirst({ where: { userCode: cleanUserCode } })
-  if (!device || device.expiresAt < Date.now()) {
-    throw new Error('Device code is invalid or expired')
-  }
-  if (device.status !== 'pending') {
-    throw new Error('Device code was already processed')
-  }
-  if (device.userId && device.userId !== userId) {
-    throw new Error('Device code belongs to a different account')
-  }
-  await db.update(schema.deviceCode)
-    .set({ status, userId })
-    .where(orm.eq(schema.deviceCode.id, device.id))
 }
 
 // ── API Key actions (used by /dashboard API key panel) ──────────────
