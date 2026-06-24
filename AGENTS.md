@@ -215,6 +215,15 @@ cloud browser sessions use the Browser Use hosted Chromium API. before editing c
 
 our typed client lives in `website/src/lib/browser-use.ts` and only uses the `/browsers` endpoints (create, get, stop, list). we do not use the agent/sessions endpoints; we connect via CDP directly.
 
+## D1 query optimization
+
+D1 queries are slow, especially writes. minimize the number of D1 round trips in every code path. use `db.batch()` to combine multiple reads or writes into a single round trip wherever possible. never add a separate D1 write when you can piggyback it onto an existing batch call.
+
+when reviewing or writing cloud-api, scheduled, or any website code that touches D1:
+- count the number of D1 round trips per request and document them in comments
+- prefer batching N statements into 1 `db.batch()` call over N individual queries
+- if adding a new column/field that needs updating, find an existing write to batch it with instead of adding a new one
+
 ## changesets
 
 this repo uses Changesets for public package release notes and version bumps.
