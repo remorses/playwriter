@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.0
+
+1. **Cloud browser sessions via Browser Use** — spin up stealth Chromium VMs in the cloud with `playwriter session new --browser cloud`. Cloud browsers support residential proxies (`--proxy us`, `--proxy de`), custom proxies (`--custom-proxy host:port`), and configurable timeouts (`--timeout 120`). Idle sessions auto-disconnect after 10 minutes.
+
+   New CLI commands for cloud management:
+   ```bash
+   playwriter cloud login       # authenticate via device flow
+   playwriter cloud status      # list active cloud VMs
+   playwriter cloud subscribe   # open subscription page
+   playwriter cloud live        # open live browser view
+   ```
+
+   Selecting a running cloud session (`cloud-1`, `cloud-2`) reattaches to the existing VM instead of creating a new one.
+
+2. **Headless browser mode** — run without the extension or a visible browser:
+   ```bash
+   playwriter browser install                    # download Chrome for Testing
+   playwriter session new --browser headless      # launch headless Chrome
+   playwriter -s 1 -e "await page.goto('https://example.com')"
+   ```
+
+   Multiple sessions share the same Chrome process. Each session gets its own isolated context. Recording is not available in headless mode.
+
+3. **API key authentication for cloud browsers** — skip the interactive device flow in CI and headless environments:
+   ```bash
+   export PLAYWRITER_API_KEY=pw_xxxxx
+   playwriter session new --browser cloud
+   ```
+
+   Create and revoke keys at https://playwriter.dev/dashboard. Authentication priority: `PLAYWRITER_API_KEY` env var, then `PLAYWRITER_CLOUD_TOKEN` env var, then `~/.playwriter/auth.json`.
+
+4. **Fixed relay routing across Chrome profiles** — the relay now identifies extension connections by per-profile install id before falling back to account identity, so two profiles signed into the same Google account no longer replace each other's relay connection. `context.newPage()` and `Target.createTarget` route to the intended browser profile.
+
+5. **Fixed cloud billing race conditions** — concurrent `playwriter session new --browser cloud` requests now use durable per-org slot claims, preventing over-provisioning beyond the subscribed session quantity. Stripe Checkout also verifies Stripe directly before creating subscriptions, avoiding duplicates while webhook delivery is pending.
+
+6. **Fixed `playwriter cloud login`** — the CLI now uses Better Auth's current device authorization endpoints (`/api/auth/device/code`, `/api/auth/device/token`) so cloud browsers appear after approving the login.
+
 ## 0.3.1
 
 1. **Auto-page creation enabled by default** — MCP and CLI sessions now automatically create a blank Playwriter-enabled tab when no targets are available, so agents can start working immediately without manual tab setup. Set `PLAYWRITER_AUTO_ENABLE=false` to disable.

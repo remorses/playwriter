@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.97
+
+### Changes
+
+- **10s timeout for CDP init commands** — frozen or hibernated tabs (common in Ghost Browser and other Chromium forks) no longer block the entire Playwright connection setup. Init commands like `Page.enable`, `Runtime.enable`, and `Network.enable` time out individually after 10 seconds instead of hanging for 30 seconds each.
+- **Multi-profile relay routing** — extension connections are now identified by a per-profile install id before falling back to Google account identity. Two Chrome profiles signed into the same account no longer replace each other's relay connection. New tabs are created in the window where the extension was activated.
+- **Better browser name detection** — `playwriter session new` shows more specific browser names using full user-agent client hints.
+
 ## 0.0.93
 
 ### Changes
