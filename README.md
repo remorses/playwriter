@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fremorses%2Fplaywriter.svg)](https://mcptoplist.com/server/glama%2Fremorses%2Fplaywriter)
+
 <div align='center'>
     <br/>
     <picture>
