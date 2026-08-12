@@ -1,13 +1,289 @@
 import { describe, expect, it } from 'vitest'
+import type { Page } from '@xmorse/playwright-core'
 import type { Protocol } from 'devtools-protocol'
 import {
   buildRawSnapshotTree,
   buildSnapshotLines,
+  ensureSnapshotDomainsEnabled,
   filterFullSnapshotTree,
   filterInteractiveSnapshotTree,
   finalizeSnapshotOutput,
+  getAriaSnapshot,
   type SnapshotNode,
 } from './aria-snapshot.js'
+import type { ICDPSession } from './cdp-session.js'
+
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
+const nextTurn = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+describe('aria-snapshot CDP setup', () => {
+  it('keeps DOM enabled but re-enables accessibility for each snapshot', async () => {
+    const calls: string[] = []
+    const session = {
+      send: async (method: string) => {
+        calls.push(method)
+        return {}
+      },
+    } as unknown as ICDPSession
+    const page = {} as Page
+
+    await ensureSnapshotDomainsEnabled({ cacheKey: page, session, sessionId: null })
+    await ensureSnapshotDomainsEnabled({ cacheKey: page, session, sessionId: null })
+
+    expect(calls).toEqual(['DOM.enable', 'Accessibility.enable', 'Accessibility.enable'])
+  })
+
+  it('coalesces concurrent DOM setup and retries it after rejection', async () => {
+    const firstDomEnable = deferred<void>()
+    let domEnableCalls = 0
+    const session = {
+      send: async (method: string) => {
+        if (method === 'DOM.enable') {
+          domEnableCalls += 1
+          if (domEnableCalls === 1) {
+            return await firstDomEnable.promise
+          }
+        }
+        return {}
+      },
+    } as unknown as ICDPSession
+    const cacheKey = {}
+
+    const first = ensureSnapshotDomainsEnabled({ cacheKey, session, sessionId: null })
+    const concurrent = ensureSnapshotDomainsEnabled({ cacheKey, session, sessionId: null })
+    await nextTurn()
+    expect(domEnableCalls).toBe(1)
+
+    firstDomEnable.reject(new Error('setup failed'))
+    await expect(first).rejects.toThrow('setup failed')
+    await expect(concurrent).rejects.toThrow('setup failed')
+
+    await ensureSnapshotDomainsEnabled({ cacheKey, session, sessionId: null })
+    expect(domEnableCalls).toBe(2)
+  })
+
+  it('does not share DOM setup across explicit CDP session keys', async () => {
+    const calls: string[] = []
+    const createSession = (name: string) =>
+      ({
+        send: async (method: string) => {
+          calls.push(`${name}:${method}`)
+          return {}
+        },
+      }) as unknown as ICDPSession
+    const firstSession = createSession('first')
+    const secondSession = createSession('second')
+
+    await ensureSnapshotDomainsEnabled({ cacheKey: firstSession, session: firstSession, sessionId: null })
+    await ensureSnapshotDomainsEnabled({ cacheKey: secondSession, session: secondSession, sessionId: null })
+
+    expect(calls).toEqual([
+      'first:DOM.enable',
+      'first:Accessibility.enable',
+      'second:DOM.enable',
+      'second:Accessibility.enable',
+    ])
+  })
+
+  it('enables domains for each page and each temporary OOPIF session', async () => {
+    const calls: string[] = []
+    const session = {
+      send: async (method: string, _params: unknown, sessionId: string | null) => {
+        calls.push(`${sessionId ?? 'main'}:${method}`)
+        return {}
+      },
+    } as unknown as ICDPSession
+    const firstPage = {} as Page
+    const secondPage = {} as Page
+
+    await ensureSnapshotDomainsEnabled({ cacheKey: firstPage, session, sessionId: null })
+    await ensureSnapshotDomainsEnabled({ cacheKey: secondPage, session, sessionId: null })
+    await ensureSnapshotDomainsEnabled({ cacheKey: firstPage, session, sessionId: 'oopif-1' })
+    await ensureSnapshotDomainsEnabled({ cacheKey: firstPage, session, sessionId: 'oopif-2' })
+
+    expect(calls).toEqual([
+      'main:DOM.enable',
+      'main:Accessibility.enable',
+      'main:DOM.enable',
+      'main:Accessibility.enable',
+      'oopif-1:DOM.enable',
+      'oopif-1:Accessibility.enable',
+      'oopif-2:DOM.enable',
+      'oopif-2:Accessibility.enable',
+    ])
+  })
+
+  it('requests the DOM and accessibility trees in parallel', async () => {
+    const calls: string[] = []
+    let resolveDom!: (value: unknown) => void
+    let resolveAccessibility!: (value: unknown) => void
+    const session = {
+      send: async (method: string) => {
+        calls.push(method)
+        if (method === 'DOM.getFlattenedDocument') {
+          return await new Promise((resolve) => {
+            resolveDom = resolve
+          })
+        }
+        if (method === 'Accessibility.getFullAXTree') {
+          return await new Promise((resolve) => {
+            resolveAccessibility = resolve
+          })
+        }
+        return {}
+      },
+    } as unknown as ICDPSession
+    const page = {} as Page
+
+    const snapshotPromise = getAriaSnapshot({ page, cdp: session })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(calls).toContain('DOM.getFlattenedDocument')
+    expect(calls).toContain('Accessibility.getFullAXTree')
+
+    resolveAccessibility({ nodes: [] })
+    await nextTurn()
+    expect(calls.at(-1)).toBe('Accessibility.disable')
+
+    resolveDom({ nodes: [] })
+    await snapshotPromise
+    expect(calls.at(-1)).toBe('Accessibility.disable')
+  })
+
+  it('waits for a pending AX capture before disabling after DOM failure', async () => {
+    const calls: string[] = []
+    const axCapture = deferred<unknown>()
+    const session = {
+      send: async (method: string) => {
+        calls.push(method)
+        if (method === 'DOM.getFlattenedDocument') {
+          throw new Error('DOM capture failed')
+        }
+        if (method === 'Accessibility.getFullAXTree') {
+          return await axCapture.promise
+        }
+        return {}
+      },
+    } as unknown as ICDPSession
+
+    const snapshotPromise = getAriaSnapshot({ page: {} as Page, cdp: session })
+    await nextTurn()
+    expect(calls).not.toContain('Accessibility.disable')
+
+    axCapture.resolve({ nodes: [] })
+    await expect(snapshotPromise).rejects.toThrow('DOM capture failed')
+    expect(calls.at(-1)).toBe('Accessibility.disable')
+  })
+
+  it('waits for a pending DOM capture before releasing after AX failure', async () => {
+    const calls: string[] = []
+    const domCapture = deferred<unknown>()
+    const session = {
+      send: async (method: string) => {
+        calls.push(method)
+        if (method === 'DOM.getFlattenedDocument') {
+          return await domCapture.promise
+        }
+        if (method === 'Accessibility.getFullAXTree') {
+          throw new Error('AX capture failed')
+        }
+        return {}
+      },
+    } as unknown as ICDPSession
+
+    let settled = false
+    const snapshotPromise = getAriaSnapshot({ page: {} as Page, cdp: session }).finally(() => {
+      settled = true
+    })
+    await nextTurn()
+    expect(calls).toContain('Accessibility.disable')
+    expect(settled).toBe(false)
+
+    domCapture.resolve({ nodes: [] })
+    await expect(snapshotPromise).rejects.toThrow('AX capture failed')
+    expect(settled).toBe(true)
+  })
+
+  it('serializes overlapping accessibility captures for the same page', async () => {
+    const calls: string[] = []
+    const firstAxCapture = deferred<unknown>()
+    let axCaptureCount = 0
+    const session = {
+      send: async (method: string) => {
+        calls.push(method)
+        if (method === 'DOM.getFlattenedDocument') {
+          return { nodes: [] }
+        }
+        if (method === 'Accessibility.getFullAXTree') {
+          axCaptureCount += 1
+          if (axCaptureCount === 1) {
+            return await firstAxCapture.promise
+          }
+          return { nodes: [] }
+        }
+        return {}
+      },
+    } as unknown as ICDPSession
+    const page = {} as Page
+
+    const first = getAriaSnapshot({ page, cdp: session })
+    await nextTurn()
+    const second = getAriaSnapshot({ page, cdp: session })
+    await nextTurn()
+    expect(calls.filter((call) => call === 'Accessibility.enable')).toHaveLength(1)
+
+    firstAxCapture.resolve({ nodes: [] })
+    await first
+    await second
+
+    const accessibilityCalls = calls.filter((call) => call.startsWith('Accessibility.'))
+    expect(accessibilityCalls).toEqual([
+      'Accessibility.enable',
+      'Accessibility.getFullAXTree',
+      'Accessibility.disable',
+      'Accessibility.enable',
+      'Accessibility.getFullAXTree',
+      'Accessibility.disable',
+    ])
+  })
+
+  it('re-enables DOM once when a stale cache is detected during capture', async () => {
+    const calls: string[] = []
+    let captureAttempts = 0
+    const session = {
+      send: async (method: string) => {
+        calls.push(method)
+        if (method === 'DOM.getFlattenedDocument') {
+          captureAttempts += 1
+          if (captureAttempts === 1) {
+            throw new Error("DOM agent hasn't been enabled")
+          }
+          return { nodes: [] }
+        }
+        if (method === 'Accessibility.getFullAXTree') {
+          return { nodes: [] }
+        }
+        return {}
+      },
+    } as unknown as ICDPSession
+
+    await getAriaSnapshot({ page: {} as Page, cdp: session })
+
+    expect(calls.filter((call) => call === 'DOM.enable')).toHaveLength(2)
+    expect(captureAttempts).toBe(2)
+  })
+})
 
 const roleValue = (value: string): Protocol.Accessibility.AXValue => {
   return { type: 'role', value }
