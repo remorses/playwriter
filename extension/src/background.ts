@@ -12,8 +12,15 @@ import { createStore } from 'zustand/vanilla'
 import type { ExtensionState, ConnectionState, TabState, TabInfo } from './types'
 import { initPlaywriterToolbar } from './toolbar/toolbar'
 import type { CDPEvent, Protocol } from 'playwriter/src/cdp-types'
-import type { ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/protocol'
+import {
+  TIMED_OUT_CDP_TARGET_RECOVERY_TIMEOUT_MS,
+  type ExtensionCommandMessage,
+  type ExtensionResponseMessage,
+  type ForwardCDPCommand,
+  type RecoverTimedOutCDPTargetResult,
+} from 'playwriter/src/protocol'
 import { handleGhostBrowserCommand, type GhostBrowserCommandParams } from 'playwriter/src/ghost-browser'
+import { createRecoveryPublicationBarrier, createTimedOutTargetRecovery } from './cdp-target-recovery'
 // Inlined at build time via vite ?raw. Source: playwriter/src/ghost-cursor-client.ts
 import ghostCursorBundleCode from '../../playwriter/dist/ghost-cursor-client.js?raw'
 // Bippy: React fiber introspection library, used for "Copy React Source Path" context menu.
@@ -69,6 +76,24 @@ async function sendCommandWithTimeout(
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           reject(new Error(`CDP command timed out after ${timeout}ms: ${method} (tab may be frozen/hibernated)`))
+        }, timeout)
+      }),
+    ])
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  }
+}
+
+async function promiseWithTimeout<T>(promise: Promise<T>, timeout: number, description: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${description} timed out after ${timeout}ms`))
         }, timeout)
       }),
     ])
@@ -232,10 +257,28 @@ const TAB_GROUP_TITLE = 'playwriter'
 
 let childSessions: Map<string, { tabId: number; targetId?: string }> = new Map()
 let nextSessionId = 1
+let nextRecoveryId = 1
 let tabGroupQueue: Promise<void> = Promise.resolve()
 // Cache Target.setAutoAttach params so existing and future tabs enable OOPIF target events.
 // This ensures Playwright can build the iframe frame tree when connecting over CDP.
 let autoAttachParams: Protocol.Target.SetAutoAttachRequest | null = null
+
+type TimedOutTargetRecoveryStage = {
+  recoveryId: string
+  tabId: number
+  oldTab: TabInfo & { sessionId: string; targetId: string }
+  oldChildSessions: Array<{ sessionId: string; targetId?: string }>
+  attached?: AttachTabResult
+  cancelledState?: 'connecting' | 'error'
+  cancellationError?: string
+}
+
+const targetRecoveryStagesByTab = new Map<number, TimedOutTargetRecoveryStage>()
+const targetRecoveryStagesById = new Map<string, TimedOutTargetRecoveryStage>()
+const suppressedDebuggerTabs = new Set<number>()
+const targetRecoveryOperationsByTab = new Set<number>()
+const publishedRecoveryIds = new Set<string>()
+const targetRecoveryPublicationBarrier = createRecoveryPublicationBarrier()
 
 // Buffer for recording chunks when WebSocket isn't ready.
 // Chunks are keyed by tabId and flushed when WebSocket opens.
@@ -503,6 +546,28 @@ class ConnectionManager {
         return
       }
 
+      if (message.method === 'recoverTimedOutCDPTarget') {
+        try {
+          const result = await recoverTimedOutCDPTarget(message.params)
+          sendMessage({ id: message.id, result })
+        } catch (error: any) {
+          logger.error('Failed to recover timed-out CDP target:', error)
+          sendMessage({ id: message.id, error: error.message })
+        }
+        return
+      }
+
+      if (message.method === 'publishRecoveredCDPTarget') {
+        try {
+          await publishRecoveredCDPTarget(message.params.recoveryId, message.params.publicationToken)
+          sendMessage({ id: message.id, result: { success: true } })
+        } catch (error: any) {
+          logger.error('Failed to publish recovered CDP target:', error)
+          sendMessage({ id: message.id, error: error.message })
+        }
+        return
+      }
+
       // Handle Ghost Browser API commands
       // This allows calling chrome.ghostPublicAPI, chrome.ghostProxies, chrome.projects
       // from the playwriter executor sandbox when running in Ghost Browser
@@ -571,6 +636,10 @@ class ConnectionManager {
     const isExtensionReplaced = reason === 'Extension Replaced' || code === 4001
     const isExtensionInUse = reason === 'Extension Already In Use' || code === 4002
     this.preserveTabsOnDetach = !(isExtensionReplaced || isExtensionInUse)
+
+    for (const stage of Array.from(targetRecoveryStagesByTab.values())) {
+      invalidateTargetRecoveryStage(stage, 'connecting')
+    }
 
     const { tabs } = store.getState()
 
@@ -678,7 +747,7 @@ class ConnectionManager {
 
         // Re-attach any tabs that were in 'connecting' state (from a previous disconnect)
         const tabsToReattach = Array.from(store.getState().tabs.entries())
-          .filter(([_, tab]) => tab.state === 'connecting')
+          .filter(([tabId, tab]) => tab.state === 'connecting' && !targetRecoveryOperationsByTab.has(tabId))
           .map(([tabId]) => tabId)
 
         for (const tabId of tabsToReattach) {
@@ -1007,7 +1076,7 @@ function emitChildDetachesForTab(tabId: number): void {
 // 1. Top-level sessionId (the CDP session the command was sent on)
 // 2. params.sessionId (e.g. Target.detachFromTarget on the root session, see #40)
 // 3. params.targetId (e.g. Target.closeTarget)
-function getTabForCommand(msg: ExtensionCommandMessage): { tabId: number; tab: TabInfo } | undefined {
+function getTabForCommand(msg: ForwardCDPCommand): { tabId: number; tab: TabInfo } | undefined {
   const sessionId = msg.params.sessionId
   if (sessionId) {
     const found = getTabBySessionId(sessionId)
@@ -1179,6 +1248,11 @@ const DROPPED_CDP_EVENTS = new Set([
 ])
 
 function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string, params: any): void {
+  if (source.tabId && suppressedDebuggerTabs.has(source.tabId)) {
+    logger.debug('Suppressing debugger event during target recovery:', method, 'tab:', source.tabId)
+    return
+  }
+
   if (DROPPED_CDP_EVENTS.has(method)) {
     return
   }
@@ -1250,6 +1324,10 @@ function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string
 
 function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.debugger.DetachReason}`): void {
   const tabId = source.tabId
+  if (tabId && suppressedDebuggerTabs.has(tabId)) {
+    logger.debug('Suppressing debugger detach during target recovery:', tabId, reason)
+    return
+  }
   if (!tabId || !store.getState().tabs.has(tabId)) {
     logger.debug('Ignoring debugger detach event for untracked tab:', tabId)
     return
@@ -1359,12 +1437,45 @@ async function removeRestrictedIframes(tabId: number): Promise<number> {
   }
 }
 
+async function installPageHelpers(debuggee: chrome.debugger.DebuggerSession, timeout: number): Promise<void> {
+  const contextMenuScript = js`
+    document.addEventListener('contextmenu', (e) => {
+      window.__playwriter_lastRightClicked = e.target;
+    }, true);
+  `
+  await sendCommandWithTimeout(
+    debuggee,
+    'Page.addScriptToEvaluateOnNewDocument',
+    { source: contextMenuScript },
+    timeout,
+  )
+  await sendCommandWithTimeout(debuggee, 'Runtime.evaluate', { expression: contextMenuScript }, timeout)
+
+  // Ghost cursor — survives navigations via addScriptToEvaluateOnNewDocument.
+  try {
+    await sendCommandWithTimeout(
+      debuggee,
+      'Page.addScriptToEvaluateOnNewDocument',
+      { source: ghostCursorBundleCode },
+      timeout,
+    )
+    await sendCommandWithTimeout(debuggee, 'Runtime.evaluate', { expression: ghostCursorBundleCode }, timeout)
+  } catch (err) {
+    logger.debug('Could not inject ghost cursor (restricted page):', (err as Error).message)
+  }
+}
+
 async function attachTab(
   tabId: number,
-  { skipAttachedEvent = false }: { skipAttachedEvent?: boolean } = {},
+  {
+    skipAttachedEvent = false,
+    skipAutoAttach = false,
+    skipPageHelpers = false,
+  }: { skipAttachedEvent?: boolean; skipAutoAttach?: boolean; skipPageHelpers?: boolean } = {},
 ): Promise<AttachTabResult> {
   const debuggee = { tabId }
   let debuggerAttached = false
+  const commandTimeout = skipPageHelpers ? 5000 : 10000
 
   try {
     logger.debug('Attaching debugger to tab:', tabId)
@@ -1375,7 +1486,7 @@ async function attachTab(
     const maxAttachAttempts = 3
     for (let attempt = 1; attempt <= maxAttachAttempts; attempt++) {
       try {
-        await chrome.debugger.attach(debuggee, '1.3')
+        await promiseWithTimeout(chrome.debugger.attach(debuggee, '1.3'), 10000, `Debugger attach for tab ${tabId}`)
         break
       } catch (attachError: any) {
         const msg = attachError.message ?? ''
@@ -1387,7 +1498,11 @@ async function attachTab(
           `Debugger attach blocked by chrome-extension:// iframe (attempt ${attempt}/${maxAttachAttempts}), removing and retrying:`,
           tabId,
         )
-        await removeRestrictedIframes(tabId)
+        await promiseWithTimeout(
+          removeRestrictedIframes(tabId),
+          5000,
+          `Restricted iframe cleanup for tab ${tabId}`,
+        )
         await sleep(50)
       }
     }
@@ -1395,38 +1510,26 @@ async function attachTab(
     debuggerAttached = true
     logger.debug('Debugger attached successfully to tab:', tabId)
 
-    await chrome.debugger.sendCommand(debuggee, 'Page.enable')
+    await sendCommandWithTimeout(debuggee, 'Page.enable', undefined, commandTimeout)
 
     // Reapply cached auto-attach for new tabs so OOPIF targets are reported immediately.
-    if (autoAttachParams) {
+    if (autoAttachParams && !skipAutoAttach) {
       try {
-        await chrome.debugger.sendCommand(debuggee, 'Target.setAutoAttach', autoAttachParams)
+        await sendCommandWithTimeout(debuggee, 'Target.setAutoAttach', autoAttachParams, 10000)
       } catch (error) {
         logger.debug('Failed to apply auto-attach for tab:', tabId, error)
       }
     }
 
-    const contextMenuScript = js`
-      document.addEventListener('contextmenu', (e) => {
-        window.__playwriter_lastRightClicked = e.target;
-      }, true);
-    `
-    await chrome.debugger.sendCommand(debuggee, 'Page.addScriptToEvaluateOnNewDocument', { source: contextMenuScript })
-    await chrome.debugger.sendCommand(debuggee, 'Runtime.evaluate', { expression: contextMenuScript })
-
-    // Ghost cursor — survives navigations via addScriptToEvaluateOnNewDocument.
-    try {
-      await chrome.debugger.sendCommand(debuggee, 'Page.addScriptToEvaluateOnNewDocument', {
-        source: ghostCursorBundleCode,
-      })
-      await chrome.debugger.sendCommand(debuggee, 'Runtime.evaluate', { expression: ghostCursorBundleCode })
-    } catch (err) {
-      logger.debug('Could not inject ghost cursor (restricted page):', (err as Error).message)
+    if (!skipPageHelpers) {
+      await installPageHelpers(debuggee, commandTimeout)
     }
 
-    const result = (await chrome.debugger.sendCommand(
+    const result = (await sendCommandWithTimeout(
       debuggee,
       'Target.getTargetInfo',
+      undefined,
+      commandTimeout,
     )) as Protocol.Target.GetTargetInfoResponse
 
     const targetInfo = result.targetInfo
@@ -1497,15 +1600,20 @@ async function attachTab(
     return { targetInfo, sessionId }
   } catch (error) {
     // Clean up debugger if we attached but failed later
-    if (debuggerAttached) {
+    const attachTimedOut = error instanceof Error && error.message.startsWith(`Debugger attach for tab ${tabId} timed out`)
+    if (debuggerAttached || attachTimedOut) {
       logger.debug('Cleaning up debugger after partial attach failure:', tabId)
-      chrome.debugger.detach(debuggee).catch(() => {})
+      try {
+        await promiseWithTimeout(chrome.debugger.detach(debuggee), 5000, `Debugger cleanup detach for tab ${tabId}`)
+      } catch (detachError) {
+        logger.debug('Failed to clean up debugger after partial attach failure:', tabId, detachError)
+      }
     }
     throw error
   }
 }
 
-function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
+async function detachTab(tabId: number, shouldDetachDebugger: boolean): Promise<void> {
   const tab = store.getState().tabs.get(tabId)
   if (!tab) {
     logger.debug('detachTab: tab not found in map:', tabId)
@@ -1559,10 +1667,325 @@ function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
   emitChildDetachesForTab(tabId)
 
   if (shouldDetachDebugger) {
-    chrome.debugger.detach({ tabId }).catch((err) => {
+    try {
+      await promiseWithTimeout(chrome.debugger.detach({ tabId }), 5000, `Debugger detach for tab ${tabId}`)
+    } catch (err: any) {
       logger.debug('Error detaching debugger from tab:', tabId, err.message)
+    }
+  }
+}
+
+function getRecoveryTargetBySessionId(sessionId: string):
+  | {
+      recoveryKey: number
+      tabId: number
+      sessionId: string
+      targetId: string
+    }
+  | undefined {
+  const resolved = getTabBySessionId(sessionId)
+  if (resolved?.tab.sessionId && resolved.tab.targetId) {
+    return {
+      recoveryKey: resolved.tabId,
+      tabId: resolved.tabId,
+      sessionId: resolved.tab.sessionId,
+      targetId: resolved.tab.targetId,
+    }
+  }
+
+  const child = childSessions.get(sessionId)
+  const childTab = child ? store.getState().tabs.get(child.tabId) : undefined
+  if (child && childTab?.sessionId && childTab.targetId) {
+    return {
+      recoveryKey: child.tabId,
+      tabId: child.tabId,
+      sessionId: childTab.sessionId,
+      targetId: childTab.targetId,
+    }
+  }
+
+  const stage = getRecoveryStageBySessionId(sessionId)
+  if (stage) {
+    return {
+      recoveryKey: stage.tabId,
+      tabId: stage.tabId,
+      sessionId: stage.oldTab.sessionId,
+      targetId: stage.oldTab.targetId,
+    }
+  }
+
+  return undefined
+}
+
+function getRecoveryStageBySessionId(sessionId: string): TimedOutTargetRecoveryStage | undefined {
+  for (const stage of targetRecoveryStagesByTab.values()) {
+    const ownsSession =
+      stage.oldTab.sessionId === sessionId || stage.oldChildSessions.some((entry) => entry.sessionId === sessionId)
+    if (ownsSession) {
+      return stage
+    }
+  }
+
+  return undefined
+}
+
+function deleteTargetRecoveryStage(stage: TimedOutTargetRecoveryStage): void {
+  if (targetRecoveryStagesByTab.get(stage.tabId) === stage) {
+    targetRecoveryStagesByTab.delete(stage.tabId)
+  }
+  if (targetRecoveryStagesById.get(stage.recoveryId) === stage) {
+    targetRecoveryStagesById.delete(stage.recoveryId)
+  }
+  recoverTimedOutCDPTargetCoordinator.complete(stage.recoveryId)
+  targetRecoveryPublicationBarrier.complete(stage.recoveryId)
+}
+
+function restoreCancelledRecoveryState(stage: TimedOutTargetRecoveryStage): void {
+  store.setState((state) => {
+    const current = state.tabs.get(stage.tabId)
+    if (!current) {
+      return state
+    }
+    if (stage.attached && current.sessionId !== stage.attached.sessionId) {
+      return state
+    }
+    const newTabs = new Map(state.tabs)
+    newTabs.set(stage.tabId, {
+      ...stage.oldTab,
+      state: stage.cancelledState || 'error',
+      errorText:
+        stage.cancelledState === 'error'
+          ? `Automatic CDP recovery failed: ${stage.cancellationError || 'recovery was cancelled'}`
+          : undefined,
+    })
+    return { tabs: newTabs }
+  })
+}
+
+function invalidateTargetRecoveryStage(
+  stage: TimedOutTargetRecoveryStage,
+  cancelledState: 'connecting' | 'error',
+  error?: Error,
+): void {
+  stage.cancelledState = cancelledState
+  stage.cancellationError = error?.message
+  restoreCancelledRecoveryState(stage)
+  if (stage.attached) {
+    deleteTargetRecoveryStage(stage)
+    void cleanUpLateRecoveryAttachment(stage, stage.attached).finally(() => {
+      finishTargetRecoveryOperation(stage)
     })
   }
+}
+
+function finishTargetRecoveryOperation(stage: TimedOutTargetRecoveryStage): void {
+  targetRecoveryOperationsByTab.delete(stage.tabId)
+  suppressedDebuggerTabs.delete(stage.tabId)
+  if (
+    stage.cancelledState === 'connecting' &&
+    connectionManager.ws?.readyState === WebSocket.OPEN &&
+    store.getState().tabs.get(stage.tabId)?.state === 'connecting'
+  ) {
+    void connectTab(stage.tabId)
+  }
+}
+
+async function cleanUpLateRecoveryAttachment(
+  stage: TimedOutTargetRecoveryStage,
+  attached: AttachTabResult,
+): Promise<void> {
+  stage.attached = attached
+  const current = store.getState().tabs.get(stage.tabId)
+  const attachmentWasReplaced =
+    current?.state === 'connected' && current.sessionId && current.sessionId !== attached.sessionId
+  if (!attachmentWasReplaced) {
+    try {
+      await promiseWithTimeout(
+        chrome.debugger.detach({ tabId: stage.tabId }),
+        5000,
+        `Cancelled recovery detach for tab ${stage.tabId}`,
+      )
+    } catch (error) {
+      logger.debug('Failed to detach late recovery attachment:', stage.tabId, error)
+    }
+  }
+  restoreCancelledRecoveryState(stage)
+}
+
+const recoverTimedOutCDPTargetCoordinator = createTimedOutTargetRecovery({
+  findTargetBySessionId: getRecoveryTargetBySessionId,
+  detachTarget: async (tabId) => {
+    const tab = store.getState().tabs.get(tabId)
+    if (!tab?.sessionId || !tab.targetId) {
+      throw new Error(`Target for tab ${tabId} is no longer connected`)
+    }
+
+    const recoveryId = `recovery-${tabSessionScope}-${nextRecoveryId++}`
+    const stage: TimedOutTargetRecoveryStage = {
+      recoveryId,
+      tabId,
+      oldTab: { ...tab, sessionId: tab.sessionId, targetId: tab.targetId },
+      oldChildSessions: Array.from(childSessions.entries())
+        .filter(([_, child]) => child.tabId === tabId)
+        .map(([sessionId, child]) => ({ sessionId, targetId: child.targetId })),
+    }
+
+    targetRecoveryStagesByTab.set(tabId, stage)
+    targetRecoveryStagesById.set(recoveryId, stage)
+    targetRecoveryOperationsByTab.add(tabId)
+    suppressedDebuggerTabs.add(tabId)
+    setTabConnecting(tabId)
+    for (const child of stage.oldChildSessions) {
+      childSessions.delete(child.sessionId)
+    }
+
+    logger.warn(`Recovering unresponsive CDP target by detaching tab ${tabId}`)
+    await promiseWithTimeout(chrome.debugger.detach({ tabId }), 5000, `Recovery detach for tab ${tabId}`)
+    if (targetRecoveryStagesByTab.get(tabId) !== stage || stage.cancelledState) {
+      throw new Error(`Recovery for tab ${tabId} was cancelled while detaching`)
+    }
+  },
+  attachTarget: async (tabId) => {
+    const stage = targetRecoveryStagesByTab.get(tabId)
+    if (!stage) {
+      throw new Error(`Recovery state for tab ${tabId} was lost`)
+    }
+
+    const attached = await attachTab(tabId, {
+      skipAttachedEvent: true,
+      skipAutoAttach: true,
+      skipPageHelpers: true,
+    })
+    if (targetRecoveryStagesByTab.get(tabId) !== stage || stage.cancelledState) {
+      await cleanUpLateRecoveryAttachment(stage, attached)
+      throw new Error(`Recovery for tab ${tabId} was cancelled while attaching`)
+    }
+    stage.attached = attached
+    logger.warn(`Recovered CDP target for tab ${tabId} as session ${attached.sessionId}`)
+    return {
+      recoveryId: stage.recoveryId,
+      sessionId: attached.sessionId,
+      targetId: attached.targetInfo.targetId,
+    }
+  },
+  markRecoveryFailed: (target, error) => {
+    const stage = targetRecoveryStagesByTab.get(target.tabId)
+    if (!stage) {
+      targetRecoveryOperationsByTab.delete(target.tabId)
+      suppressedDebuggerTabs.delete(target.tabId)
+      return
+    }
+    if (!stage.cancelledState) {
+      stage.cancelledState = 'error'
+      stage.cancellationError = error.message
+    }
+    deleteTargetRecoveryStage(stage)
+    restoreCancelledRecoveryState(stage)
+    finishTargetRecoveryOperation(stage)
+  },
+})
+
+async function recoverTimedOutCDPTarget(
+  params: Parameters<typeof recoverTimedOutCDPTargetCoordinator.recover>[0],
+): Promise<RecoverTimedOutCDPTargetResult> {
+  try {
+    const recovery = await promiseWithTimeout(
+      recoverTimedOutCDPTargetCoordinator.recover(params),
+      TIMED_OUT_CDP_TARGET_RECOVERY_TIMEOUT_MS,
+      'Automatic CDP target recovery',
+    )
+    if (recovery.status === 'recovered') {
+      return {
+        ...recovery,
+        publicationToken: targetRecoveryPublicationBarrier.register(recovery.recoveryId),
+      }
+    }
+    return recovery
+  } catch (error) {
+    const recoveryError = error instanceof Error ? error : new Error(String(error))
+    if (recoveryError.message.startsWith('Automatic CDP target recovery timed out')) {
+      const stage = getRecoveryStageBySessionId(params.sessionId)
+      if (stage) {
+        invalidateTargetRecoveryStage(stage, 'error', recoveryError)
+      }
+    }
+    throw recoveryError
+  }
+}
+
+function rememberPublishedRecovery(recoveryId: string): void {
+  publishedRecoveryIds.add(recoveryId)
+  if (publishedRecoveryIds.size > 100) {
+    const oldest = publishedRecoveryIds.values().next().value
+    if (oldest) {
+      publishedRecoveryIds.delete(oldest)
+    }
+  }
+}
+
+async function publishRecoveredCDPTarget(recoveryId: string, publicationToken: string): Promise<void> {
+  const stage = targetRecoveryStagesById.get(recoveryId)
+  if (!stage && publishedRecoveryIds.has(recoveryId)) {
+    return
+  }
+  if (!stage?.attached) {
+    throw new Error(`Recovered target ${recoveryId} is not ready to publish`)
+  }
+
+  const publication = targetRecoveryPublicationBarrier.acknowledge(recoveryId, publicationToken)
+  if (publication === 'unknown') {
+    throw new Error(`Unknown publication token for recovered target ${recoveryId}`)
+  }
+  if (publication === 'waiting') {
+    return
+  }
+
+  sendMessage({
+    method: 'forwardCDPEvent',
+    params: {
+      method: 'Target.detachedFromTarget',
+      params: { sessionId: stage.oldTab.sessionId, targetId: stage.oldTab.targetId },
+    },
+  })
+  for (const child of stage.oldChildSessions) {
+    sendMessage({
+      method: 'forwardCDPEvent',
+      params: {
+        method: 'Target.detachedFromTarget',
+        params: child.targetId
+          ? { sessionId: child.sessionId, targetId: child.targetId }
+          : { sessionId: child.sessionId },
+      },
+    })
+  }
+  sendMessage({
+    method: 'forwardCDPEvent',
+    params: {
+      method: 'Target.attachedToTarget',
+      params: {
+        sessionId: stage.attached.sessionId,
+        targetInfo: { ...stage.attached.targetInfo, attached: true },
+        waitingForDebugger: false,
+      },
+    },
+  })
+
+  rememberPublishedRecovery(recoveryId)
+  deleteTargetRecoveryStage(stage)
+  targetRecoveryOperationsByTab.delete(stage.tabId)
+  suppressedDebuggerTabs.delete(stage.tabId)
+
+  if (autoAttachParams) {
+    try {
+      await sendCommandWithTimeout({ tabId: stage.tabId }, 'Target.setAutoAttach', autoAttachParams, 10000)
+    } catch (error) {
+      logger.debug('Failed to restore auto-attach after target recovery:', stage.tabId, error)
+    }
+  }
+
+  void installPageHelpers({ tabId: stage.tabId }, 10000).catch((error) => {
+    logger.debug('Failed to restore page helpers after target recovery:', stage.tabId, error)
+  })
 }
 
 async function connectTab(tabId: number): Promise<void> {
@@ -1654,7 +2077,7 @@ async function disconnectTab(tabId: number): Promise<void> {
     return
   }
 
-  detachTab(tabId, true)
+  await detachTab(tabId, true)
   // WS connection is maintained even with no tabs - maintainConnection handles it
 }
 
