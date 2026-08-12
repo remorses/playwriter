@@ -95,6 +95,7 @@ const NOISY_LOG_EVENTS = new Set([
 
 export type RelayServer = {
   close(): void
+  getPlaywrightClientCount(): number
   on<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
   off<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
 }
@@ -2570,6 +2571,9 @@ export async function startPlayWriterCDPRelayServer({
   logger?.log('CDP endpoint:', cdpEndpoint)
 
   return {
+    getPlaywrightClientCount() {
+      return store.getState().playwrightClients.size
+    },
     close() {
       const { extensions, playwrightClients } = store.getState()
 

@@ -1,5 +1,32 @@
 import { describe, it, expect } from 'vitest'
-import { shouldAutoReturn, wrapCode, isPlaywrightChannelOwner } from './executor.js'
+import type { BrowserContext, Page } from '@xmorse/playwright-core'
+import { shouldAutoReturn, wrapCode, isPlaywrightChannelOwner, waitForOpenPageOnExistingContexts } from './executor.js'
+
+describe('waitForOpenPageOnExistingContexts', () => {
+  it('subscribes before scanning and captures a page emitted during the scan', async () => {
+    const replacementPage = { isClosed: () => false } as Page
+    const calls: string[] = []
+    let resolvePage!: (page: Page) => void
+    const context = {
+      waitForEvent: () => {
+        calls.push('subscribe')
+        return new Promise<Page>((resolve) => {
+          resolvePage = resolve
+        })
+      },
+      pages: () => {
+        calls.push('scan')
+        resolvePage(replacementPage)
+        return []
+      },
+    } as unknown as BrowserContext
+
+    await expect(
+      waitForOpenPageOnExistingContexts({ contexts: [context], timeout: 1000 }),
+    ).resolves.toBe(replacementPage)
+    expect(calls).toEqual(['subscribe', 'scan'])
+  })
+})
 
 describe('shouldAutoReturn', () => {
   it('returns true for simple expressions', () => {

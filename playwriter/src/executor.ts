@@ -155,6 +155,29 @@ const EXTENSION_NOT_CONNECTED_ERROR = `The Playwriter Chrome extension is not co
 const NO_PAGES_AVAILABLE_ERROR =
   'No Playwright pages are available. Enable Playwriter on a tab or unset PLAYWRITER_AUTO_ENABLE=false to auto-create one.'
 
+export async function waitForOpenPageOnExistingContexts({
+  contexts,
+  timeout,
+}: {
+  contexts: BrowserContext[]
+  timeout: number
+}): Promise<Page | null> {
+  if (contexts.length === 0) {
+    return null
+  }
+
+  // Subscribe before scanning so a Target.attachedToTarget delivered during
+  // context.pages() cannot fall into a check-then-subscribe gap.
+  const nextPage = Promise.any(
+    contexts.map((context) => context.waitForEvent('page', { timeout })),
+  ).catch(() => null)
+  const existingPage = contexts
+    .flatMap((context) => context.pages())
+    .find((candidate) => !candidate.isClosed())
+
+  return existingPage || (await nextPage)
+}
+
 const CLOUD_SESSION_EXPIRED_ERROR =
   'Cloud browser session expired or was destroyed. Create a new session with: playwriter session new --browser cloud'
 
@@ -1001,11 +1024,81 @@ export class PlaywrightExecutor {
   }
 
   private async ensureConnection(): Promise<{ browser: Browser; page: Page }> {
-    // In headless mode, also check the shared browser is still alive.
-    // After a crash, isConnected() returns false and we need to reconnect.
-    const browserAlive = this.isHeadlessMode() ? this.browser?.isConnected() : true
-    if (this.isConnected && this.browser && this.page && browserAlive) {
+    // A disconnected Browser object cannot be reused, even if its disconnect
+    // event has not cleared the executor state yet.
+    const browserAlive = this.browser?.isConnected() ?? false
+    if (this.isConnected && this.browser && this.page && !this.page.isClosed() && browserAlive) {
       return { browser: this.browser, page: this.page }
+    }
+
+    // Headless sessions share a Browser but own their BrowserContext. Direct
+    // CDP executors also already have a usable context. Recover a closed page
+    // inside that same context so we neither adopt another session's page nor
+    // leak a context/client by reconnecting.
+    if (
+      (this.isHeadlessMode() || this.isDirectCdpMode()) &&
+      this.isConnected &&
+      this.browser &&
+      this.context &&
+      (!this.page || this.page.isClosed()) &&
+      browserAlive
+    ) {
+      try {
+        const context = this.context
+        const page = context.pages().find((candidate) => !candidate.isClosed()) || (await context.newPage())
+        this.page = page
+        this.setupPageListeners(page)
+        return { browser: this.browser, page }
+      } catch {
+        // The owned context itself was closed. Reconnect below.
+      }
+    }
+
+    // A persistent extension connection can temporarily have no pages when the
+    // user disables Playwriter on the last tab, then receive a replacement tab
+    // through Target.attachedToTarget. Reuse that browser instead of opening a
+    // second CDP WebSocket to the same chrome.debugger session.
+    if (
+      !this.isHeadlessMode() &&
+      !this.isDirectCdpMode() &&
+      this.isConnected &&
+      this.browser &&
+      (!this.page || this.page.isClosed()) &&
+      browserAlive
+    ) {
+      const browser = this.browser
+      const contexts = browser.contexts()
+      const replacementPage = await waitForOpenPageOnExistingContexts({ contexts, timeout: 1000 })
+
+      if (this.browser !== browser || !browser.isConnected()) {
+        // The disconnect handler may have cleared/replaced executor state while
+        // the page-event wait was pending. Reconnect using fresh state below.
+      } else if (replacementPage && !replacementPage.isClosed()) {
+        this.context = replacementPage.context()
+        this.page = replacementPage
+        this.setupPageListeners(replacementPage)
+        return { browser, page: replacementPage }
+      } else {
+        // The Browser WebSocket is still healthy. Auto-create (or, when
+        // PLAYWRITER_AUTO_ENABLE=false, wait/throw) through that same context
+        // instead of opening a duplicate CDP client.
+        const existingContext = contexts[0]
+        if (existingContext) {
+          try {
+            const page = await this.ensurePageForContext({ context: existingContext, timeout: 1000 })
+            this.context = existingContext
+            this.page = page
+            this.setupPageListeners(page)
+            return { browser, page }
+          } catch (error) {
+            const disconnected = error instanceof Error && isDisconnectionError(error)
+            if (browser.isConnected() && !disconnected) {
+              throw error
+            }
+            // The existing context disconnected during recovery. Reconnect below.
+          }
+        }
+      }
     }
 
     try {
@@ -1033,9 +1126,8 @@ export class PlaywrightExecutor {
     }
 
     if (this.browser) {
-      const contexts = this.browser.contexts()
-      if (contexts.length > 0) {
-        const context = contexts[0]
+      const context = this.context || this.browser.contexts()[0]
+      if (context) {
         this.context = context
         const pages = context.pages().filter((p) => !p.isClosed())
         if (pages.length > 0) {
