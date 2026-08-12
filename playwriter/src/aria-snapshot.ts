@@ -933,6 +933,114 @@ async function resolveFrame({ frame, page }: { frame?: Frame | FrameLocator; pag
 // Main Functions
 // ============================================================================
 
+const snapshotDomEnablementByTarget = new WeakMap<object, Promise<void>>()
+const snapshotCaptureQueueByPage = new WeakMap<Page, Promise<void>>()
+
+async function withSnapshotCaptureLock<T>({ page, capture }: { page: Page; capture: () => Promise<T> }): Promise<T> {
+  const previous = snapshotCaptureQueueByPage.get(page) || Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const tail = previous.catch(() => {}).then(() => current)
+  snapshotCaptureQueueByPage.set(page, tail)
+
+  await previous.catch(() => {})
+  try {
+    return await capture()
+  } finally {
+    release()
+    if (snapshotCaptureQueueByPage.get(page) === tail) {
+      snapshotCaptureQueueByPage.delete(page)
+    }
+  }
+}
+
+async function ensureSnapshotDomEnabled({
+  cacheKey,
+  session,
+  sessionId,
+}: {
+  cacheKey: object
+  session: ICDPSession
+  sessionId: string | null
+}): Promise<void> {
+  if (sessionId) {
+    await session.send('DOM.enable', undefined, sessionId)
+    return
+  }
+
+  let domEnablement = snapshotDomEnablementByTarget.get(cacheKey)
+  if (!domEnablement) {
+    domEnablement = session.send('DOM.enable', undefined, null).then(() => undefined)
+    snapshotDomEnablementByTarget.set(cacheKey, domEnablement)
+  }
+
+  try {
+    await domEnablement
+  } catch (error) {
+    if (snapshotDomEnablementByTarget.get(cacheKey) === domEnablement) {
+      snapshotDomEnablementByTarget.delete(cacheKey)
+    }
+    throw error
+  }
+}
+
+/**
+ * Enable the CDP domains used by snapshots.
+ *
+ * The borrowed main-page session remains attached for the lifetime of the
+ * page, and explicit sessions are keyed independently, so DOM setup can be
+ * reused safely. Accessibility is deliberately enabled for every snapshot and
+ * disabled as soon as its tree is captured because leaving it enabled impacts
+ * page performance and produces a continuous stream of AX update events.
+ */
+export async function ensureSnapshotDomainsEnabled({
+  cacheKey,
+  session,
+  sessionId,
+}: {
+  cacheKey: object
+  session: ICDPSession
+  sessionId: string | null
+}): Promise<void> {
+  await ensureSnapshotDomEnabled({ cacheKey, session, sessionId })
+  await session.send('Accessibility.enable', undefined, sessionId)
+}
+
+function isDomDomainDisabledError(error: unknown): boolean {
+  return error instanceof Error && /DOM.*(?:hasn't|has not|not).*enabled/i.test(error.message)
+}
+
+async function captureFlattenedDom({
+  cacheKey,
+  session,
+  sessionId,
+}: {
+  cacheKey: object
+  session: ICDPSession
+  sessionId: string | null
+}): Promise<Protocol.DOM.GetFlattenedDocumentResponse> {
+  try {
+    return (await session.send(
+      'DOM.getFlattenedDocument',
+      { depth: -1, pierce: true },
+      sessionId,
+    )) as Protocol.DOM.GetFlattenedDocumentResponse
+  } catch (error) {
+    if (sessionId || !isDomDomainDisabledError(error)) {
+      throw error
+    }
+    snapshotDomEnablementByTarget.delete(cacheKey)
+    await ensureSnapshotDomEnabled({ cacheKey, session, sessionId })
+    return (await session.send(
+      'DOM.getFlattenedDocument',
+      { depth: -1, pierce: true },
+      sessionId,
+    )) as Protocol.DOM.GetFlattenedDocumentResponse
+  }
+}
+
 /**
  * Get an accessibility snapshot with utilities to look up refs for elements.
  * Uses the browser accessibility tree (CDP) and maps nodes to DOM attributes.
@@ -968,56 +1076,94 @@ export async function getAriaSnapshot({
   cdp?: ICDPSession
 }): Promise<AriaSnapshotResult> {
   const session = cdp || (await getCDPSessionForPage({ page }))
-
-  // Resolve FrameLocator to an actual Frame. FrameLocator (from locator.contentFrame())
-  // is a scoping helper without CDP access. We need the real Frame from page.frames()
-  // which has frameId() for OOPIF session attachment.
-  const resolvedFrame = await resolveFrame({ frame, page })
-
-  // For cross-origin iframes (OOPIFs), we need to attach to the iframe's target
-  // to get a separate CDP session. Same-origin iframes can use frameId directly.
-  let oopifSessionId: string | null = null
-  const frameId = resolvedFrame?.frameId() ?? null
-
-  if (frameId) {
-    const { targetInfos } = (await session.send('Target.getTargets')) as Protocol.Target.GetTargetsResponse
-    const frameUrl = resolvedFrame!.url()
-    const iframeTarget = targetInfos.find((t) => {
-      return t.type === 'iframe' && t.url === frameUrl
-    })
-    if (iframeTarget) {
-      const { sessionId } = (await session.send('Target.attachToTarget', {
-        targetId: iframeTarget.targetId,
-        flatten: true,
-      })) as Protocol.Target.AttachToTargetResponse
-      oopifSessionId = sessionId
-      await session.send('Runtime.runIfWaitingForDebugger', undefined, oopifSessionId)
-    }
-  }
-
-  await session.send('DOM.enable', undefined, oopifSessionId)
-  await session.send('Accessibility.enable', undefined, oopifSessionId)
+  const domCacheKey = cdp ? session : page
   const scopeAttr = 'data-pw-scope'
   const scopeValue = crypto.randomUUID()
-  let scopeApplied = false
   const scopeLocator = locator
+  let oopifSessionId: string | null = null
 
   try {
-    if (scopeLocator) {
-      await scopeLocator.evaluate(
-        (element, data) => {
-          element.setAttribute(data.attr, data.value)
-        },
-        { attr: scopeAttr, value: scopeValue },
-      )
-      scopeApplied = true
+    // Resolve FrameLocator to an actual Frame. FrameLocator (from locator.contentFrame())
+    // is a scoping helper without CDP access. We need the real Frame from page.frames()
+    // which has frameId() for OOPIF session attachment.
+    const resolvedFrame = await resolveFrame({ frame, page })
+    const frameId = resolvedFrame?.frameId() ?? null
+
+    // For cross-origin iframes (OOPIFs), attach to the iframe target. This is
+    // inside the protected scope so every successful attach is detached below.
+    if (frameId) {
+      const { targetInfos } = (await session.send('Target.getTargets')) as Protocol.Target.GetTargetsResponse
+      const frameUrl = resolvedFrame!.url()
+      const iframeTarget = targetInfos.find((t) => {
+        return t.type === 'iframe' && t.url === frameUrl
+      })
+      if (iframeTarget) {
+        const { sessionId } = (await session.send('Target.attachToTarget', {
+          targetId: iframeTarget.targetId,
+          flatten: true,
+        })) as Protocol.Target.AttachToTargetResponse
+        oopifSessionId = sessionId
+        await session.send('Runtime.runIfWaitingForDebugger', undefined, oopifSessionId)
+      }
     }
 
-    const { nodes: domNodes } = (await session.send(
-      'DOM.getFlattenedDocument',
-      { depth: -1, pierce: true },
-      oopifSessionId,
-    )) as Protocol.DOM.GetFlattenedDocumentResponse
+    const axParams = !oopifSessionId && frameId ? { frameId } : undefined
+    const [domTree, axTree] = await withSnapshotCaptureLock({
+      page,
+      capture: async () => {
+        let scopeApplied = false
+        let accessibilityRequested = false
+        let domCapture: Promise<Protocol.DOM.GetFlattenedDocumentResponse> | null = null
+        let axCapture: Promise<Protocol.Accessibility.GetFullAXTreeResponse> | null = null
+
+        const disableAccessibility = async () => {
+          if (!accessibilityRequested) {
+            return
+          }
+          await session.send('Accessibility.disable', undefined, oopifSessionId).then(() => {
+            accessibilityRequested = false
+          }).catch((e) => {
+            console.error('[aria-snapshot] Failed to disable Accessibility domain:', e)
+          })
+        }
+
+        try {
+          accessibilityRequested = true
+          await ensureSnapshotDomainsEnabled({ cacheKey: domCacheKey, session, sessionId: oopifSessionId })
+
+          if (scopeLocator) {
+            await scopeLocator.evaluate(
+              (element, data) => {
+                element.setAttribute(data.attr, data.value)
+              },
+              { attr: scopeAttr, value: scopeValue },
+            )
+            scopeApplied = true
+          }
+
+          domCapture = captureFlattenedDom({ cacheKey: domCacheKey, session, sessionId: oopifSessionId })
+          axCapture = session
+            .send('Accessibility.getFullAXTree', axParams, oopifSessionId)
+            .finally(disableAccessibility) as Promise<Protocol.Accessibility.GetFullAXTreeResponse>
+          return await Promise.all([domCapture, axCapture])
+        } finally {
+          // Keep the lock/session alive until both requests settle, regardless
+          // of which side failed first.
+          await Promise.allSettled([domCapture, axCapture].filter(isTruthy))
+          await disableAccessibility()
+          if (scopeApplied && scopeLocator) {
+            await scopeLocator
+              .evaluate((element, attr) => {
+                element.removeAttribute(attr)
+              }, scopeAttr)
+              .catch((e) => {
+                console.error('[aria-snapshot] Failed to remove snapshot scope attribute:', e)
+              })
+          }
+        }
+      },
+    })
+    const { nodes: domNodes } = domTree as Protocol.DOM.GetFlattenedDocumentResponse
     const { domById, domByBackendId, childrenByParent } = buildDomIndex(domNodes)
 
     let scopeRootNodeId: Protocol.DOM.NodeId | null = null
@@ -1034,12 +1180,7 @@ export async function getAriaSnapshot({
 
     const allowedBackendIds = scopeRootNodeId ? buildBackendIdSet(scopeRootNodeId, childrenByParent, domById) : null
 
-    const axParams = !oopifSessionId && frameId ? { frameId } : undefined
-    const { nodes: axNodes } = (await session.send(
-      'Accessibility.getFullAXTree',
-      axParams,
-      oopifSessionId,
-    )) as Protocol.Accessibility.GetFullAXTreeResponse
+    const { nodes: axNodes } = axTree as Protocol.Accessibility.GetFullAXTreeResponse
 
     const axById = new Map<Protocol.Accessibility.AXNodeId, Protocol.Accessibility.AXNode>()
     for (const node of axNodes) {
@@ -1321,18 +1462,15 @@ export async function getAriaSnapshot({
       getRefStringForLocator: async (loc) => (await getRefsForLocators([loc]))[0]?.ref ?? null,
     }
   } finally {
-    if (scopeApplied && scopeLocator) {
-      await scopeLocator.evaluate((element, attr) => {
-        element.removeAttribute(attr)
-      }, scopeAttr)
-    }
     if (oopifSessionId) {
       await session.send('Target.detachFromTarget', { sessionId: oopifSessionId }).catch((e) => {
         console.error('[aria-snapshot] Failed to detach OOPIF session:', oopifSessionId, e)
       })
     }
     if (!cdp) {
-      await session.detach()
+      await session.detach().catch((e) => {
+        console.error('[aria-snapshot] Failed to release borrowed CDP session:', e)
+      })
     }
   }
 }
