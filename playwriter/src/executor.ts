@@ -1177,7 +1177,8 @@ export class PlaywrightExecutor {
           showDiffSinceLastCall = !search,
           interactiveOnly = false,
         } = options
-        const resolvedPage = targetPage || page
+        // A locator's page is authoritative; the default page may be another open tab.
+        const resolvedPage = locator?.page() || targetPage || page
         if (!resolvedPage) {
           throw new Error('snapshot requires a page')
         }

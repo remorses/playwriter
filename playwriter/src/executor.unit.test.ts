@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldAutoReturn, wrapCode, isPlaywrightChannelOwner } from './executor.js'
+import { PlaywrightExecutor, shouldAutoReturn, wrapCode, isPlaywrightChannelOwner } from './executor.js'
 
 describe('shouldAutoReturn', () => {
   it('returns true for simple expressions', () => {
@@ -134,6 +134,41 @@ describe('wrapCode', () => {
   it('wraps assignment expressions without return', () => {
     expect(wrapCode('x = 5')).toBe('(async () => { x = 5 })()')
   })
+})
+
+describe('locator-scoped snapshots', () => {
+  it('uses the locator page when multiple pages are open', async () => {
+    const executor = new PlaywrightExecutor({
+      cdpConfig: { headless: true },
+      logger: {
+        log: () => {},
+        error: () => {},
+      },
+    })
+
+    try {
+      const result = await executor.execute(`
+        await page.setContent('<main data-testid="wrong-page">WRONG DEFAULT PAGE</main>')
+        const locatorPage = await context.newPage()
+        try {
+          await locatorPage.setContent('<main data-testid="right-page">RIGHT LOCATOR PAGE</main>')
+          return await snapshot({
+            locator: locatorPage.locator('main'),
+            showDiffSinceLastCall: false,
+          })
+        } finally {
+          await locatorPage.close()
+        }
+      `, 30000)
+
+      expect(result.isError).toBe(false)
+      expect(result.text).toContain('RIGHT LOCATOR PAGE')
+      expect(result.text).not.toContain('WRONG DEFAULT PAGE')
+    } finally {
+      await executor.closeHeadlessContext()
+      await PlaywrightExecutor.closeSharedHeadlessBrowser()
+    }
+  }, 60000)
 })
 
 describe('isPlaywrightChannelOwner', () => {

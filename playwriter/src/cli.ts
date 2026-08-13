@@ -377,6 +377,16 @@ interface BrowserOption {
   activeCloudSessionId?: string
 }
 
+const sessionCreationLogger = {
+  log: (...args: unknown[]) => {
+    console.error(...args)
+  },
+}
+
+function printSessionId(sessionId: string): void {
+  console.log(sessionId)
+}
+
 cli
   .command('session new', 'Create a new session and print the session ID')
   .option('--host <host>', 'Remote relay server host')
@@ -419,8 +429,8 @@ cli
           process.exit(1)
         }
         const result = (await response.json()) as { id: string }
-        console.log(`Session ${result.id} created (headless). Use with: playwriter -s ${result.id} -e "..."`)
-        console.log(pc.dim('NOTE: Recording unavailable in headless mode.'))
+        printSessionId(result.id)
+        console.error(pc.dim('NOTE: Recording unavailable in headless mode.'))
       } catch (error: any) {
         if (error.message?.includes('Could not find a supported browser binary')) {
           console.error('No Chrome browser found. Install one first:')
@@ -453,8 +463,8 @@ cli
       await ensureRelayForSessionCreation(isLocal)
       const serverUrl = await getServerUrl(options.host)
       const result = await createDirectSession({ serverUrl, cdpEndpoint, token: options.token })
-      console.log(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
-      console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
+      printSessionId(result.id)
+      console.error(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
       return
     }
 
@@ -467,7 +477,7 @@ cli
         process.exit(1)
       }
       await ensureRelayForSessionCreation(isLocal)
-      console.log(pc.dim('Discovering Chrome instances with debugging enabled...'))
+      console.error(pc.dim('Discovering Chrome instances with debugging enabled...'))
       const instances = await discoverChromeInstances()
 
       if (instances.length === 0) {
@@ -483,11 +493,8 @@ cli
         const instance = instances[0]
         const serverUrl = await getServerUrl(options.host)
         const result = await createDirectSession({ serverUrl, cdpEndpoint: instance.wsUrl, browser: instance.browser, profiles: instance.profiles, token: options.token })
-        const profileLabel = formatInstanceProfiles(instance)
-        console.log(
-          `Session ${result.id} created (direct CDP, ${instance.browser}${profileLabel}). Use with: playwriter -s ${result.id} -e "..."`,
-        )
-        console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
+        printSessionId(result.id)
+        console.error(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
         return
       }
 
@@ -508,8 +515,8 @@ cli
         }
         const serverUrl = await getServerUrl(options.host)
         const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles, token: options.token })
-        console.log(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
-        console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
+        printSessionId(result.id)
+        console.error(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
         return
       }
 
@@ -522,19 +529,19 @@ cli
     let extensions: ExtensionStatus[] = []
 
     if (isLocal) {
-      await ensureRelayServer({ logger: console })
+      await ensureRelayServer({ logger: sessionCreationLogger })
       extensions = await waitForConnectedExtensions({
         timeoutMs: 12000,
         pollIntervalMs: 250,
-        logger: console,
+        logger: sessionCreationLogger,
       })
 
       if (extensions.length === 0) {
-        console.log(pc.dim('Waiting briefly for extension to reconnect...'))
+        console.error(pc.dim('Waiting briefly for extension to reconnect...'))
         extensions = await waitForConnectedExtensions({
           timeoutMs: 10000,
           pollIntervalMs: 250,
-          logger: console,
+          logger: sessionCreationLogger,
         })
       }
     } else {
@@ -574,9 +581,9 @@ cli
               blockProxyResources: computeBlockProxyResources(options),
               token: options.token,
             })
-          console.log(`Session ${result.id} created (cloud). Use with: playwriter -s ${result.id} -e "..."`)
+          printSessionId(result.id)
           if (result.liveUrl) {
-            console.log(pc.dim(`Live view: ${result.liveUrl}`))
+            console.error(pc.dim(`Live view: ${result.liveUrl}`))
           }
           return
         }
@@ -626,8 +633,8 @@ cli
           process.exit(1)
         }
         const result = (await response.json()) as { id: string; extensionId: string | null }
-        console.log(`Session ${result.id} created. Use with: playwriter -s ${result.id} -e "..."`)
-        printCloudTip()
+        printSessionId(result.id)
+        printCloudTip({ log: console.error })
       } catch (error: any) {
         console.error(`Error: ${error.message}`)
         process.exit(1)
@@ -638,7 +645,7 @@ cli
     // Multiple extensions: also discover direct CDP instances and cloud browsers.
     // Direct discovery only works locally — remote relay can't reach local Chrome debug ports.
     const directInstances = isLocal ? await (async () => {
-      console.log(pc.dim('Discovering additional Chrome instances...'))
+      console.error(pc.dim('Discovering additional Chrome instances...'))
       return await discoverChromeInstances()
     })() : []
 
@@ -691,14 +698,14 @@ cli
               blockProxyResources: computeBlockProxyResources(options),
               token: options.token,
             })
-          console.log(`Session ${result.id} created (cloud). Use with: playwriter -s ${result.id} -e "..."`)
+          printSessionId(result.id)
           if (result.liveUrl) {
-            console.log(pc.dim(`Live view: ${result.liveUrl}`))
+            console.error(pc.dim(`Live view: ${result.liveUrl}`))
           }
         } else if (selected.type === 'direct') {
           const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles, token: options.token })
-          console.log(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
-          console.log(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
+          printSessionId(result.id)
+          console.error(pc.dim('NOTE: Recording unavailable in direct CDP mode.'))
         } else {
           const cwd = process.cwd()
           const response = await fetch(`${serverUrl}/cli/session/new`, {
@@ -712,8 +719,8 @@ cli
             process.exit(1)
           }
           const result = (await response.json()) as { id: string }
-          console.log(`Session ${result.id} created. Use with: playwriter -s ${result.id} -e "..."`)
-          printCloudTip()
+          printSessionId(result.id)
+          printCloudTip({ log: console.error })
         }
       } catch (error: any) {
         console.error(`Error: ${error.message}`)
@@ -731,7 +738,7 @@ cli
 
 async function ensureRelayForSessionCreation(isLocal: boolean): Promise<void> {
   if (isLocal) {
-    await ensureRelayServer({ logger: console })
+    await ensureRelayServer({ logger: sessionCreationLogger })
   }
 }
 
@@ -870,12 +877,12 @@ async function handleCloudBrowserNotFound(browserKey: string, { hasCloudOptions 
   process.exit(1)
 }
 
-function printCloudTip(): void {
-  console.log('')
-  console.log(
+function printCloudTip({ log = console.log }: { log?: (...args: unknown[]) => void } = {}): void {
+  log('')
+  log(
     pc.dim('Tip: Need stealth browsing, VPS control, or auto CAPTCHA solving? Run `playwriter cloud login` or set PLAYWRITER_API_KEY'),
   )
-  console.log(
+  log(
     pc.dim('     to control a browser in the cloud instead of local Chrome.'),
   )
 }
