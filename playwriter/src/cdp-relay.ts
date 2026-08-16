@@ -36,6 +36,11 @@ import { RecordingRelay } from './recording-relay.js'
 import { StreamRelay } from './stream-relay.js'
 import { appendSessionToWsUrl } from './chrome-discovery.js'
 import * as relayState from './relay-state.js'
+import {
+  completeRecoveredCDPTimeout,
+  RecoveredCDPTimeoutError,
+  recoverTimedOutExtensionRequest,
+} from './cdp-request-timeout-recovery.js'
 
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
@@ -429,7 +434,18 @@ export async function startPlayWriterCDPRelayServer({
             requestId: id,
           }),
         )
-        reject(new Error(`Extension request timeout after ${timeout}ms: ${method}`))
+        void recoverTimedOutExtensionRequest({
+          method,
+          params,
+          timeout,
+          sendRecovery: (recoveryRequest) =>
+            sendToExtension({
+              extensionId: resolvedExtensionId,
+              method: recoveryRequest.method,
+              params: recoveryRequest.params,
+              timeout: recoveryRequest.timeout,
+            }),
+        }).then(reject)
       }, timeout)
 
       const pendingRequest = {
@@ -439,6 +455,22 @@ export async function startPlayWriterCDPRelayServer({
         },
         reject: (error) => {
           clearTimeout(timeoutId)
+          if (forwardCdpParams?.sessionId && error.message.startsWith('CDP command timed out after ')) {
+            void recoverTimedOutExtensionRequest({
+              method,
+              params,
+              timeout,
+              requestError: error,
+              sendRecovery: (recoveryRequest) =>
+                sendToExtension({
+                  extensionId: resolvedExtensionId,
+                  method: recoveryRequest.method,
+                  params: recoveryRequest.params,
+                  timeout: recoveryRequest.timeout,
+                }),
+            }).then(reject)
+            return
+          }
           reject(error)
         },
       }
@@ -1403,8 +1435,25 @@ export async function startPlayWriterCDPRelayServer({
               sessionId,
               error: { message: (e as Error).message },
             }
-            sendToPlaywright({ message: errorResponse, clientId })
-            emitter.emit('cdp:response', { clientId, response: errorResponse, command: message })
+            await completeRecoveredCDPTimeout({
+              error: e as Error,
+              sendErrorResponse: () => {
+                sendToPlaywright({ message: errorResponse, clientId })
+                emitter.emit('cdp:response', { clientId, response: errorResponse, command: message })
+              },
+              publishRecovery: async (recoveryId, publicationToken) => {
+                try {
+                  await sendToExtension({
+                    extensionId: extensionConn.id,
+                    method: 'publishRecoveredCDPTarget',
+                    params: { recoveryId, publicationToken },
+                    timeout: 15000,
+                  })
+                } catch (publishError) {
+                  logger?.error('Failed to publish recovered CDP target:', publishError)
+                }
+              },
+            })
           }
         },
 

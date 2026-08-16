@@ -2,7 +2,12 @@ import { CDPEventFor, ProtocolMapping } from './cdp-types.js'
 
 export const VERSION = 1
 
-type ForwardCDPCommand = {
+// The extension owns the recovery deadline. The relay waits slightly longer so it
+// always receives either the recovered target or the extension's bounded failure.
+export const TIMED_OUT_CDP_TARGET_RECOVERY_TIMEOUT_MS = 30000
+export const TIMED_OUT_CDP_TARGET_RECOVERY_REQUEST_TIMEOUT_MS = 35000
+
+export type ForwardCDPCommand = {
   [K in keyof ProtocolMapping.Commands]: {
     id: number
     method: 'forwardCDPCommand'
@@ -15,7 +20,41 @@ type ForwardCDPCommand = {
   }
 }[keyof ProtocolMapping.Commands]
 
-export type ExtensionCommandMessage = ForwardCDPCommand
+export type RecoverTimedOutCDPTargetParams = {
+  sessionId: string
+  timedOutMethod: string
+}
+
+export type RecoverTimedOutCDPTargetResult =
+  | {
+      status: 'recovered'
+      recoveryId: string
+      publicationToken: string
+      oldSessionId: string
+      newSessionId: string
+      targetId: string
+    }
+  | {
+      status: 'stale'
+      oldSessionId: string
+    }
+
+export type RecoverTimedOutCDPTargetMessage = {
+  id: number
+  method: 'recoverTimedOutCDPTarget'
+  params: RecoverTimedOutCDPTargetParams
+}
+
+export type PublishRecoveredCDPTargetMessage = {
+  id: number
+  method: 'publishRecoveredCDPTarget'
+  params: { recoveryId: string; publicationToken: string }
+}
+
+export type ExtensionCommandMessage =
+  | ForwardCDPCommand
+  | RecoverTimedOutCDPTargetMessage
+  | PublishRecoveredCDPTargetMessage
 
 export type ExtensionResponseMessage = {
   id: number
