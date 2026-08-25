@@ -695,18 +695,26 @@ export async function startPlayWriterCDPRelayServer({
       return progress
     }
 
-    const downloadPaths = downloadPathsForExtension(extensionId)
-    if (downloadPaths.length === 0) {
-      // No client asked for downloads to be saved, so none of them has an artifact to read.
-      return progress
-    }
-
-    // The completed event reaches every client at once and there is no per-client download
-    // event to differentiate, so a file that cannot be placed for one client is reported as
-    // cancelled for all of them rather than letting that client fail later on a missing file.
-    const failures = (
-      await Promise.all(
-        downloadPaths.map((downloadPath) =>
+    // Copying is asynchronous and the completed event is broadcast to whichever clients are
+    // connected when it is sent, so a client whose Browser.setDownloadBehavior lands while a
+    // copy is in flight would otherwise be told the download completed with nothing at its
+    // own <downloadPath>/<guid>. Copying until the set of paths stops growing closes that
+    // window: the check that ends this loop runs with no await after it, and the caller
+    // sends the event without awaiting again, so no path can be registered in between.
+    const copied = new Set<string>()
+    const failures: string[] = []
+    for (;;) {
+      const pending = downloadPathsForExtension(extensionId).filter((downloadPath) => {
+        return !copied.has(downloadPath)
+      })
+      if (pending.length === 0) {
+        break
+      }
+      for (const downloadPath of pending) {
+        copied.add(downloadPath)
+      }
+      const results = await Promise.all(
+        pending.map((downloadPath) =>
           copyDownloadToArtifact({
             downloadPath,
             guid: progress.guid,
@@ -715,8 +723,17 @@ export async function startPlayWriterCDPRelayServer({
           }),
         ),
       )
-    ).filter((failure): failure is string => Boolean(failure))
+      failures.push(...results.filter((failure): failure is string => Boolean(failure)))
+    }
 
+    if (copied.size === 0) {
+      // No client asked for downloads to be saved, so none of them has an artifact to read.
+      return progress
+    }
+
+    // The completed event reaches every client at once and there is no per-client download
+    // event to differentiate, so a file that cannot be placed for one client is reported as
+    // cancelled for all of them rather than letting that client fail later on a missing file.
     if (failures.length === 0) {
       return progress
     }

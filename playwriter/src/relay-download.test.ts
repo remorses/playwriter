@@ -334,6 +334,55 @@ describe('download protocol over the relay', () => {
 
   })
 
+  test('materializes for a client that registers its path while the copy is in flight', async () => {
+    const extension = await connectExtension()
+    const pathA = artifactDir('inflight-a')
+    const pathB = artifactDir('inflight-b')
+    const clientA = await connectClient({ clientId: 'inflight-a', downloadPath: pathA })
+    // B is connected and will receive the completed event, but the relay does not know
+    // where its artifacts go yet.
+    const clientB = await connectClient({ clientId: 'inflight-b' })
+
+    const guid = 'c3333333-3333-4333-8333-333333333333'
+    // Big enough that copying it for A takes far longer than a message from B crossing a
+    // loopback socket, which is what puts B's registration inside the copy.
+    const contents = `${'A'.repeat(16 * 1024 * 1024 - 4)}TAIL`
+    const chromeFile = writeChromeDownload({ name: 'big-export.bin', contents })
+
+    const seenByA = clientA.waitFor(isDownloadProgress, 'downloadProgress on A').then((message) => ({
+      message,
+      artifactExisted: fs.existsSync(path.join(pathA, guid)),
+    }))
+    const seenByB = clientB.waitFor(isDownloadProgress, 'downloadProgress on B').then((message) => ({
+      message,
+      artifactExisted: fs.existsSync(path.join(pathB, guid)),
+    }))
+
+    extension.send({ method: 'downloadCompleted', params: { guid, filename: chromeFile } })
+    extension.send({
+      method: 'forwardCDPEvent',
+      params: { sessionId: 'pw-tab-1', method: 'Page.downloadProgress', params: { guid, state: 'completed' } },
+    })
+    // Sent while the relay is already copying for A. Reading the client paths once, before
+    // the copies, leaves B out of them and still sends B the completed event.
+    clientB.send({
+      id: 7,
+      method: 'Browser.setDownloadBehavior',
+      params: { behavior: 'allowAndName', downloadPath: pathB, eventsEnabled: true },
+    })
+    await clientB.waitFor((message) => message.id === 7, 'setDownloadBehavior ack for inflight-b')
+
+    const resultA = await seenByA
+    const resultB = await seenByB
+    expect(resultA.message.params.state).toBe('completed')
+    expect(resultB.message.params.state).toBe('completed')
+    expect(resultA.artifactExisted).toBe(true)
+    expect(resultB.artifactExisted).toBe(true)
+    const artifactB = fs.readFileSync(path.join(pathB, guid), 'utf8')
+    expect(artifactB.length).toBe(contents.length)
+    expect(artifactB.endsWith('TAIL')).toBe(true)
+  })
+
   test('stops writing artifacts for a client that disconnected', async () => {
     const extension = await connectExtension()
     const pathA = artifactDir('stay')

@@ -24,6 +24,6 @@ Chrome reports every download in the profile to the extension, including from ta
 
 When the path cannot be resolved or copied, the relay logs the reason and reports the download as canceled, so `download.saveAs()` rejects immediately instead of failing on a missing file later.
 
-Every connected Playwright client now gets the finished file in its own artifact directory, so a download started by one client no longer breaks when a second client connects.
+Every connected Playwright client now gets the finished file in its own artifact directory, so a download started by one client no longer breaks when a second client connects. That includes a client whose `Browser.setDownloadBehavior` arrives while the copy for another client is already running: the relay keeps copying until the set of artifact directories stops growing, so no client is told the download completed before the file is at its own `<downloadPath>/<guid>`.
 
 The extension needs the new `downloads` permission for this, and extensions older than 0.0.120 keep working unchanged against the new relay.
