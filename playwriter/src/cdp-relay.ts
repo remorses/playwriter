@@ -138,12 +138,19 @@ export async function startPlayWriterCDPRelayServer({
   token,
   logger,
   cdpLogger,
+  copyDownload = copyDownloadToArtifact,
 }: {
   port?: number
   host?: string
   token?: string
   logger?: { log(...args: any[]): void; error(...args: any[]): void }
   cdpLogger?: CdpLogger
+  /**
+   * How a finished download is put where a Playwright client reads it. Tests replace it to
+   * control when a copy starts and ends, which is the only way to place another client's
+   * registration inside a copy without timing it.
+   */
+  copyDownload?: typeof copyDownloadToArtifact
 } = {}): Promise<RelayServer> {
   const emitter = new EventEmitter()
   const store = relayState.createRelayStore()
@@ -715,7 +722,7 @@ export async function startPlayWriterCDPRelayServer({
       }
       const results = await Promise.all(
         pending.map((downloadPath) =>
-          copyDownloadToArtifact({
+          copyDownload({
             downloadPath,
             guid: progress.guid,
             filename: reported.filename,

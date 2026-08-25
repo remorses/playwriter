@@ -128,11 +128,46 @@ describe('download protocol over the relay', () => {
     }
   }
 
+  /**
+   * Holds the relay's first artifact copy for one guid open. `started` resolves once the
+   * relay is inside that copy, which is past the point where it read the client paths, and
+   * the copy only finishes when the test calls `release`. That is what lets a test register
+   * a second client *during* a copy instead of hoping a big file outlasts a socket message.
+   */
+  type CopyGate = { started: Promise<void>; release: () => void }
+  const copyGates = new Map<string, { markStarted: () => void; released: Promise<void>; release: () => void }>()
+
+  function holdFirstCopy(guid: string): CopyGate {
+    let markStarted = (): void => {}
+    const started = new Promise<void>((resolve) => {
+      markStarted = () => resolve()
+    })
+    let release = (): void => {}
+    const released = new Promise<void>((resolve) => {
+      release = () => resolve()
+    })
+    copyGates.set(guid, { markStarted, released, release })
+    return { started, release }
+  }
+
   beforeAll(async () => {
     const { startPlayWriterCDPRelayServer } = await import('./cdp-relay.js')
     server = await startPlayWriterCDPRelayServer({
       port: TEST_PORT,
       logger: { log: recordLog, error: recordLog },
+      // The real copy, except for the one guid a test is holding open. Every other test in
+      // this file goes through the untouched filesystem path.
+      copyDownload: async (args) => {
+        const gate = copyGates.get(args.guid)
+        if (gate) {
+          // Only the first copy for that guid waits; the ones the relay makes afterwards
+          // for clients that registered late must run, or there is nothing to assert on.
+          copyGates.delete(args.guid)
+          gate.markStarted()
+          await gate.released
+        }
+        return await copyDownloadToArtifact(args)
+      },
     })
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-download-protocol-'))
   })
@@ -140,6 +175,10 @@ describe('download protocol over the relay', () => {
   // Every socket closes here rather than at the end of each test, so one failing
   // assertion cannot leave a second extension connected and break the tests after it.
   afterEach(async () => {
+    for (const gate of Array.from(copyGates.values())) {
+      gate.release()
+    }
+    copyGates.clear()
     const toClose = openSockets
     openSockets = []
     await Promise.all(toClose.map((socket) => socket.close()))
@@ -344,10 +383,9 @@ describe('download protocol over the relay', () => {
     const clientB = await connectClient({ clientId: 'inflight-b' })
 
     const guid = 'c3333333-3333-4333-8333-333333333333'
-    // Big enough that copying it for A takes far longer than a message from B crossing a
-    // loopback socket, which is what puts B's registration inside the copy.
-    const contents = `${'A'.repeat(16 * 1024 * 1024 - 4)}TAIL`
-    const chromeFile = writeChromeDownload({ name: 'big-export.bin', contents })
+    const contents = 'quarter,total\nQ3,1180\n'
+    const chromeFile = writeChromeDownload({ name: 'inflight-export.csv', contents })
+    const gate = holdFirstCopy(guid)
 
     const seenByA = clientA.waitFor(isDownloadProgress, 'downloadProgress on A').then((message) => ({
       message,
@@ -363,14 +401,20 @@ describe('download protocol over the relay', () => {
       method: 'forwardCDPEvent',
       params: { sessionId: 'pw-tab-1', method: 'Page.downloadProgress', params: { guid, state: 'completed' } },
     })
-    // Sent while the relay is already copying for A. Reading the client paths once, before
-    // the copies, leaves B out of them and still sends B the completed event.
+
+    // The relay is now inside the copy for A, past the point where it read which clients
+    // have an artifact directory. B registers here, and only then does the copy finish.
+    await gate.started
     clientB.send({
       id: 7,
       method: 'Browser.setDownloadBehavior',
       params: { behavior: 'allowAndName', downloadPath: pathB, eventsEnabled: true },
     })
     await clientB.waitFor((message) => message.id === 7, 'setDownloadBehavior ack for inflight-b')
+    // Nothing has been sent to either client yet: the completed event waits on this copy.
+    expect(clientA.messages.some(isDownloadProgress)).toBe(false)
+    expect(clientB.messages.some(isDownloadProgress)).toBe(false)
+    gate.release()
 
     const resultA = await seenByA
     const resultB = await seenByB
@@ -378,9 +422,7 @@ describe('download protocol over the relay', () => {
     expect(resultB.message.params.state).toBe('completed')
     expect(resultA.artifactExisted).toBe(true)
     expect(resultB.artifactExisted).toBe(true)
-    const artifactB = fs.readFileSync(path.join(pathB, guid), 'utf8')
-    expect(artifactB.length).toBe(contents.length)
-    expect(artifactB.endsWith('TAIL')).toBe(true)
+    expect(fs.readFileSync(path.join(pathB, guid), 'utf8')).toBe(contents)
   })
 
   test('stops writing artifacts for a client that disconnected', async () => {
