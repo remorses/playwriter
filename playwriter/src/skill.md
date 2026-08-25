@@ -44,6 +44,16 @@ Reset a session if the browser connection is stale or broken:
 playwriter session reset <sessionId>
 ```
 
+When more than one extension/browser can connect, persist the intended default once instead of passing its install key to every session command:
+
+```bash
+playwriter browser list
+playwriter browser default <key>
+playwriter session new
+```
+
+The stored key is fail-safe: if that browser is offline, session creation fails instead of silently selecting another Chrome profile. An explicit `--browser <key>` overrides the stored value for one command, and `PLAYWRITER_BROWSER` overrides it for the current environment. Clear the stored value with `playwriter browser default --clear`.
+
 ### Remote access (control browser from another machine)
 
 Playwriter can control a Chrome browser running on a different machine over the internet. The host machine runs `playwriter serve` with a [traforo](https://traforo.dev) tunnel, and the remote machine connects through the tunnel URL.

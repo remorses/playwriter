@@ -27,6 +27,13 @@ import {
 } from './relay-client.js'
 import { discoverChromeInstances, resolveDirectInput, type DiscoveredInstance } from './chrome-discovery.js'
 import { getCloudClient, loadCloudAuth, saveCloudAuth, CloudClient, buildLiveUrl } from './cloud-client.js'
+import {
+  clearDefaultBrowserKey,
+  getBrowserPreferencePath,
+  loadPreferredBrowserKey,
+  resolvePreferredBrowserKey,
+  saveDefaultBrowserKey,
+} from './browser-preference.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const executeDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
@@ -398,9 +405,21 @@ cli
     }
 
     const isLocal = !options.host && !process.env.PLAYWRITER_HOST
+    const preferredBrowserKey: string | undefined = (() => {
+      if (options.direct !== undefined) {
+        return options.browser
+      }
+      try {
+        return loadPreferredBrowserKey({ cliKey: options.browser })
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error(`Error: ${message}`)
+        process.exit(1)
+      }
+    })()
 
     // --browser headless: launch headless Chrome via chromium.launch(), no extension
-    if (options.browser === 'headless') {
+    if (preferredBrowserKey === 'headless') {
       try {
         await ensureRelayForSessionCreation(isLocal)
         const serverUrl = await getServerUrl(options.host)
@@ -557,11 +576,11 @@ cli
         await ensureRelayForSessionCreation(isLocal)
         const allOptions: BrowserOption[] = [...cloudOptions]
 
-        if (options.browser) {
-          const selected = allOptions.find((opt) => { return opt.key === options.browser })
+        if (preferredBrowserKey) {
+          const selected = allOptions.find((opt) => { return opt.key === preferredBrowserKey })
           if (!selected) {
-            await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: true })
-            console.error(`Browser not found: ${options.browser}`)
+            await handleCloudBrowserNotFound(preferredBrowserKey, { hasCloudOptions: true })
+            console.error(`Browser not found: ${preferredBrowserKey}`)
             console.error('Available: ' + allOptions.map((opt) => opt.key).join(', '))
             process.exit(1)
           }
@@ -595,8 +614,9 @@ cli
         process.exit(1)
       }
 
-      if (options.browser) {
-        await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: false })
+      if (preferredBrowserKey) {
+        await handleCloudBrowserNotFound(preferredBrowserKey, { hasCloudOptions: false })
+        console.error(`Configured browser is not connected: ${preferredBrowserKey}`)
       }
       console.error('No connected browsers detected. Click the Playwriter extension icon.')
       console.error(pc.dim('Tip: Use --direct to connect via Chrome DevTools Protocol instead.'))
@@ -613,8 +633,13 @@ cli
       }
     }
 
-    // Single extension: auto-select (unchanged behavior)
-    if (extensions.length === 1 && !options.browser) {
+    // A persisted preference remains authoritative even when only one other browser is online.
+    // This prevents a background automation profile from becoming the default after the
+    // intended user Chrome closes or its extension disconnects.
+    const singleExtensionKey = extensions.length === 1
+      ? extensions[0].stableKey || extensions[0].extensionId
+      : undefined
+    if (extensions.length === 1 && (!preferredBrowserKey || preferredBrowserKey === singleExtensionKey)) {
       const selectedExtension = extensions[0]
       try {
         const serverUrl = await getServerUrl(options.host)
@@ -670,13 +695,13 @@ cli
       ...cloudOptions,
     ]
 
-    if (options.browser) {
+    if (preferredBrowserKey) {
       const selected = allOptions.find((opt) => {
-        return opt.key === options.browser
+        return opt.key === preferredBrowserKey
       })
       if (!selected) {
-        await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: cloudOptions.length > 0 })
-        console.error(`Browser not found: ${options.browser}`)
+        await handleCloudBrowserNotFound(preferredBrowserKey, { hasCloudOptions: cloudOptions.length > 0 })
+        console.error(`Browser not found: ${preferredBrowserKey}`)
         console.error('Available: ' + allOptions.map((opt) => opt.key).join(', '))
         process.exit(1)
       }
@@ -1730,6 +1755,53 @@ cli
   })
 
 cli
+  .command('browser default [key]', 'Show or persist the browser used by unqualified session commands')
+  .option('--clear', 'Clear the persisted browser preference')
+  .action(async (key, options) => {
+    try {
+      const environmentKey = resolvePreferredBrowserKey({ environmentKey: process.env.PLAYWRITER_BROWSER })
+
+      if (options.clear) {
+        if (key) {
+          console.error('Error: pass either a browser key or --clear, not both.')
+          process.exit(1)
+        }
+        const removed = clearDefaultBrowserKey()
+        console.log(removed ? 'Default browser cleared.' : 'No persisted default browser was configured.')
+        return
+      }
+
+      if (key) {
+        const storedKey = key.trim()
+        saveDefaultBrowserKey({ browser: storedKey })
+        console.log(`Default browser: ${storedKey}`)
+        console.log(pc.dim(`Saved to: ${getBrowserPreferencePath()}`))
+        if (environmentKey) {
+          console.log(pc.yellow('PLAYWRITER_BROWSER is set and overrides this persisted preference.'))
+        }
+        return
+      }
+
+      const effectiveKey = loadPreferredBrowserKey({})
+      if (!effectiveKey) {
+        console.log('No default browser configured.')
+        console.log(pc.dim('Set one with: playwriter browser default <key>'))
+        return
+      }
+      console.log(`Default browser: ${effectiveKey}`)
+      if (environmentKey) {
+        console.log(pc.dim('Source: PLAYWRITER_BROWSER'))
+        return
+      }
+      console.log(pc.dim(`Source: ${getBrowserPreferencePath()}`))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`Error: ${message}`)
+      process.exit(1)
+    }
+  })
+
+cli
   .command('browser list', 'List all available browsers: extension-connected and direct CDP on port 9222')
   .option('--host <host>', z.string().describe('Remote relay server host'))
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
@@ -1792,6 +1864,20 @@ cli
 
     printBrowserTable(allOptions)
     console.log('')
+
+    try {
+      const effectiveKey = loadPreferredBrowserKey({})
+      if (effectiveKey) {
+        console.log(pc.dim(`Default: ${effectiveKey}`))
+      } else {
+        console.log(pc.dim('Default: automatic (set with `playwriter browser default <key>`)'))
+      }
+      console.log('')
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`Error: ${message}`)
+      process.exit(1)
+    }
 
     const hasDirectInstances = allOptions.some((opt) => {
       return opt.type === 'direct'
