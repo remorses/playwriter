@@ -8,6 +8,7 @@ import type { Protocol } from './cdp-types.js'
 import type { CDPCommand, CDPResponseBase, CDPEventBase, CDPEventFor, RelayServerEvents } from './cdp-types.js'
 import type {
   ExtensionMessage,
+  DownloadCompletedMessage,
   ExtensionEventMessage,
   RecordingDataMessage,
   RecordingCancelledMessage,
@@ -99,6 +100,38 @@ export type RelayServer = {
   off<K extends keyof RelayServerEvents>(event: K, listener: RelayServerEvents[K]): void
 }
 
+/**
+ * Copies a finished download to <downloadPath>/<guid>, the exact path Playwright's Download
+ * artifact reads. Chrome writes downloads wherever its own download settings point and a
+ * tab-scoped debugger session cannot change that, so the relay copies the file the extension
+ * reported instead of redirecting it. Returns why the artifact could not be created.
+ */
+export async function copyDownloadToArtifact({
+  downloadPath,
+  guid,
+  filename,
+  error,
+}: {
+  downloadPath: string
+  guid: string
+  filename?: string
+  error?: string
+}): Promise<string | undefined> {
+  if (!filename) {
+    return `Download ${guid} finished in Chrome but its file could not be located: ${error || 'unknown reason'}`
+  }
+
+  const destination = path.join(downloadPath, guid)
+  try {
+    await fs.promises.mkdir(downloadPath, { recursive: true })
+    await fs.promises.copyFile(filename, destination)
+    return undefined
+  } catch (copyError) {
+    const message = copyError instanceof Error ? copyError.message : String(copyError)
+    return `Failed to copy download ${guid} from ${filename} to ${destination}: ${message}`
+  }
+}
+
 export async function startPlayWriterCDPRelayServer({
   port = 19988,
   host = '127.0.0.1',
@@ -114,7 +147,27 @@ export async function startPlayWriterCDPRelayServer({
 } = {}): Promise<RelayServer> {
   const emitter = new EventEmitter()
   const store = relayState.createRelayStore()
-  const extensionDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
+  // Download behavior each Playwright client asked for, keyed by that client. Download
+  // events are broadcast to every client bound to an extension and each client's Download
+  // artifact reads <its own downloadsPath>/<guid>, so one path per extension would strand
+  // every client except whichever one set the behavior last.
+  const clientDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
+  // Path Chrome actually wrote each finished download to, keyed by extension connection
+  // and then by CDP download guid. Filled by the extension's downloadCompleted message,
+  // consumed by the completed Page.downloadProgress event that follows it.
+  const finishedDownloads = new Map<string, Map<string, DownloadCompletedMessage['params']>>()
+
+  /** Every artifact directory a finished download has to be materialized in, deduplicated. */
+  function downloadPathsForExtension(extensionId: string): string[] {
+    const clients = store.getState().playwrightClients
+    const paths = new Set<string>()
+    for (const [clientId, behavior] of clientDownloadBehavior) {
+      if (behavior.downloadPath && clients.get(clientId)?.extensionId === extensionId) {
+        paths.add(behavior.downloadPath)
+      }
+    }
+    return Array.from(paths)
+  }
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
@@ -592,20 +645,6 @@ export async function startPlayWriterCDPRelayServer({
     }
   }
 
-  function getPageTargetSessionIds({ extensionId }: { extensionId: string }): string[] {
-    const extensionState = store.getState().extensions.get(extensionId)
-    if (!extensionState) {
-      return []
-    }
-    return Array.from(extensionState.connectedTargets.values())
-      .filter((target) => {
-        return target.targetInfo.type === 'page'
-      })
-      .map((target) => {
-        return target.sessionId
-      })
-  }
-
   function maybeEmitBrowserDownloadCompatEvent({
     method,
     params,
@@ -634,58 +673,71 @@ export async function startPlayWriterCDPRelayServer({
     })
   }
 
-  async function applyDownloadBehaviorToTargets({
+  /**
+   * Returns the Page.downloadProgress params to forward to Playwright. A completed download
+   * is held back until its file sits where Playwright will look for it; when that is not
+   * possible the event becomes a cancellation, which Playwright surfaces as a rejected
+   * download.saveAs() instead of a missing-file error much later.
+   */
+  async function settleDownloadProgress({
     extensionId,
-    behavior,
-    source,
-    targetSessionIds,
+    progress,
   }: {
     extensionId: string
-    behavior: Protocol.Browser.SetDownloadBehaviorRequest
-    source?: CDPCommand['source']
-    targetSessionIds?: string[]
-  }): Promise<void> {
-    const pageBehavior: Protocol.Page.SetDownloadBehaviorRequest['behavior'] =
-      behavior.behavior === 'allowAndName' ? 'allow' : behavior.behavior
-    const pageParams: Protocol.Page.SetDownloadBehaviorRequest = (() => {
-      if (pageBehavior === 'allow' && behavior.downloadPath) {
-        return { behavior: pageBehavior, downloadPath: behavior.downloadPath }
-      }
-      return { behavior: pageBehavior }
-    })()
-    const sessions = targetSessionIds || getPageTargetSessionIds({ extensionId })
-    if (sessions.length === 0) {
-      return
+    progress: Protocol.Page.DownloadProgressEvent
+  }): Promise<Protocol.Page.DownloadProgressEvent> {
+    const finished = finishedDownloads.get(extensionId)
+    const reported = finished?.get(progress.guid)
+    finished?.delete(progress.guid)
+
+    // No report means an extension too old to send one; it stays on the pre-existing path.
+    if (!reported) {
+      return progress
     }
-    await Promise.all(
-      sessions.map(async (targetSessionId) => {
-        try {
-          await sendToExtension({
-            extensionId,
-            method: 'forwardCDPCommand',
-            params: {
-              sessionId: targetSessionId,
-              method: 'Page.setDownloadBehavior',
-              params: pageParams,
-              source,
-            },
-          })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          logger?.log(pc.yellow(`[Server] Failed to apply Page.setDownloadBehavior to ${targetSessionId}: ${message}`))
-        }
-      }),
-    )
+
+    const downloadPaths = downloadPathsForExtension(extensionId)
+    if (downloadPaths.length === 0) {
+      // No client asked for downloads to be saved, so none of them has an artifact to read.
+      return progress
+    }
+
+    // The completed event reaches every client at once and there is no per-client download
+    // event to differentiate, so a file that cannot be placed for one client is reported as
+    // cancelled for all of them rather than letting that client fail later on a missing file.
+    const failures = (
+      await Promise.all(
+        downloadPaths.map((downloadPath) =>
+          copyDownloadToArtifact({
+            downloadPath,
+            guid: progress.guid,
+            filename: reported.filename,
+            error: reported.error,
+          }),
+        ),
+      )
+    ).filter((failure): failure is string => Boolean(failure))
+
+    if (failures.length === 0) {
+      return progress
+    }
+
+    for (const failure of failures) {
+      logger?.error(pc.red(`[Server] ${failure}`))
+    }
+    return { ...progress, state: 'canceled' }
   }
 
   async function routeCdpCommand({
     extensionId,
+    clientId,
     method,
     params,
     sessionId,
     source,
   }: {
     extensionId: string | null
+    /** Playwright client that sent the command, absent for relay-internal calls. */
+    clientId?: string
     method: CDPCommand['method'] | (string & {})
     params: CDPCommand['params']
     sessionId?: CDPCommand['sessionId']
@@ -710,14 +762,14 @@ export async function startPlayWriterCDPRelayServer({
         if (!downloadBehaviorParams?.behavior) {
           throw new Error('behavior is required for Browser.setDownloadBehavior')
         }
-        if (resolvedExtensionId) {
-          extensionDownloadBehavior.set(resolvedExtensionId, downloadBehaviorParams)
-          await applyDownloadBehaviorToTargets({
-            extensionId: resolvedExtensionId,
-            behavior: downloadBehaviorParams,
-            source,
-          })
+        if (clientId) {
+          clientDownloadBehavior.set(clientId, downloadBehaviorParams)
         }
+        // Nothing is forwarded to the extension. Chrome answers every variant of
+        // Page.setDownloadBehavior on an extension-owned tab session with "Cannot not access
+        // browser-level commands" and does not expose the Browser domain there at all, so
+        // the download path Playwright asks for can only be honoured by copying the finished
+        // file into it — see settleDownloadProgress.
         return {}
       }
 
@@ -1275,6 +1327,7 @@ export async function startPlayWriterCDPRelayServer({
           try {
             const result = await routeCdpCommand({
               extensionId: extensionConn.id,
+              clientId,
               method,
               params,
               sessionId,
@@ -1410,6 +1463,9 @@ export async function startPlayWriterCDPRelayServer({
         },
 
         onClose() {
+          // A disconnected client can no longer read an artifact, so stop materializing
+          // finished downloads into its directory.
+          clientDownloadBehavior.delete(clientId)
           store.setState((s) => relayState.removePlaywrightClient(s, { clientId }))
           logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`))
         },
@@ -1589,6 +1645,12 @@ export async function startPlayWriterCDPRelayServer({
                 relay.handleRecordingCancelled(message)
               }
             }
+          } else if (message.method === 'downloadCompleted') {
+            // Recorded synchronously so the completed Page.downloadProgress event the
+            // extension sends next on this socket always finds it.
+            const byGuid = finishedDownloads.get(connectionId) || new Map<string, DownloadCompletedMessage['params']>()
+            byGuid.set(message.params.guid, message.params)
+            finishedDownloads.set(connectionId, byGuid)
           } else {
             const extensionEvent = message
 
@@ -1604,11 +1666,18 @@ export async function startPlayWriterCDPRelayServer({
               return
             }
 
+            // Playwright reads a finished download from <downloadPath>/<guid>, so the file has
+            // to be there before it is told the download completed.
+            const forwardedParams =
+              method === 'Page.downloadProgress' && params
+                ? await settleDownloadProgress({ extensionId: connectionId, progress: params })
+                : params
+
             if (!NOISY_LOG_EVENTS.has(method)) {
               logCdpJson({
                 timestamp: new Date().toISOString(),
                 direction: 'from-extension',
-                message: { method, params, sessionId },
+                message: { method, params: forwardedParams, sessionId },
               })
             }
 
@@ -1616,13 +1685,13 @@ export async function startPlayWriterCDPRelayServer({
               direction: 'from-extension',
               method,
               sessionId,
-              params,
+              params: forwardedParams,
             })
 
-            const cdpEvent: CDPEventBase = { method, sessionId, params }
+            const cdpEvent: CDPEventBase = { method, sessionId, params: forwardedParams } as CDPEventBase
             emitter.emit('cdp:event', { event: cdpEvent, sessionId })
 
-            maybeEmitBrowserDownloadCompatEvent({ method, params, extensionId: connectionId })
+            maybeEmitBrowserDownloadCompatEvent({ method, params: forwardedParams, extensionId: connectionId })
 
             if (method === 'Target.attachedToTarget') {
               const targetParams = params!
@@ -1683,15 +1752,6 @@ export async function startPlayWriterCDPRelayServer({
                   targetInfo: targetParams.targetInfo,
                 }),
               )
-
-              const cachedDownloadBehavior = extensionDownloadBehavior.get(connectionId)
-              if (cachedDownloadBehavior && targetParams.targetInfo.type === 'page') {
-                void applyDownloadBehaviorToTargets({
-                  extensionId: connectionId,
-                  behavior: cachedDownloadBehavior,
-                  targetSessionIds: [targetParams.sessionId],
-                })
-              }
 
               // Only forward to Playwright if this is a new target to avoid duplicates
               if (!alreadyConnected) {
@@ -1844,7 +1904,7 @@ export async function startPlayWriterCDPRelayServer({
                 message: {
                   sessionId,
                   method,
-                  params,
+                  params: forwardedParams,
                 } as CDPEventBase,
                 source: 'extension',
                 extensionId: connectionId,
@@ -1871,6 +1931,8 @@ export async function startPlayWriterCDPRelayServer({
             streamRelay.destroyAll('Extension disconnected')
           }
           streamRelays.delete(connectionId)
+
+          finishedDownloads.delete(connectionId)
 
           // Reject all pending I/O requests (state cleanup happens in removeExtension below)
           const closingExt = store.getState().extensions.get(connectionId)

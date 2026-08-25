@@ -14,6 +14,7 @@ import { initPlaywriterToolbar } from './toolbar/toolbar'
 import type { CDPEvent, Protocol } from 'playwriter/src/cdp-types'
 import type { ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/protocol'
 import { handleGhostBrowserCommand, type GhostBrowserCommandParams } from 'playwriter/src/ghost-browser'
+import { createDownloadTracker } from 'playwriter/src/download-tracker'
 // Inlined at build time via vite ?raw. Source: playwriter/src/ghost-cursor-client.ts
 import ghostCursorBundleCode from '../../playwriter/dist/ghost-cursor-client.js?raw'
 // Bippy: React fiber introspection library, used for "Copy React Source Path" context menu.
@@ -1189,6 +1190,75 @@ const DROPPED_CDP_EVENTS = new Set([
   'Network.resourceChangedPriority',
 ])
 
+// Chrome refuses every setDownloadBehavior variant on the tab-scoped debugger session this
+// extension owns ("Cannot not access browser-level commands"), so the relay can never
+// redirect a download into Playwright's artifact directory. chrome.downloads is the only
+// place the path Chrome actually used is readable, and it can still be catching up when
+// CDP reports the download complete, so reading it needs a bounded wait against the one
+// download item this guid owns. See playwriter/src/download-tracker.ts for the measured
+// event ordering that lets a guid be bound to an id at all, and for which downloads are
+// refused because Chrome's download items name no tab.
+const downloadTracker = createDownloadTracker({
+  search: (query) => chrome.downloads.search(query),
+  addChangeListener: (listener) => chrome.downloads.onChanged.addListener(listener),
+  removeChangeListener: (listener) => chrome.downloads.onChanged.removeListener(listener),
+  setTimeout: (callback, ms) => setTimeout(callback, ms),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+})
+
+// Chrome creates the download item and CDP announces it on two independent streams, so the
+// creation listener has to be registered up front rather than when a guid shows up. Every
+// download in the profile arrives here, including ones from tabs this extension never
+// attached to and ones the user started by hand: DownloadItem carries no tabId, so there is
+// nothing to filter on at this level. The tracker is the one place that decides which
+// creation belongs to which guid, and which downloads cannot be identified at all.
+chrome.downloads.onCreated.addListener((item) => {
+  downloadTracker.noteCreated(item)
+})
+
+function forwardCdpEvent({
+  source,
+  tab,
+  method,
+  params,
+}: {
+  source: chrome.debugger.DebuggerSession
+  tab: TabInfo
+  method: string
+  params: any
+}): void {
+  sendMessage({
+    method: 'forwardCDPEvent',
+    params: {
+      sessionId: source.sessionId || tab.sessionId,
+      method,
+      params,
+    },
+  })
+}
+
+async function forwardCompletedDownload({
+  source,
+  tab,
+  params,
+}: {
+  source: chrome.debugger.DebuggerSession
+  tab: TabInfo
+  params: any
+}): Promise<void> {
+  const resolved = await downloadTracker.resolveFinishedFile({ guid: params.guid })
+  downloadTracker.releaseStarted(params.guid)
+
+  if (resolved.error) {
+    logger.error(`Could not resolve the file for completed download ${params.guid}:`, resolved.error)
+  }
+
+  // The relay copies this file into Playwright's artifact directories when the completed
+  // event arrives next on this socket, so it has to be sent first.
+  sendMessage({ method: 'downloadCompleted', params: { guid: params.guid, ...resolved } })
+  forwardCdpEvent({ source, tab, method: 'Page.downloadProgress', params })
+}
+
 function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string, params: any): void {
   if (DROPPED_CDP_EVENTS.has(method)) {
     return
@@ -1198,6 +1268,20 @@ function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string
   if (!tab) return
 
   logger.debug('Forwarding CDP event:', method, 'from tab:', source.tabId)
+
+  if (method === 'Page.downloadWillBegin' && typeof params?.guid === 'string' && typeof params?.url === 'string') {
+    downloadTracker.trackStarted({ guid: params.guid, url: params.url, tabId: source.tabId })
+  }
+
+  if (method === 'Page.downloadProgress' && typeof params?.guid === 'string') {
+    if (params.state === 'completed') {
+      void forwardCompletedDownload({ source, tab, params })
+      return
+    }
+    if (params.state === 'canceled') {
+      downloadTracker.releaseStarted(params.guid)
+    }
+  }
 
   if (method === 'Target.attachedToTarget' && params?.sessionId) {
     const targetUrl = params.targetInfo?.url as string | undefined
@@ -1249,14 +1333,7 @@ function onDebuggerEvent(source: chrome.debugger.DebuggerSession, method: string
     }
   }
 
-  sendMessage({
-    method: 'forwardCDPEvent',
-    params: {
-      sessionId: source.sessionId || tab.sessionId,
-      method,
-      params,
-    },
-  })
+  forwardCdpEvent({ source, tab, method, params })
 }
 
 function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.debugger.DetachReason}`): void {
@@ -1290,6 +1367,7 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
     // keep sending commands to tabs Chrome already detached from.
     for (const [detachedTabId, tab] of store.getState().tabs.entries()) {
       detachTabFromPlaywright(detachedTabId, tab)
+      downloadTracker.releaseTab(detachedTabId)
     }
 
     store.setState({ tabs: new Map(), connectionState: 'idle', errorText: undefined })
@@ -1300,6 +1378,9 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
   if (tab) {
     detachTabFromPlaywright(tabId, tab)
   }
+  // A download announced on a tab Chrome detached from will never report completed, and a
+  // download left outstanding blocks the next download of the same URL from binding.
+  downloadTracker.releaseTab(tabId)
 
   store.setState((state) => {
     const newTabs = new Map(state.tabs)
