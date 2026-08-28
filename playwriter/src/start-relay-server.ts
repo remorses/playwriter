@@ -2,6 +2,7 @@ import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
 import { waitForRelayVersion } from './relay-client.js'
 import { LOG_CDP_FILE_PATH } from './utils.js'
+import url from 'node:url'
 
 process.title = 'playwriter-ws-server'
 
@@ -26,9 +27,10 @@ export async function startServer({
   host = '127.0.0.1',
   token,
 }: { port?: number; host?: string; token?: string } = {}) {
+  const resolvedToken = token ?? process.env.PLAYWRITER_TOKEN
   let server
   try {
-    server = await startPlayWriterCDPRelayServer({ port, host, token, logger })
+    server = await startPlayWriterCDPRelayServer({ port, host, token: resolvedToken, logger })
   } catch (err: unknown) {
     // When two relay processes race to start (issue #75), the loser gets
     // EADDRINUSE. Check if the winner is a valid relay and exit cleanly
@@ -66,4 +68,7 @@ export async function startServer({
 
   return server
 }
-startServer().catch(logger.error)
+
+if (process.argv[1] && import.meta.url === url.pathToFileURL(process.argv[1]).href) {
+  startServer().catch(logger.error)
+}
