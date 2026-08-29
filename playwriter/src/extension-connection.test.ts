@@ -664,6 +664,70 @@ describe('Extension Connection Tests', () => {
     await page.goto('about:blank')
   })
 
+  it('should reuse the existing CDP connection when the last attached page is replaced', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.disconnectEverything()
+    })
+
+    const originalPage = await browserContext.newPage()
+    await originalPage.goto('data:text/html,<title>Original Page</title><h1>replaced-page-original</h1>')
+    await originalPage.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const beforeResult = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          return { urls: context.pages().map((candidate) => candidate.url()) };
+        `,
+      },
+    })
+    expect((beforeResult as any).isError).not.toBe(true)
+    expect((beforeResult as any).content[0].text).toContain('replaced-page-original')
+    const clientCountBeforeReplacement = testCtx!.relayServer.getPlaywrightClientCount()
+
+    await originalPage.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const replacementPage = await browserContext.newPage()
+    await replacementPage.goto('data:text/html,<title>Replacement Page</title><h1>replaced-page-new</h1>')
+    await replacementPage.bringToFront()
+
+    const afterResultPromise = client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          const replacement = context.pages().find((candidate) => candidate.url().includes('replaced-page-new'));
+          return { foundReplacement: Boolean(replacement), title: await replacement?.title() };
+        `,
+        timeout: 15000,
+      },
+    })
+    // This is intentionally a timed overlap: the behavior under test is a
+    // Target.attachedToTarget arriving while ensureConnection waits for a page.
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    const afterResult = await afterResultPromise
+
+    expect((afterResult as any).isError).not.toBe(true)
+    expect((afterResult as any).content[0].text).toContain('foundReplacement: true')
+    expect((afterResult as any).content[0].text).toContain('Replacement Page')
+
+    expect(testCtx!.relayServer.getPlaywrightClientCount()).toBe(clientCountBeforeReplacement)
+
+    await originalPage.close()
+    await replacementPage.close()
+  }, 120000)
+
   it('should keep an active browser connected when another Chromium context starts', async () => {
     const browserContext = getBrowserContext()
     const serviceWorker = await getExtensionServiceWorker(browserContext)
