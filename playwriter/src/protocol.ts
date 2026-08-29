@@ -76,6 +76,25 @@ export type RecordingCancelledMessage = {
   }
 }
 
+/**
+ * Sent right before the extension forwards a completed Page.downloadProgress event.
+ * Chrome rejects Browser.setDownloadBehavior on a tab-scoped debugger session, so the
+ * relay cannot make Chrome write downloads into Playwright's artifact directory.
+ * chrome.downloads is the only place the real path is readable, so the extension
+ * reports it and the relay copies the file where Playwright expects to find it.
+ */
+export type DownloadCompletedMessage = {
+  id?: undefined
+  method: 'downloadCompleted'
+  params: {
+    guid: string
+    /** Absolute path Chrome wrote the finished download to. */
+    filename?: string
+    /** Why the extension could not resolve a finished file, when filename is absent. */
+    error?: string
+  }
+}
+
 export type ExtensionMessage =
   | ExtensionResponseMessage
   | ExtensionEventMessage
@@ -83,6 +102,7 @@ export type ExtensionMessage =
   | ExtensionPongMessage
   | RecordingDataMessage
   | RecordingCancelledMessage
+  | DownloadCompletedMessage
 
 // Recording command messages (MCP -> Extension via relay)
 export type StartRecordingParams = {

@@ -7,6 +7,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
 import { startPlayWriterCDPRelayServer, type RelayServer } from './cdp-relay.js'
+import { createCdpLogger, type CdpLogger } from './cdp-log.js'
 import { createFileLogger } from './create-logger.js'
 import { killPortProcess } from './kill-port.js'
 
@@ -70,6 +71,8 @@ export interface TestContext {
   browserContext: BrowserContext
   userDataDir: string
   relayServer: RelayServer
+  /** The relay's CDP message log, for tests that assert on what crossed the relay. */
+  cdpLogger: CdpLogger
 }
 
 export async function setupTestContext({
@@ -96,7 +99,11 @@ export async function setupTestContext({
 
   const localLogPath = path.join(process.cwd(), 'relay-server.log')
   const logger = createFileLogger({ logFilePath: localLogPath })
-  const relayServer = await startPlayWriterCDPRelayServer({ port, logger })
+  // Its own CDP log, per port. The default is ~/.playwriter/cdp.jsonl, which the relay the
+  // developer is actually using writes to and which every new logger truncates, so tests
+  // sharing it both clobber that log and read another process's messages as their own.
+  const cdpLogger = createCdpLogger({ logFilePath: path.join(os.tmpdir(), `playwriter-test-cdp-${port}.jsonl`) })
+  const relayServer = await startPlayWriterCDPRelayServer({ port, logger, cdpLogger })
 
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix))
   const extensionPath = path.resolve('../extension', distDir)
@@ -119,7 +126,7 @@ export async function setupTestContext({
     })
   }
 
-  return { browserContext, userDataDir, relayServer }
+  return { browserContext, userDataDir, relayServer, cdpLogger }
 }
 
 export async function cleanupTestContext(
@@ -358,19 +365,45 @@ export type SimpleServer = {
   close: () => Promise<void>
 }
 
-/** Minimal local HTTP server for tests that need cross-origin iframes or custom routes */
-export async function createSimpleServer({ routes }: { routes: Record<string, string> }): Promise<SimpleServer> {
+/**
+ * A route body. A plain string is served as HTML; a function is called per request and
+ * served uncached, for tests that need one stable URL to return different bodies on
+ * repeated requests; `{ handle }` is given the response to own, for tests that need to
+ * hold one open.
+ */
+export type SimpleRoute =
+  | string
+  | (() => string)
+  | { handle: (req: http.IncomingMessage, res: http.ServerResponse) => void }
+
+/**
+ * Minimal local HTTP server for tests that need cross-origin iframes or custom routes.
+ */
+export async function createSimpleServer({
+  routes,
+}: {
+  routes: Record<string, SimpleRoute>
+}): Promise<SimpleServer> {
   const openSockets: Set<net.Socket> = new Set()
   const server = http.createServer((req, res) => {
     const url = req.url || '/'
-    const body = routes[url]
-    if (!body) {
+    const route = routes[url]
+    if (!route) {
       res.writeHead(404, { 'Content-Type': 'text/plain' })
       res.end('not found')
       return
     }
+    if (typeof route === 'object') {
+      route.handle(req, res)
+      return
+    }
+    if (typeof route === 'function') {
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' })
+      res.end(route())
+      return
+    }
     res.writeHead(200, { 'Content-Type': 'text/html' })
-    res.end(body)
+    res.end(route)
   })
 
   server.on('connection', (socket) => {

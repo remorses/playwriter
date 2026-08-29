@@ -2,8 +2,11 @@ import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { chromium } from '@xmorse/playwright-core'
 import { getCDPSessionForPage } from './cdp-session.js'
-import { getCdpUrl, LOG_CDP_FILE_PATH } from './utils.js'
+import { getCdpUrl } from './utils.js'
 import fs from 'node:fs'
+import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
 import {
   setupTestContext,
   cleanupTestContext,
@@ -43,6 +46,11 @@ describe('Relay Core Tests', () => {
   const getBrowserContext = () => {
     if (!testCtx?.browserContext) throw new Error('Browser not initialized')
     return testCtx.browserContext
+  }
+
+  const getCdpLogger = () => {
+    if (!testCtx?.cdpLogger) throw new Error('Relay not initialized')
+    return testCtx.cdpLogger
   }
 
   const ensureConnectedTabForExecute = async (): Promise<void> => {
@@ -129,7 +137,9 @@ describe('Relay Core Tests', () => {
   it('should emit download events for both Browser and Page domains in extension mode', async () => {
     const browserContext = getBrowserContext()
     const serviceWorker = await getExtensionServiceWorker(browserContext)
-    const logFilePath = LOG_CDP_FILE_PATH
+    const cdpLogger = getCdpLogger()
+    const logFilePath = cdpLogger.logFilePath
+    await cdpLogger.flush()
     const logLineCountBefore = fs.existsSync(logFilePath)
       ? fs
           .readFileSync(logFilePath, 'utf-8')
@@ -213,6 +223,9 @@ describe('Relay Core Tests', () => {
     await page.close()
     await server.close()
 
+    // The logger batches writes every 500ms, so what crossed the relay is only all on disk
+    // once it has been drained.
+    await cdpLogger.flush()
     const logLinesAfter = fs
       .readFileSync(logFilePath, 'utf-8')
       .split('\n')
@@ -248,6 +261,10 @@ describe('Relay Core Tests', () => {
       hasBrowserSetDownloadBehavior: methods.some((entry) => {
         return entry.direction === 'from-playwright' && entry.method === 'Browser.setDownloadBehavior'
       }),
+      // False on purpose. Chrome answers every Page.setDownloadBehavior variant on an
+      // extension-owned tab session with "Cannot not access browser-level commands", and
+      // does not expose Browser.setDownloadBehavior there at all, so the relay keeps the
+      // path Playwright asked for and copies the finished file into it instead.
       hasPageSetDownloadBehavior: methods.some((entry) => {
         return entry.direction === 'to-extension' && entry.method === 'Page.setDownloadBehavior'
       }),
@@ -272,9 +289,201 @@ describe('Relay Core Tests', () => {
         "hasBrowserSetDownloadBehavior": true,
         "hasPageDownloadProgress": true,
         "hasPageDownloadWillBegin": true,
-        "hasPageSetDownloadBehavior": true,
+        "hasPageSetDownloadBehavior": false,
       }
     `)
+  }, 120000)
+
+  it('should save a download twice from one URL without reusing the earlier file', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    // One stable export URL that answers with different bytes each time, which is what
+    // makes an old download indistinguishable from the new one by URL alone.
+    let exportCount = 0
+    const server = await createSimpleServer({
+      routes: {
+        '/export.txt': () => {
+          exportCount += 1
+          return `export-body-${exportCount}`
+        },
+        '/': `<!doctype html>
+<html>
+  <body>
+    <a id="download-link" href="/export.txt" download="export.txt">Download</a>
+  </body>
+</html>`,
+      },
+    })
+
+    const page = await browserContext.newPage()
+    await page.goto(server.baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.bringToFront()
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const directBrowser = await withTimeout({
+      promise: chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
+      timeoutMs: 10000,
+      errorMessage: 'Timed out connecting over CDP for download saveAs test',
+    })
+
+    const connectedPage = directBrowser
+      .contexts()[0]
+      .pages()
+      .find((candidatePage) => {
+        return candidatePage.url() === server.baseUrl + '/'
+      })
+    if (!connectedPage) {
+      throw new Error('Connected page not found for download saveAs test')
+    }
+
+    const saveDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-saveas-'))
+    const saveDownload = async (destination: string): Promise<void> => {
+      const [download] = await Promise.all([
+        connectedPage.waitForEvent('download', { timeout: 5000 }),
+        connectedPage.click('#download-link'),
+      ])
+      await download.saveAs(destination)
+    }
+
+    const firstPath = path.join(saveDir, 'first.txt')
+    const secondPath = path.join(saveDir, 'second.txt')
+    await saveDownload(firstPath)
+    await saveDownload(secondPath)
+
+    // Matching the finished download by URL would answer the second download with the
+    // first download's file, so the second save would read export-body-1 again.
+    expect(fs.readFileSync(firstPath, 'utf8')).toBe('export-body-1')
+    expect(fs.readFileSync(secondPath, 'utf8')).toBe('export-body-2')
+
+    fs.rmSync(saveDir, { recursive: true, force: true })
+    await safeCloseCDPBrowser(directBrowser)
+    await page.close()
+    await server.close()
+  }, 120000)
+
+  it('should not save the bytes of an unrelated in-progress download of the same URL', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    // One stable export URL, the way a real export endpoint is stable. The first request is
+    // answered with headers and one chunk and then held open, so that download is still
+    // running while the second one happens: being in progress is the freshness that must not
+    // be mistaken for being ours.
+    let exportRequests = 0
+    const heldResponses: http.ServerResponse[] = []
+    const server = await createSimpleServer({
+      routes: {
+        '/export.txt': {
+          handle: (_req, res) => {
+            exportRequests += 1
+            res.writeHead(200, {
+              'Content-Type': 'application/octet-stream',
+              'Content-Disposition': 'attachment; filename="export.txt"',
+              'Cache-Control': 'no-store',
+            })
+            if (exportRequests === 1) {
+              res.write('unrelated-body')
+              heldResponses.push(res)
+              return
+            }
+            res.end('attached-body')
+          },
+        },
+        '/': `<!doctype html>
+<html>
+  <body>
+    <a id="download-link" href="/export.txt" download="export.txt">Download</a>
+  </body>
+</html>`,
+      },
+    })
+
+    const exportUrl = `${server.baseUrl}/export.txt`
+    let directBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+    const strangerPage = await browserContext.newPage()
+    const page = await browserContext.newPage()
+
+    try {
+      // A tab the extension is not attached to starts the first download. Chrome reports it
+      // to the extension anyway, with a DownloadItem that names no tab.
+      await strangerPage.goto(server.baseUrl, { waitUntil: 'domcontentloaded' })
+      await strangerPage.click('#download-link')
+
+      const waitForStranger = async (): Promise<number> => {
+        return await serviceWorker.evaluate(async (url) => {
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const items = await (globalThis as any).chrome.downloads.search({})
+            const running = items.filter((item: any) => {
+              return (item.url === url || item.finalUrl === url) && item.state === 'in_progress'
+            })
+            if (running.length > 0) {
+              return running.length
+            }
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          return 0
+        }, exportUrl)
+      }
+      expect(await waitForStranger()).toBeGreaterThan(0)
+
+      // Only now does the attached page download the same URL.
+      await page.goto(server.baseUrl, { waitUntil: 'domcontentloaded' })
+      await page.bringToFront()
+      await serviceWorker.evaluate(async () => {
+        await globalThis.toggleExtensionForActiveTab()
+      })
+
+      directBrowser = await withTimeout({
+        promise: chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT })),
+        timeoutMs: 10000,
+        errorMessage: 'Timed out connecting over CDP for concurrent download test',
+      })
+
+      const connectedPage = directBrowser
+        .contexts()[0]
+        .pages()
+        .find((candidatePage) => {
+          return candidatePage.url() === server.baseUrl + '/'
+        })
+      if (!connectedPage) {
+        throw new Error('Connected page not found for concurrent download test')
+      }
+
+      const saveDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-concurrent-'))
+      const savedPath = path.join(saveDir, 'attached.txt')
+      const [download] = await Promise.all([
+        connectedPage.waitForEvent('download', { timeout: 5000 }),
+        connectedPage.click('#download-link'),
+      ])
+
+      // The unrelated download was the only one of this URL Chrome had running when this
+      // one began, which is what makes it adoptable.
+      expect(await waitForStranger()).toBeGreaterThan(0)
+      // Release it now, while a wrong binding would still be waiting for a file: adopting
+      // it writes unrelated-body here instead of failing visibly.
+      for (const response of heldResponses) {
+        response.end('-tail')
+      }
+      await download.saveAs(savedPath)
+
+      expect(fs.readFileSync(savedPath, 'utf8')).toBe('attached-body')
+
+      fs.rmSync(saveDir, { recursive: true, force: true })
+    } finally {
+      for (const response of heldResponses) {
+        response.destroy()
+      }
+      if (directBrowser) {
+        await safeCloseCDPBrowser(directBrowser)
+      }
+      await page.close()
+      await strangerPage.close()
+      await server.close()
+    }
   }, 120000)
 
   it('should ignore duplicate dialog dismissals from multiple CDP clients', async () => {
