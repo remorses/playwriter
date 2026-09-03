@@ -6,6 +6,7 @@ import {
   filterFullSnapshotTree,
   filterInteractiveSnapshotTree,
   finalizeSnapshotOutput,
+  normalizeAccessibleName,
   type SnapshotNode,
 } from './aria-snapshot.js'
 
@@ -611,5 +612,12 @@ describe('aria-snapshot tree filters', () => {
         ],
       }
     `)
+  })
+})
+
+describe('normalizeAccessibleName (20260831214129)', () => {
+  it('shares one normalized string between snapshot and locator', () => {
+    expect(normalizeAccessibleName('Jersey 150')).toBe('Jersey 150')
+    expect(normalizeAccessibleName('  Jersey   150\n')).toBe('Jersey 150')
   })
 })

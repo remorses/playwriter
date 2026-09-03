@@ -331,6 +331,19 @@ function escapeLocatorValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
+/**
+ * Shared accessible-name normalization for snapshot rendering and locator building.
+ * Frog 20260831214129: the snapshot printed `Jersey 150` while getByRole with
+ * exact:true timed out. Playwright collapses internal whitespace for matching,
+ * but CSS text-transform (e.g. lowercase source styled title-case) changes the
+ * DOM string itself, so an exact match on the displayed name can never resolve.
+ * Normalize whitespace here so snapshot and locator share one string, and prefer
+ * exact:false when the visible label may be CSS-transformed.
+ */
+export function normalizeAccessibleName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ')
+}
+
 function buildLocatorFromStable(stable: { value: string; attr: string }): string {
   const escaped = escapeLocatorValue(stable.value)
   return `[${stable.attr}="${escaped}"]`
@@ -358,7 +371,7 @@ function buildBaseLocator({
   if (isPromotedContentEditable) {
     return `[contenteditable="true"]`
   }
-  const trimmedName = name.trim()
+  const trimmedName = normalizeAccessibleName(name)
   if (trimmedName.length > 0) {
     const escapedName = escapeLocatorValue(trimmedName)
     return `role=${role}[name="${escapedName}"]`
@@ -467,7 +480,7 @@ export function buildRawSnapshotTree(options: {
   }
 
   const role = getAxRole(node)
-  const name = getAxValueString(node.name).trim()
+  const name = normalizeAccessibleName(getAxValueString(node.name))
   const children = (node.childIds ?? [])
     .map((childId) => {
       return buildRawSnapshotTree({

@@ -157,8 +157,73 @@ export async function waitForConnectedExtensions(
   return []
 }
 
+/**
+ * Structured error for `session new` / `browser list` when no extension connects.
+ * Frog 20260830090829: session creation ended without a session ID and without
+ * a nonzero structured signal. Callers must print this to stderr and exit 1.
+ */
+export function formatNoExtensionError(options: { timeoutMs?: number } = {}): string {
+  const { timeoutMs = 5000 } = options
+  return [
+    'ERROR code=extension_not_connected',
+    `No extension connected within ${timeoutMs}ms.`,
+    'Click the Playwriter extension icon on a tab, then retry.',
+    'Tip: run `playwriter browser list` to check readiness; exit status is 1 when no browser is ready.',
+  ].join('\n')
+}
+
+/**
+ * Durable, observable description of an extension connection loss.
+ * Frog 20260902073850: after successful captures the extension dropped and the
+ * next session failed with `Error: fetch failed`. Map transport failures to an
+ * actionable reconnect hint instead of a bare fetch error.
+ */
+export function describeExtensionDisconnect(options: { error?: string; when?: string } = {}): string {
+  const { error = '', when = 'session creation' } = options
+  const normalized = error.toLowerCase()
+  if (normalized.includes('fetch failed') || normalized.includes('fetch failed')) {
+    return [
+      'ERROR code=extension_connection_lost',
+      `Extension connection lost during ${when}: fetch failed.`,
+      'The previously authorized extension dropped; no new browser gesture is required.',
+      'Retry once: run `playwriter browser list`, confirm the extension row returns, then retry session creation.',
+    ].join('\n')
+  }
+  return [
+    'ERROR code=extension_connection_lost',
+    `Extension connection lost during ${when}${error ? `: ${error}` : '.'}`,
+    'Retry once: run `playwriter browser list`, confirm the extension row returns, then retry session creation.',
+  ].join('\n')
+}
+
+/**
+ * Poll until no process listens on `port`, or until `timeoutMs` expires.
+ * Frog 20260902000436: occupied-port recovery killed the owner but timed out
+ * before the replacement listener was verified. Returns true when free.
+ */
+export async function waitForPortFree(options: {
+  port: number
+  timeoutMs?: number
+  pollIntervalMs?: number
+  listPids?: (port: number) => Promise<number[]>
+}): Promise<boolean> {
+  const { port, timeoutMs = 10000, pollIntervalMs = 100, listPids } = options
+  const list = listPids ?? ((p: number) => getListeningPidsForPort({ port: p }))
+  const startTime = Date.now()
+  for (;;) {
+    const pids = await list(port).catch(() => [] as number[])
+    if (pids.length === 0) {
+      return true
+    }
+    if (Date.now() - startTime >= timeoutMs) {
+      return false
+    }
+    await sleep(pollIntervalMs)
+  }
+}
+
 async function killRelayServer(options: { port: number; waitForFreeMs?: number }): Promise<void> {
-  const { port, waitForFreeMs = 3000 } = options
+  const { port, waitForFreeMs = 10000 } = options
 
   try {
     await killPortProcess({ port })
@@ -166,14 +231,7 @@ async function killRelayServer(options: { port: number; waitForFreeMs?: number }
     return
   }
 
-  const startTime = Date.now()
-  while (Date.now() - startTime < waitForFreeMs) {
-    const pids = await getListeningPidsForPort({ port }).catch(() => [])
-    if (pids.length === 0) {
-      return
-    }
-    await sleep(100)
-  }
+  await waitForPortFree({ port, timeoutMs: waitForFreeMs, pollIntervalMs: 100 })
 }
 
 /**
@@ -318,7 +376,9 @@ async function ensureRelayServerImpl(options: EnsureRelayServerOptions = {}): Pr
 
   serverProcess.unref()
 
-  const startTimeoutMs = 5000
+  // Frog 20260902000436: 5s was too short to verify the replacement listener
+  // after killing the occupied-port owner (observed 5082ms failure). Poll longer.
+  const startTimeoutMs = 15000
   const startTime = Date.now()
 
   while (Date.now() - startTime < startTimeoutMs) {

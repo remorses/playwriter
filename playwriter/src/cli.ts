@@ -23,6 +23,8 @@ import {
   waitForConnectedExtensions,
   getExtensionOutdatedWarning,
   getExtensionStatus,
+  formatNoExtensionError,
+  describeExtensionDisconnect,
   type ExtensionStatus,
 } from './relay-client.js'
 import { discoverChromeInstances, resolveDirectInput, type DiscoveredInstance } from './chrome-discovery.js'
@@ -598,7 +600,7 @@ cli
       if (options.browser) {
         await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: false })
       }
-      console.error('No connected browsers detected. Click the Playwriter extension icon.')
+      console.error(formatNoExtensionError({ timeoutMs: 12000 }))
       console.error(pc.dim('Tip: Use --direct to connect via Chrome DevTools Protocol instead.'))
       console.error(pc.dim('Tip: Run `playwriter cloud login` to use cloud browsers.'))
       process.exit(1)
@@ -638,7 +640,7 @@ cli
         console.log(`Session ${result.id} created. Use with: playwriter -s ${result.id} -e "..."`)
         printCloudTip()
       } catch (error: any) {
-        console.error(`Error: ${error.message}`)
+        console.error(describeExtensionDisconnect({ error: error?.message ?? String(error), when: 'session creation' }))
         process.exit(1)
       }
       return
