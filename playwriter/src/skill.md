@@ -854,11 +854,12 @@ if (!state.page) throw new Error('No myapp.com tab found. Ask the user to enable
 
 **Handle page closures gracefully:**
 
-The user may close your page by accident (e.g., closing a tab in Chrome). Check before using it and recreate if needed:
+If the connection to Chrome drops, playwriter re-attaches `state` pages to the same tabs on your next call and tells you so: keep using `state.page`, retry the failed step, and don't call reset. A page that stays closed was closed by the user or lost its connection while still open, so look for the tab before opening a new one:
 
 ```js
-if (!state.page || state.page.isClosed()) state.page = await context.newPage()
-await state.page.goto('https://example.com')
+if (!state.page || state.page.isClosed()) {
+  state.page = context.pages().findLast((p) => p.url().includes('example.com')) ?? (await context.newPage())
+}
 ```
 
 **List all available pages:**

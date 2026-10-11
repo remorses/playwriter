@@ -637,6 +637,7 @@ class ConnectionManager {
     }
 
     // For normal disconnects, set tabs to 'connecting' state and let maintain loop handle reconnect
+    startReconnectGrace()
     store.setState((state) => {
       return {
         tabs: keepTabsForRemote ? state.tabs : markAllTabsConnecting(state.tabs),
@@ -1303,10 +1304,12 @@ async function syncTabGroup(): Promise<void> {
     // is dead all tabs are 'connecting' (waiting for reconnect) and the groups should
     // be cleaned up. onUpdated re-reads the live tab groups so a stale ungroup event
     // after reconnect cannot detach tabs that are already back in a playwriter group.
+    // During a short outage (relay drop, worker restart) keep 'connecting' tabs grouped
+    // too: they are about to be re-attached (see startReconnectGrace).
     const { connectionState } = store.getState()
-    const isRelayConnected = connectionState === 'connected'
+    const keepConnectingTabs = connectionState === 'connected' || inReconnectGrace()
     const desiredTabs = Array.from(store.getState().tabs.entries())
-      .filter(([_, info]) => info.state === 'connected' || (info.state === 'connecting' && isRelayConnected))
+      .filter(([_, info]) => info.state === 'connected' || (info.state === 'connecting' && keepConnectingTabs))
       .map(([tabId, info]) => ({ tabId, title: info.groupTitle || DEFAULT_TAB_GROUP_TITLE }))
 
     const persisted = await loadManagedTabGroups()
@@ -1406,6 +1409,205 @@ async function syncTabGroup(): Promise<void> {
     })
   } catch (error: any) {
     logger.debug('Failed to sync tab group:', error.message)
+  }
+}
+
+// --- Tab recovery -----------------------------------------------------------
+// Chrome can drop the debugger from a tab that stays open (target_closed on some
+// navigations, a tab replaced on prerender activation) and terminates the MV3
+// service worker, which loses the in-memory tabs map. Agents were then told their
+// page closed, abandoned tabs that were still open and opened duplicates. The
+// relay/executor re-bind a returning tab by targetId; these helpers make sure the
+// tab actually comes back.
+
+/** storage.session survives service worker restarts but not browser restarts,
+ *  which matches tab id lifetime: Chrome reuses tab ids after a browser restart. */
+const ATTACHED_TABS_SESSION_KEY = 'playwriterAttachedTabs'
+
+type PersistedTab = {
+  tabId: number
+  groupTitle?: string
+  groupKey?: string
+  groupColor?: chrome.tabGroups.ColorEnum
+}
+
+let lastPersistedTabs = ''
+
+function persistAttachedTabs(tabs: Map<number, TabInfo>): void {
+  const persisted: PersistedTab[] = Array.from(tabs.entries())
+    .filter(([tabId, info]) => {
+      const isLive = info.state === 'connected' || info.state === 'connecting'
+      // Remote-control tabs are restored by restoreRemoteTunnelAfterRestart
+      return isLive && !remoteTunnel?.remoteTabIds.has(tabId) && remoteTunnel?.anchorTabId !== tabId
+    })
+    .map(([tabId, info]) => {
+      return { tabId, groupTitle: info.groupTitle, groupKey: info.groupKey, groupColor: info.groupColor }
+    })
+  const serialized = JSON.stringify(persisted)
+  if (serialized === lastPersistedTabs) {
+    return
+  }
+  lastPersistedTabs = serialized
+  void chrome.storage.session.set({ [ATTACHED_TABS_SESSION_KEY]: persisted }).catch((error: Error) => {
+    logger.debug('Failed to persist attached tabs:', error.message)
+  })
+}
+
+async function loadPersistedAttachedTabs(): Promise<PersistedTab[]> {
+  const stored = await chrome.storage.session.get(ATTACHED_TABS_SESSION_KEY).catch(() => {
+    return {} as Record<string, unknown>
+  })
+  const value = stored[ATTACHED_TABS_SESSION_KEY]
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is PersistedTab => {
+    return typeof item?.tabId === 'number'
+  })
+}
+
+/** Keep 'connecting' tabs in their groups this long after the relay drops or the
+ *  worker restarts. Ungrouping them during a short outage churned the groups, and
+ *  an ungrouped tab counts as one the user dragged out. */
+const RECONNECT_GROUP_GRACE_MS = 60_000
+let reconnectGraceStartedAt = 0
+
+function startReconnectGrace(): void {
+  reconnectGraceStartedAt = Date.now()
+  // Clean up groups of tabs that never came back once the grace period ends
+  setTimeout(() => {
+    tabGroupQueue = tabGroupQueue.then(syncTabGroup).catch((e) => {
+      logger.debug('post-grace syncTabGroup error:', e)
+    })
+  }, RECONNECT_GROUP_GRACE_MS + 1000)
+}
+
+function inReconnectGrace(): boolean {
+  return Date.now() - reconnectGraceStartedAt < RECONNECT_GROUP_GRACE_MS
+}
+
+/** Tabs that lost the debugger while still open, re-attached once they reach a
+ *  debuggable page (e.g. after navigating away from a chrome:// page). */
+const PENDING_REATTACH_TTL_MS = 10 * 60_000
+const pendingReattach = new Map<number, PersistedTab & { until: number }>()
+/** Recently detached tab info, for chrome.tabs.onReplaced which can fire after the detach. */
+const recentlyDetachedTabs = new Map<number, { info: TabInfo; at: number }>()
+/** Cap automatic re-attaches so a page that keeps dropping the debugger can't loop. */
+const MAX_REATTACHES_PER_MINUTE = 3
+const reattachHistory = new Map<number, number[]>()
+
+function takeReattachBudget(tabId: number): boolean {
+  const now = Date.now()
+  const recent = (reattachHistory.get(tabId) || []).filter((at) => {
+    return now - at < 60_000
+  })
+  if (recent.length >= MAX_REATTACHES_PER_MINUTE) {
+    reattachHistory.set(tabId, recent)
+    return false
+  }
+  reattachHistory.set(tabId, [...recent, now])
+  return true
+}
+
+function groupOptionsOf(info: Pick<TabInfo, 'groupTitle' | 'groupKey' | 'groupColor'>) {
+  return { groupTitle: info.groupTitle, groupKey: info.groupKey, groupColor: info.groupColor }
+}
+
+async function recoverDetachedTab(tabId: number, info: TabInfo): Promise<void> {
+  // target_closed also fires just before a tab closes: let onRemoved run first
+  await sleep(300)
+  const chromeTab = await chrome.tabs.get(tabId).catch(() => {
+    return undefined
+  })
+  if (!chromeTab || store.getState().tabs.has(tabId)) {
+    return
+  }
+  const waitForNextPage = () => {
+    logger.debug('Will re-attach tab once it reaches a debuggable page:', tabId)
+    pendingReattach.set(tabId, { tabId, ...groupOptionsOf(info), until: Date.now() + PENDING_REATTACH_TTL_MS })
+  }
+  // pendingUrl: the tab may be mid-navigation to a page extensions can't debug
+  const url = chromeTab.pendingUrl || chromeTab.url
+  if (isRestrictedUrl(url) || !takeReattachBudget(tabId)) {
+    waitForNextPage()
+    return
+  }
+  logger.warn(`RECOVER: re-attaching tab ${tabId} after an unexpected debugger detach`)
+  await connectTab(tabId, groupOptionsOf(info))
+  // Attaching can still fail mid-navigation: retry on the next page load instead of
+  // leaving the tab in the error state
+  if (store.getState().tabs.get(tabId)?.state === 'error') {
+    store.setState((state) => {
+      const newTabs = new Map(state.tabs)
+      newTabs.delete(tabId)
+      return { tabs: newTabs }
+    })
+    waitForNextPage()
+  }
+}
+
+function reattachPendingTabIfReady(tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab): void {
+  const pending = pendingReattach.get(tabId)
+  if (!pending || changeInfo.status !== 'complete') {
+    return
+  }
+  if (Date.now() > pending.until || store.getState().tabs.has(tabId)) {
+    pendingReattach.delete(tabId)
+    return
+  }
+  if (isRestrictedUrl(tab.pendingUrl || tab.url) || !takeReattachBudget(tabId)) {
+    return
+  }
+  pendingReattach.delete(tabId)
+  logger.warn(`RECOVER: re-attaching tab ${tabId} now that it reached a debuggable page`)
+  void connectTab(tabId, groupOptionsOf(pending))
+}
+
+/** Prerender/instant activation swaps the tab's contents for a new tab id. */
+function onTabReplaced(addedTabId: number, removedTabId: number): void {
+  pendingReattach.delete(removedTabId)
+  const tracked = store.getState().tabs.get(removedTabId)
+  const recent = recentlyDetachedTabs.get(removedTabId)
+  recentlyDetachedTabs.delete(removedTabId)
+  const info = tracked || (recent && Date.now() - recent.at < 10_000 ? recent.info : undefined)
+  if (!info) {
+    return
+  }
+  logger.warn(`RECOVER: tab ${removedTabId} was replaced by ${addedTabId}, attaching the replacement`)
+  if (tracked) {
+    detachTab(removedTabId, false)
+  }
+  void connectTab(addedTabId, groupOptionsOf(info))
+}
+
+/** Re-attach tabs that were attached before the service worker restarted. */
+async function restoreAttachedTabsAfterRestart(): Promise<void> {
+  const persisted = await loadPersistedAttachedTabs()
+  if (persisted.length === 0) {
+    return
+  }
+  startReconnectGrace()
+  const restored = (
+    await Promise.all(
+      persisted.map(async (item) => {
+        if (store.getState().tabs.has(item.tabId)) {
+          return undefined
+        }
+        const chromeTab = await chrome.tabs.get(item.tabId).catch(() => {
+          return undefined
+        })
+        if (!chromeTab || isRestrictedUrl(chromeTab.url)) {
+          return undefined
+        }
+        setTabConnecting(item.tabId, groupOptionsOf(item))
+        return item.tabId
+      }),
+    )
+  ).filter(isTruthy)
+  logger.warn(`RECOVER: restoring ${restored.length} tab(s) attached before the service worker restarted`)
+  // The relay handshake re-attaches 'connecting' tabs; if it already ran, do it here
+  if (restored.length > 0 && connectionManager.ws?.readyState === WebSocket.OPEN) {
+    await reattachConnectingTabsToLocalRelay()
   }
 }
 
@@ -1768,6 +1970,7 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
   const tab = store.getState().tabs.get(tabId)
   if (tab) {
     detachTabFromPlaywright(tabId, tab)
+    recentlyDetachedTabs.set(tabId, { info: tab, at: Date.now() })
   }
 
   store.setState((state) => {
@@ -1776,6 +1979,11 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
     return { tabs: newTabs }
   })
   forgetRemoteTab(tabId)
+
+  // The tab may still be open (Chrome dropped the debugger, not the tab): attach it again
+  if (tab && remoteTunnel === null) {
+    void recoverDetachedTab(tabId, tab)
+  }
 }
 
 type AttachTabResult = {
@@ -2821,6 +3029,8 @@ async function updateIcons(): Promise<void> {
 
 async function onTabRemoved(tabId: number): Promise<void> {
   popupSourceTabMap.delete(tabId)
+  pendingReattach.delete(tabId)
+  recentlyDetachedTabs.delete(tabId)
   forgetRemoteTab(tabId)
   const { tabs } = store.getState()
   if (!tabs.has(tabId)) return
@@ -2915,6 +3125,8 @@ chrome.debugger.onDetach.addListener(onDebuggerDetach)
 // resetDebugger detaches everything, so remote tabs must be restored after it.
 void resetDebugger().then(() => {
   return restoreRemoteTunnelAfterRestart()
+}).then(() => {
+  return restoreAttachedTabsAfterRestart()
 }).finally(() => {
   // Startup sync: clean leftover managed groups from a previous SW/browser
   // session (Chrome session restore can bring groups back while nothing is
@@ -2979,6 +3191,7 @@ store.subscribe((state, prevState) => {
   updateContextMenuVisibility()
   const tabsChanged = serializeTabs(state.tabs) !== serializeTabs(prevState.tabs)
   if (tabsChanged) {
+    persistAttachedTabs(state.tabs)
     tabGroupQueue = tabGroupQueue.then(syncTabGroup).catch((e) => {
       logger.debug('syncTabGroup error:', e)
     })
@@ -3041,10 +3254,12 @@ setInterval(checkMemory, 5000)
 checkMemory()
 
 chrome.tabs.onRemoved.addListener(onTabRemoved)
+chrome.tabs.onReplaced.addListener(onTabReplaced)
 chrome.tabs.onActivated.addListener(onTabActivated)
 chrome.action.onClicked.addListener(onActionClicked)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   void updateIcons()
+  reattachPendingTabIfReady(tabId, changeInfo, tab)
   if (changeInfo.groupId !== undefined) {
     // Queue tab group operations to serialize with syncTabGroup and disconnectEverything
     tabGroupQueue = tabGroupQueue
