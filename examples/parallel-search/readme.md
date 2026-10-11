@@ -68,7 +68,7 @@ separate conversation, generate an id once with `crypto.randomUUID()` in your
 local module and pass it as `sessionId` to both functions throughout that
 conversation.
 
-When finished, remove the session and its opened tabs:
+When finished, remove the session. This also closes its headless tabs:
 
 ```bash
 pnpm exec playwriter session delete 1
