@@ -63,6 +63,11 @@ public page content and do not use your browser's logged-in session. Each call
 closes its MCP connection and has a 60-second total deadline. Both functions also
 accept an optional `signal` for cancellation from local JavaScript.
 
+The module reuses one default `session_id` across searches and fetches. For a
+separate conversation, generate an id once with `crypto.randomUUID()` in your
+local module and pass it as `sessionId` to both functions throughout that
+conversation.
+
 When finished, remove the session and its opened tabs:
 
 ```bash

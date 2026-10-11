@@ -2,6 +2,8 @@ import crypto from 'node:crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
+const defaultSessionId = crypto.randomUUID()
+
 async function callParallel({ name, arguments: args, signal }) {
   const deadline = AbortSignal.timeout(60_000)
   const operationSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
@@ -51,18 +53,18 @@ async function callParallel({ name, arguments: args, signal }) {
   }
 }
 
-export async function searchWeb({ objective, searchQueries, signal }) {
+export async function searchWeb({ objective, searchQueries, sessionId = defaultSessionId, signal }) {
   return callParallel({
     name: 'web_search',
-    arguments: { objective, search_queries: searchQueries, session_id: crypto.randomUUID() },
+    arguments: { objective, search_queries: searchQueries, session_id: sessionId },
     signal,
   })
 }
 
-export async function fetchPages({ urls, objective, sessionId, signal }) {
+export async function fetchPages({ urls, objective, sessionId = defaultSessionId, signal }) {
   return callParallel({
     name: 'web_fetch',
-    arguments: { urls, objective, session_id: sessionId ?? crypto.randomUUID() },
+    arguments: { urls, objective, session_id: sessionId },
     signal,
   })
 }
