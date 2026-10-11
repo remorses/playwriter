@@ -152,6 +152,8 @@ console.log({ title, url: state.page.url() });
 
 ## Examples
 
+For web search and page fetching before browser automation, see the [Parallel Search MCP example](./examples/parallel-search/readme.md).
+
 Variables in scope: `context`, `state` (persists between calls), `cloud` (local CLI sessions), `require`, `importModule`, native `import()`, and Node.js globals. Relative imports resolve from the session working directory. There is no default `page`; examples below assume `state.page` was set as shown above.
 
 **Persist data in state:**
