@@ -1796,9 +1796,9 @@ describe('Relay Core Tests', () => {
     expect(JSON.stringify(result.content)).toContain('not allowed in the sandbox')
   }, 30000)
 
-  // clock: 'manual' freezes page time between execute calls, so agent latency
-  // never shows in the video. The handle in state works across execute calls.
-  it('records frame-stepped video with a manual clock and switches tabs', async () => {
+  // clock: 'manual' writes frames only inside wait(ms), so agent latency between
+  // execute calls is cut. The handle in state works across execute calls.
+  it('records only wait() windows with a manual clock and switches tabs', async () => {
     await ensureConnectedTabForExecute()
     const page = (box: string) => {
       return `<!doctype html><html><body style="margin:0">
@@ -1815,10 +1815,8 @@ describe('Relay Core Tests', () => {
             state.clockA = await context.newPage()
             await state.clockA.goto('${server.baseUrl}/a')
             state.video = await recording.start({ page: state.clockA, outputPath: '${outputPath}', clock: 'manual', frameRate: 30 })
-            await state.clockA.evaluate(() => {
-              document.getElementById('box').style.transform = 'translateX(300px)'
-              setTimeout(() => { window.fired = true }, 400)
-            })
+            await state.clockA.evaluate(() => { document.getElementById('box').style.transform = 'translateX(300px)' })
+            await state.video.wait(500)
           `,
         },
       })
@@ -1827,59 +1825,33 @@ describe('Relay Core Tests', () => {
         name: 'execute',
         arguments: {
           code: js`
-            const read = (p) => p.evaluate(() => ({
-              x: new DOMMatrix(getComputedStyle(document.getElementById('box')).transform).m41,
-              fired: Boolean(window.fired),
-            }))
-            // Agent latency: wall time passes, page time must not
+            // Agent latency: wall time passes, nothing is recorded
             await new Promise((r) => setTimeout(r, 300))
-            const frozen = await read(state.clockA)
-            await state.video.wait(500)
-            const afterWait = await read(state.clockA)
-
             state.clockB = await context.newPage()
             await state.clockB.goto('${server.baseUrl}/b')
             await state.video.setPage(state.clockB)
-            const resumedA = await state.clockA.evaluate(() => new Promise((r) => setTimeout(() => r(true), 20)))
             await state.clockB.evaluate(() => { document.getElementById('box').style.transform = 'translateX(300px)' })
-            await new Promise((r) => setTimeout(r, 300))
-            const frozenB = await read(state.clockB)
             await state.video.wait(100)
-            const afterWaitB = await read(state.clockB)
-
             const { duration, executionTimestamps } = await state.video.stop()
-            const resumedB = await state.clockB.evaluate(() => new Promise((r) => setTimeout(() => r(true), 20)))
             for (const key of ['clockA', 'clockB']) {
               const tab = state[key]
               delete state[key]
               await tab.close()
             }
-            return { frozen, afterWait, resumedA, frozenB, afterWaitB, duration, executionTimestamps, resumedB, isRecording: state.video.isRecording }
+            return { duration, executionTimestamps, isRecording: state.video.isRecording }
           `,
         },
       })
       expect(result.isError).toBeFalsy()
-      expect((result.content as Array<{ text: string }>)[0].text).toMatchInlineSnapshot(`
-        "[return value] {
-          frozen: { x: 0, fired: false },
-          afterWait: { x: 150, fired: true },
-          resumedA: true,
-          frozenB: { x: 0, fired: false },
-          afterWaitB: { x: 30, fired: false },
-          duration: 633,
-          executionTimestamps: [],
-          resumedB: true,
-          isRecording: false
-        }"
-      `)
+      expect((result.content as Array<{ text: string }>)[0].text).toMatchInlineSnapshot(`"[return value] { duration: 600, executionTimestamps: [], isRecording: false }"`)
 
-      // 1 start frame + 15 frames for 500ms + 3 frames for 100ms, at 30 fps
+      // 15 frames for 500ms + 3 frames for 100ms at 30 fps. The 300ms gap is cut.
       const { spawnSync } = await import('node:child_process')
       const frames = spawnSync('ffprobe', [
         '-v', 'error', '-count_frames', '-select_streams', 'v:0',
         '-show_entries', 'stream=nb_read_frames', '-of', 'default=nw=1:nk=1', outputPath,
       ]).stdout.toString().trim()
-      expect(frames).toBe('19')
+      expect(frames).toBe('18')
     } finally {
       await server.close()
       fs.rmSync(outputPath, { force: true })

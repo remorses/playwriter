@@ -289,7 +289,7 @@ playwriter -e "await state.video.stop()"
 ```
 
 It works in extension, direct CDP and headless mode, and can record **page audio** with
-`audio: true`. With `clock: 'manual'` page time freezes between frames, so agent latency never
+`audio: true`. With `clock: 'manual'` only `wait(ms)` windows are recorded, so agent latency never
 shows in the video. The handle also has `isRecording`, `cancel()` and `setPage()` to switch tabs.
 Requires `ffmpeg` on `PATH`.
 

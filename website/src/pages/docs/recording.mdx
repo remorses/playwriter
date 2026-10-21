@@ -1,7 +1,7 @@
 ---
 title: Record Browser Automation as MP4 Video
 sidebarTitle: Recording
-description: Record browser sessions as MP4 or WebM video with CDP screencast and ffmpeg. No permission click, survives page navigation, optional page audio, ghost cursor overlay, frame-stepped manual clock without agent latency, and demo acceleration for idle sections.
+description: Record browser sessions as MP4 or WebM video with CDP screencast and ffmpeg. No permission click, survives page navigation, optional page audio, ghost cursor overlay, a manual clock that cuts agent latency, and demo acceleration for idle sections.
 icon: lucide:video
 ---
 
@@ -61,7 +61,7 @@ state.recordingResult = await state.video.stop()
 |---|---|---|---|
 | `page` | Page | required | Page to record. Change it later with `setPage()` |
 | `outputPath` | string | required | Absolute output path. `.mp4`, `.mov`, `.mkv` or `.webm` |
-| `clock` | `'real'` \| `'manual'` | `'real'` | `'manual'` freezes page time; see [Manual clock](#manual-clock) |
+| `clock` | `'real'` \| `'manual'` | `'real'` | `'manual'` records only inside `wait(ms)`; see [Manual clock](#manual-clock) |
 | `frameRate` | number | 30 | Frames per second, max 60 |
 | `audio` | boolean | false | Record page audio (see [Audio](#audio)) |
 | `maxSize` | number | 1920 | Longest output edge in pixels |
@@ -104,42 +104,29 @@ Limitations:
 
 ## Manual clock
 
-With the default `clock: 'real'`, the video is wall-clock time: every second the agent spends thinking is in the video. Pass `clock: 'manual'` to **freeze page time** instead. Time moves only when you add frames, so agent latency never shows and animations play smoothly at any frame rate:
+With the default `clock: 'real'`, the video is wall-clock time: every second the agent spends thinking is in the video. Pass `clock: 'manual'` to record **only inside `wait(ms)`**. The page keeps running normally; time outside `wait()` is just not written, so agent latency never shows:
 
 ```js
 state.video = await recording.start({ page: state.page, outputPath: '/abs/demo.mp4', clock: 'manual' })
 
+// Same execute call: the action and its wait are milliseconds apart
 await state.page.getByRole('button', { name: 'Open menu' }).click()
-await state.video.wait(400)  // 400ms of page time = 12 frames at 30 fps
+await state.video.wait(800)  // records the next 800ms, menu animation included
 
-for (let y = 0; y < 600; y += 40) {
-  await state.page.mouse.wheel(0, 40)
-  await state.video.frame()  // one frame per wheel step
-}
+// Next execute call, after the agent thought for 10s: those 10s are not in the video
+await state.page.mouse.wheel(0, 400)
+await state.video.wait(600)
 
-await state.video.stop()  // encode and give the page real time back
+await state.video.stop()
 ```
 
 ```
-agent ── click ─────────────> page time frozen, nothing moves
-agent ── video.wait(400) ───> advance 33ms → screenshot → advance 33ms → screenshot ...
-agent thinks for 10s ───────> page time frozen, nothing recorded
-agent ── video.stop() ──────> encode frames, resume real time
+execute 1: click() → video.wait(800)  ──> 800ms of frames written
+agent thinks 10s                      ──> page runs, nothing written
+execute 2: wheel() → video.wait(600)  ──> 600ms of frames written
 ```
 
-| Call | What it does |
-|---|---|
-| `video.frame()` | Moves page time by one frame (`1000 / frameRate` ms), then captures it |
-| `video.wait(ms)` | Captures `ms` of page time |
-
-Frozen: `Date`, `performance.now`, timers, `requestAnimationFrame`, CSS animations and transitions, and `element.animate()`. Input lands **instantly** between frames, so move the mouse in small steps across frames for a visible glide.
-
-Limitations:
-
-- `<video>` and `<audio>` playback, smooth scrolling, GIFs, workers and iframes still run in real time
-- Timers that the page started **before** `recording.start` keep real time. Start the recording before `goto()` to control them all
-- No `audio: true`. Use `video.wait(ms)`, not `waitForTimeout()`, to let the page move on
-- After `stop()` the page keeps fake timers that follow real time until it reloads
+Put each action and its `wait()` in the **same execute call**. An animation that starts in one call and finishes before the next call's `wait()` is not in the video. Use `video.wait(ms)` instead of `waitForTimeout()` whenever the viewer should see the time pass. `audio: true` is not supported yet with `clock: 'manual'`.
 
 ## Record another tab
 
@@ -150,8 +137,6 @@ state.other = await context.newPage()
 await state.other.goto('https://example.com')
 await state.video.setPage(state.other)
 ```
-
-With `clock: 'manual'`, the old tab gets real time back and the new tab is frozen.
 
 ## Other recording commands
 
@@ -215,7 +200,7 @@ const { path, duration, size } = await rec.stop()
 // or: await rec.cancel()
 ```
 
-`startRecording({ clock: 'manual' })` gives the same `frame()`, `wait(ms)` and `setPage(page)` methods.
+`startRecording({ clock: 'manual' })` gives the same `wait(ms)` and `setPage(page)` methods.
 
 ## Limitations
 

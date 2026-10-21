@@ -6,5 +6,5 @@
     "types": ["node", "chrome"]
   },
   "include": ["src"],
-  "exclude": ["src/a11y-client.ts", "src/ghost-cursor-client.ts", "src/audio-tap-client.ts", "src/frame-clock-client.ts"]
+  "exclude": ["src/a11y-client.ts", "src/ghost-cursor-client.ts", "src/audio-tap-client.ts"]
 }

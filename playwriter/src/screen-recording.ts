@@ -26,11 +26,11 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
-import { once } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
 import util from 'node:util'
 import type { Writable } from 'node:stream'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@xmorse/playwright-core'
 import { getCDPSessionForPage, type PlaywrightCDPSessionAdapter } from './cdp-session.js'
@@ -302,27 +302,22 @@ export function parseFfmpegProgressLine(line: string): {
  *  would stop all of them: the last one to stop sends it. */
 const capturesByPage = new Map<Page, Set<PageCapture>>()
 
-/** Pages whose clock a manual capture controls. Two captures cannot share one clock. */
-const manualClockPages = new Set<Page>()
+let audioTapCode: string | null = null
 
-const clientBundles = new Map<string, string>()
-
-/** Browser IIFE built by scripts/build-client-bundles.ts */
-function readClientBundle(name: 'audio-tap-client' | 'frame-clock-client'): string {
-  const cached = clientBundles.get(name)
-  if (cached) {
-    return cached
+function getAudioTapCode(): string {
+  if (audioTapCode) {
+    return audioTapCode
   }
   const currentDir = path.dirname(fileURLToPath(import.meta.url))
-  const code = fs.readFileSync(path.join(currentDir, '..', 'dist', `${name}.js`), 'utf-8')
-  clientBundles.set(name, code)
-  return code
+  audioTapCode = fs.readFileSync(path.join(currentDir, '..', 'dist', 'audio-tap-client.js'), 'utf-8')
+  return audioTapCode
 }
 
 /**
- * - `real`: wall-clock video from the screencast. Agent think time is in the video.
- * - `manual`: page time is frozen. Each `frame()` moves it by one frame and takes a
- *   screenshot, so the video only shows time the agent asked for.
+ * Which wall-clock time ends up in the video:
+ * - `real`: all of it, from start to stop. Agent think time is in the video.
+ * - `manual`: only time inside `wait(ms)`. The page keeps running in between,
+ *   but nothing is written, so agent latency between execute calls is cut.
  */
 export type RecordingClock = 'real' | 'manual'
 
@@ -383,6 +378,10 @@ export class PageCapture {
   private readonly redact: (line: string) => string
   private readonly stderrTail: string[] = []
   private clockStart = performance.now()
+  /** Manual clock: video time from finished wait() calls */
+  private closedWindowsMs = 0
+  /** Manual clock: the wait() running now */
+  private openWindow: { startedAt: number; ms: number } | null = null
   private ticker: ReturnType<typeof setInterval> | null = null
   /** Hooks on the current page, removed on setPage() and at the end */
   private pageCleanups: Array<() => Promise<unknown>> = []
@@ -431,7 +430,7 @@ export class PageCapture {
   static async start(opts: PageCaptureOptions): Promise<PageCapture> {
     const { page, fps, audio } = opts
     if (opts.clock === 'manual' && audio) {
-      throw new Error('audio cannot be recorded with clock: "manual": page audio plays in real time.')
+      throw new Error('audio is not supported with clock: "manual" yet. Use clock: "real".')
     }
     const session = await getCDPSessionForPage({ page })
 
@@ -470,12 +469,7 @@ export class PageCapture {
     capture.wireProcess()
     try {
       await capture.attachPage()
-      if (capture.clock === 'manual') {
-        // First frame at the frozen start time, like a video's frame 0
-        await capture.writeFrame(await capture.screenshot())
-      } else {
-        capture.startTicker()
-      }
+      capture.startTicker()
     } catch (error) {
       await capture.abort()
       throw new Error('Could not start page capture', { cause: error })
@@ -490,8 +484,7 @@ export class PageCapture {
 
   /**
    * Take frames from another page from now on. The output size stays the same;
-   * frames are scaled and padded to fit. In manual clock mode the old page gets
-   * real time back and the new page is frozen.
+   * frames are scaled and padded to fit.
    */
   async setPage(page: Page): Promise<void> {
     if (this.finishing) {
@@ -516,24 +509,27 @@ export class PageCapture {
   }
 
   /**
-   * Manual clock only. Move page time by one frame (1000 / fps ms), take a
-   * screenshot and write it as the next video frame.
+   * Manual clock only. Write the next `ms` of real time as frames, then pause
+   * the video again. The video grows by exactly `ms`, however late the timer.
    */
-  async frame(): Promise<void> {
+  async wait(ms: number): Promise<void> {
     if (this.clock !== 'manual') {
-      throw new Error('frame() needs a recording started with clock: "manual"')
+      throw new Error('wait() needs a recording started with clock: "manual"')
     }
     if (this.finishing || this.failure) {
       throw this.failure || new Error('Capture already stopped')
     }
-    // Integer steps that add up exactly, so 30 fps does not drift by rounding
-    const index = this.stats.videoFrames
-    const stepMs = Math.round((index * 1000) / this.fps) - Math.round(((index - 1) * 1000) / this.fps)
-    await this.evaluate(`globalThis.__playwriterFrameClock?.advance(${stepMs})`).catch((error: unknown) => {
-      // Usually a navigation: the new document is frozen by the init script.
-      this.logger?.error('[capture] could not advance page clock:', error instanceof Error ? error.message : error)
-    })
-    await this.writeFrame(await this.screenshot())
+    if (this.openWindow) {
+      throw new Error('wait() is already running. Await it before calling it again.')
+    }
+    this.openWindow = { startedAt: performance.now(), ms }
+    try {
+      await Promise.race([delay(ms), this.done])
+    } finally {
+      this.openWindow = null
+      this.closedWindowsMs += ms
+    }
+    this.tick({ final: false })
   }
 
   /** Stop capturing, flush, and wait for ffmpeg to finish the output. */
@@ -541,9 +537,7 @@ export class PageCapture {
     if (!this.finishing) {
       this.finishing = true
       this.stopTicker()
-      if (this.clock === 'real') {
-        this.tick({ final: true })
-      }
+      this.tick({ final: true })
       void this.detach().finally(() => {
         this.videoIn.end()
         this.audioIn?.end()
@@ -634,11 +628,6 @@ export class PageCapture {
       browser?.off('disconnected', onClose)
     })
 
-    if (this.clock === 'manual') {
-      await this.freezePage()
-      return
-    }
-
     // Static pages never paint, so Chrome sends no screencast frame. Seed one.
     this.latestFrame = await this.screenshot()
     await this.attachScreencast()
@@ -672,32 +661,10 @@ export class PageCapture {
     await this.sendScreencast({ page, session })
   }
 
-  /** Install the frame clock (frame-clock-client.ts) now and on every new document. */
-  private async freezePage(): Promise<void> {
-    const { session } = this
-    const page = this.currentPage
-    if (manualClockPages.has(page)) {
-      throw new Error('Another clock: "manual" recording already controls this page. Stop it first.')
-    }
-    manualClockPages.add(page)
-    this.pageCleanups.push(async () => {
-      manualClockPages.delete(page)
-    })
-    const source = `${readClientBundle('frame-clock-client')}\n;globalThis.__playwriterFrameClock?.freeze()`
-    const { identifier } = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
-    this.pageCleanups.push(async () => {
-      await Promise.allSettled([
-        session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }),
-        this.evaluate('globalThis.__playwriterFrameClock?.release()', session),
-      ])
-    })
-    await this.evaluate(source, session)
-  }
-
   private async attachAudio(): Promise<void> {
     const { session } = this
     const bindingName = `__playwriterAudio_${crypto.randomUUID().replace(/-/g, '')}`
-    const source = `${readClientBundle('audio-tap-client')}\n;globalThis.__playwriterAudioTap(${JSON.stringify(bindingName)})`
+    const source = `${getAudioTapCode()}\n;globalThis.__playwriterAudioTap(${JSON.stringify(bindingName)})`
 
     const onBinding = (event: { name: string; payload: string }) => {
       if (event.name !== bindingName) {
@@ -732,14 +699,6 @@ export class PageCapture {
     await session.send('Runtime.evaluate', { expression: source })
   }
 
-  /** Main-world evaluate in the top frame. Awaits promises, throws page exceptions. */
-  private async evaluate(expression: string, session = this.session): Promise<void> {
-    const result = await session.send('Runtime.evaluate', { expression, awaitPromise: true })
-    if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text)
-    }
-  }
-
   private async screenshot(): Promise<Buffer> {
     const { data } = await this.session.send('Page.captureScreenshot', {
       format: 'jpeg',
@@ -747,15 +706,6 @@ export class PageCapture {
       optimizeForSpeed: true,
     })
     return Buffer.from(data, 'base64')
-  }
-
-  /** Manual clock: write one frame, waiting for ffmpeg when its pipe is full. */
-  private async writeFrame(frame: Buffer): Promise<void> {
-    this.stats.videoFrames += 1
-    if (this.videoIn.write(frame)) {
-      return
-    }
-    await Promise.race([once(this.videoIn, 'drain'), this.done])
   }
 
   /**
@@ -822,12 +772,23 @@ export class PageCapture {
     })
   }
 
+  /** Wall time that belongs in the video so far */
+  private videoElapsedMs(): number {
+    if (this.clock === 'real') {
+      return performance.now() - this.clockStart
+    }
+    // Clamped: a late timer must not add frames past the requested ms
+    const window = this.openWindow
+    const openMs = window ? Math.min(performance.now() - window.startedAt, window.ms) : 0
+    return this.closedWindowsMs + openMs
+  }
+
   /** Write every output frame slot and audio sample due up to now. */
   private tick({ final }: { final: boolean }): void {
     if (this.failure) {
       return
     }
-    const elapsedMs = performance.now() - this.clockStart
+    const elapsedMs = this.videoElapsedMs()
     const frameTarget = Math.floor((elapsedMs * this.fps) / 1000)
     while (this.stats.videoFrames < frameTarget) {
       this.videoIn.write(this.latestFrame)
@@ -913,7 +874,7 @@ export interface StartRecordingOptions {
   maxSize?: number
   /** JPEG quality of captured frames, 0-100 (default 90) */
   quality?: number
-  /** `real` (default) records wall-clock time. `manual` freezes the page; `frame()` and `wait()` add frames. */
+  /** `real` (default) records all wall-clock time. `manual` records only inside `wait(ms)`. */
   clock?: RecordingClock
   logger?: Logger
 }
@@ -986,17 +947,9 @@ export class ScreenRecording {
     return this.capture.setPage(page)
   }
 
-  /** Manual clock only: move page time by one frame and capture it. */
-  frame(): Promise<void> {
-    return this.capture.frame()
-  }
-
-  /** Manual clock only: capture `ms` of page time, one frame per 1000 / fps ms. */
-  async wait(ms: number): Promise<void> {
-    const count = Math.round((ms * this.capture.fps) / 1000)
-    for (let index = 0; index < count; index += 1) {
-      await this.capture.frame()
-    }
+  /** Manual clock only: record the next `ms` of real time. */
+  wait(ms: number): Promise<void> {
+    return this.capture.wait(ms)
   }
 
   get isRecording(): boolean {
@@ -1295,12 +1248,7 @@ export class RecordingHandle {
     }
   }
 
-  /** clock: 'manual' only. Move page time by one frame and capture it. */
-  frame(): Promise<void> {
-    return this.recording.frame()
-  }
-
-  /** clock: 'manual' only. Capture `ms` of page time. */
+  /** clock: 'manual' only. Record the next `ms` of real time. */
   wait(ms: number): Promise<void> {
     return this.recording.wait(ms)
   }

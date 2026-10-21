@@ -1198,7 +1198,7 @@ state.video = await recording.start({
   page: state.page,
   outputPath: '/absolute/path/to/recording.mp4',
   frameRate: 30, // default, max 60
-  clock: 'real', // default. 'manual' freezes page time, see below
+  clock: 'real', // default. 'manual' records only inside wait(ms), see below
   audio: false, // default
   maxSize: 1920, // default, longest output edge in pixels
   quality: 90, // default, JPEG frame quality 0-100
@@ -1218,18 +1218,16 @@ state.recordingResult = await state.video.stop() // { path, duration, size, exec
 // Other: state.video.isRecording, state.video.cancel()
 ```
 
-**Prefer `clock: 'manual'` for demo videos.** With the default `'real'` clock every second you spend thinking is in the video. `'manual'` freezes page time (`Date`, timers, rAF, CSS animations and transitions); it moves only when you add frames, so the video has no idle time and animations stay smooth:
+**Prefer `clock: 'manual'` for demo videos.** With the default `'real'` clock every second you spend thinking is in the video. `'manual'` writes frames only inside `wait(ms)`; the page runs normally in between, so the video has no idle time:
 
 ```js
 state.video = await recording.start({ page: state.page, outputPath: '/abs/demo.mp4', clock: 'manual' })
 await state.page.getByRole('button', { name: 'Open' }).click()
-await state.video.wait(400) // capture 400ms of page time (12 frames at 30 fps)
-await state.page.mouse.wheel(0, 200)
-await state.video.frame() // one frame (1000 / frameRate ms)
-await state.video.stop() // page gets real time back
+await state.video.wait(800) // records the next 800ms, animation included
+await state.video.stop()
 ```
 
-In manual mode input lands instantly between frames: move the mouse in small steps with a `frame()` after each for a visible glide. Use `wait(ms)`, never `waitForTimeout()`, to let the page move on (loading spinners, debounced inputs). Start the recording before `goto()` so timers the page starts are frozen too. Media playback, smooth scroll, workers and iframes still run in real time. No `audio`.
+Put each action and its `wait()` in the **same execute call**, or the animation is over before recording resumes. Use `wait(ms)` instead of `waitForTimeout()` when the viewer should see time pass. No `audio` yet.
 
 **ghostCursor.show / ghostCursor.hide** - the ghost cursor overlay is always on: the extension injects it hidden on every Playwriter-attached tab, it appears on the first Playwright mouse action (click, move, wheel) and fades out after 5s idle. These methods only matter if you want to change the cursor style or temporarily hide it:
 
