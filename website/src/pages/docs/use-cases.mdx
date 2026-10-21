@@ -128,14 +128,14 @@ Have the agent **record what it's doing** as an MP4 video. The recording pipes C
 
 ```bash
 # Open a tab and start recording
-playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com"); await recording.start({ page: state.page, outputPath: "/tmp/demo.mp4" })'
+playwriter -s 1 -e 'state.page = await context.newPage(); await state.page.goto("https://example.com"); state.video = await recording.start({ page: state.page, outputPath: "/tmp/demo.mp4" })'
 
 # Do things — recording continues through navigation
 playwriter -s 1 -e 'await state.page.click("a")'
 playwriter -s 1 -e 'await state.page.goBack()'
 
 # Stop and save
-playwriter -s 1 -e 'await recording.stop({ page: state.page })'
+playwriter -s 1 -e 'await state.video.stop()'
 ```
 
 Useful for creating **demo videos**, recording bug reproductions, or documenting workflows. The agent can also speed up idle sections with `createDemoVideo` to produce polished demos.

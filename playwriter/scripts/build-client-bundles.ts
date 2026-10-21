@@ -57,6 +57,11 @@ const BUNDLES: BundleConfig[] = [
     type: 'source',
     entry: 'audio-tap-client.ts',
   },
+  {
+    name: 'frame-clock-client',
+    type: 'source',
+    entry: 'frame-clock-client.ts',
+  },
 
   // Wrapper bundles (npm packages → globalThis)
   {

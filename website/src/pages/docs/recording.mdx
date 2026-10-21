@@ -1,7 +1,7 @@
 ---
 title: Record Browser Automation as MP4 Video
 sidebarTitle: Recording
-description: Record browser sessions as MP4 or WebM video with CDP screencast and ffmpeg. No permission click, survives page navigation, optional page audio, ghost cursor overlay and demo acceleration for idle sections.
+description: Record browser sessions as MP4 or WebM video with CDP screencast and ffmpeg. No permission click, survives page navigation, optional page audio, ghost cursor overlay, frame-stepped manual clock without agent latency, and demo acceleration for idle sections.
 icon: lucide:video
 ---
 
@@ -23,8 +23,10 @@ sudo apt install ffmpeg
 
 ## Start recording
 
+`recording.start()` returns a **handle**. Keep it in `state` to use it in later execute calls:
+
 ```js
-await recording.start({
+state.video = await recording.start({
   page: state.page,
   outputPath: '/absolute/path/to/recording.mp4',
   frameRate: 30,
@@ -47,7 +49,7 @@ Static pages are fine too. The last frame is **repeated** at a constant frame ra
 ## Stop and save
 
 ```js
-state.recordingResult = await recording.stop({ page: state.page })
+state.recordingResult = await state.video.stop()
 // => { path, duration, size, executionTimestamps }
 ```
 
@@ -57,8 +59,9 @@ state.recordingResult = await recording.stop({ page: state.page })
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `page` | Page | required | Page to record |
+| `page` | Page | required | Page to record. Change it later with `setPage()` |
 | `outputPath` | string | required | Absolute output path. `.mp4`, `.mov`, `.mkv` or `.webm` |
+| `clock` | `'real'` \| `'manual'` | `'real'` | `'manual'` freezes page time; see [Manual clock](#manual-clock) |
 | `frameRate` | number | 30 | Frames per second, max 60 |
 | `audio` | boolean | false | Record page audio (see [Audio](#audio)) |
 | `maxSize` | number | 1920 | Longest output edge in pixels |
@@ -99,18 +102,66 @@ Limitations:
 - An AudioContext graph wired **before** `recording.start` is missed
 - The page can detect the patched audio APIs while recording
 
+## Manual clock
+
+With the default `clock: 'real'`, the video is wall-clock time: every second the agent spends thinking is in the video. Pass `clock: 'manual'` to **freeze page time** instead. Time moves only when you add frames, so agent latency never shows and animations play smoothly at any frame rate:
+
+```js
+state.video = await recording.start({ page: state.page, outputPath: '/abs/demo.mp4', clock: 'manual' })
+
+await state.page.getByRole('button', { name: 'Open menu' }).click()
+await state.video.wait(400)  // 400ms of page time = 12 frames at 30 fps
+
+for (let y = 0; y < 600; y += 40) {
+  await state.page.mouse.wheel(0, 40)
+  await state.video.frame()  // one frame per wheel step
+}
+
+await state.video.stop()  // encode and give the page real time back
+```
+
+```
+agent ── click ─────────────> page time frozen, nothing moves
+agent ── video.wait(400) ───> advance 33ms → screenshot → advance 33ms → screenshot ...
+agent thinks for 10s ───────> page time frozen, nothing recorded
+agent ── video.stop() ──────> encode frames, resume real time
+```
+
+| Call | What it does |
+|---|---|
+| `video.frame()` | Moves page time by one frame (`1000 / frameRate` ms), then captures it |
+| `video.wait(ms)` | Captures `ms` of page time |
+
+Frozen: `Date`, `performance.now`, timers, `requestAnimationFrame`, CSS animations and transitions, and `element.animate()`. Input lands **instantly** between frames, so move the mouse in small steps across frames for a visible glide.
+
+Limitations:
+
+- `<video>` and `<audio>` playback, smooth scrolling, GIFs, workers and iframes still run in real time
+- Timers that the page started **before** `recording.start` keep real time. Start the recording before `goto()` to control them all
+- No `audio: true`. Use `video.wait(ms)`, not `waitForTimeout()`, to let the page move on
+- After `stop()` the page keeps fake timers that follow real time until it reloads
+
+## Record another tab
+
+`setPage()` moves the recording to another tab. The output size stays the same; frames are scaled and padded to fit:
+
+```js
+state.other = await context.newPage()
+await state.other.goto('https://example.com')
+await state.video.setPage(state.other)
+```
+
+With `clock: 'manual'`, the old tab gets real time back and the new tab is frozen.
+
 ## Other recording commands
 
 ```js
-// Check if recording is active
-await recording.isRecording({ page: state.page })
-// => { isRecording, startedAt? }
-
-// Cancel recording without saving
-await recording.cancel({ page: state.page })
+state.video.isRecording  // false after stop, cancel, page close or max duration
+state.video.page         // tab being recorded
+await state.video.cancel()  // stop without saving
 ```
 
-Several pages can record **at the same time**. Pass the page you want to each call.
+Several pages can record **at the same time**. Each `recording.start()` returns its own handle.
 
 ## Ghost cursor
 
@@ -129,11 +180,11 @@ For best-looking recordings, use **locator-based interactions** (`locator.click(
 
 ## Demo video acceleration
 
-After recording, use `createDemoVideo` to **speed up idle sections** (time between execute calls) while keeping interactions at normal speed. Requires `ffmpeg` and `ffprobe` installed.
+After a `clock: 'real'` recording, use `createDemoVideo` to **speed up idle sections** (time between execute calls) while keeping interactions at normal speed. Requires `ffmpeg` and `ffprobe` installed. A `clock: 'manual'` recording has no idle sections, so it does not need this.
 
 ```js
 // First, stop recording and save the result
-state.recordingResult = await recording.stop({ page: state.page })
+state.recordingResult = await state.video.stop()
 
 // Then in a SEPARATE execute call (with --timeout 120000):
 const demoPath = await createDemoVideo({
@@ -163,6 +214,8 @@ await page.goto('https://example.com')
 const { path, duration, size } = await rec.stop()
 // or: await rec.cancel()
 ```
+
+`startRecording({ clock: 'manual' })` gives the same `frame()`, `wait(ms)` and `setPage(page)` methods.
 
 ## Limitations
 

@@ -132,9 +132,9 @@ to save CPU. With `audio: true` it also records **page audio** through a Web Aud
 agent-browser recordings have no audio.
 
 ```bash
-playwriter -s 1 -e "await recording.start({ page: state.page, outputPath: './demo.mp4', frameRate: 60 })"
+playwriter -s 1 -e "state.video = await recording.start({ page: state.page, outputPath: './demo.mp4', frameRate: 60 })"
 playwriter -s 1 -e "await state.page.click('a'); await state.page.waitForLoadState('domcontentloaded')"
-playwriter -s 1 -e "await recording.stop({ page: state.page })"
+playwriter -s 1 -e "await state.video.stop()"
 ```
 
 See [Recording](/docs/recording).

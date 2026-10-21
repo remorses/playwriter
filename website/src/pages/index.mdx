@@ -278,19 +278,20 @@ CDP screencast piped to `ffmpeg`, so it needs no permission click and
 
 ```bash
 # Start recording
-playwriter -e "await recording.start({ page: state.page, outputPath: './recording.mp4', frameRate: 30 })"
+playwriter -e "state.video = await recording.start({ page: state.page, outputPath: './recording.mp4', frameRate: 30 })"
 
 # Navigate, interact — recording continues
 playwriter -e "await state.page.click('a'); await state.page.waitForLoadState('domcontentloaded')"
 playwriter -e "await state.page.goBack()"
 
 # Stop and save
-playwriter -e "await recording.stop({ page: state.page })"
+playwriter -e "await state.video.stop()"
 ```
 
 It works in extension, direct CDP and headless mode, and can record **page audio** with
-`audio: true`. You can also check recording status with `recording.isRecording` or cancel
-without saving with `recording.cancel`. Requires `ffmpeg` on `PATH`.
+`audio: true`. With `clock: 'manual'` page time freezes between frames, so agent latency never
+shows in the video. The handle also has `isRecording`, `cancel()` and `setPage()` to switch tabs.
+Requires `ffmpeg` on `PATH`.
 
 ## Comparison
 

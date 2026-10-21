@@ -621,7 +621,7 @@ export interface ExecutionTimestamp {
  *
  * @example
  * ```ts
- * const { executionTimestamps, duration } = await stopRecording()
+ * const { executionTimestamps, duration } = await state.video.stop()
  * const idleSections = computeIdleSections({
  *   executionTimestamps,
  *   totalDurationMs: duration,
@@ -639,7 +639,7 @@ export function computeIdleSections({
     bufferSeconds = INTERACTION_BUFFER_SECONDS,
 }: {
     executionTimestamps: ExecutionTimestamp[]
-    /** Total recording duration in milliseconds (from stopRecording result) */
+    /** Total recording duration in milliseconds (from the recording handle stop() result) */
     totalDurationMs: number
     /** Speed multiplier for idle sections (default 6) */
     speed?: number
@@ -707,9 +707,9 @@ export function computeIdleSections({
 export interface CreateDemoVideoOptions {
     /** Path to the raw recording file */
     recordingPath: string
-    /** Total recording duration in milliseconds (from stopRecording result) */
+    /** Total recording duration in milliseconds (from the recording handle stop() result) */
     durationMs: number
-    /** Execution timestamps (from stopRecording result) */
+    /** Execution timestamps (from the recording handle stop() result) */
     executionTimestamps: ExecutionTimestamp[]
     /** Speed multiplier for idle sections (default 6) */
     speed?: number

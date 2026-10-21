@@ -471,7 +471,7 @@ export class PlaywrightExecutor {
 
   // Recording timestamp tracking: when recording is active, each execute()
   // call pushes {start, end} (seconds relative to recordingStartedAt).
-  // Returned by stopRecording() so the model can speed up idle sections.
+  // Returned by the recording handle stop() so the model can speed up idle sections.
   private recordingStartedAt: number | null = null
   private executionTimestamps: Array<{ start: number; end: number }> = []
   private activeOutputScopes = new Set<OutputScope>()
@@ -1623,7 +1623,6 @@ export class PlaywrightExecutor {
         },
       }
       const recordingApi = createRecordingApi({
-        context,
         ghostCursorController,
         logger: captureLogger,
         onStart: () => {
@@ -1765,9 +1764,6 @@ export class PlaywrightExecutor {
         },
         recording: {
           start: recordingApi.start,
-          stop: recordingApi.stop,
-          isRecording: recordingApi.isRecording,
-          cancel: recordingApi.cancel,
         },
         stream: {
           start: streamApi.start,
@@ -1777,11 +1773,6 @@ export class PlaywrightExecutor {
         cloud: this.enableCloudScope
           ? createCloudScope({ auth: this.cloudAuth })
           : undefined,
-        // Backward-compatible aliases
-        startRecording: recordingApi.start,
-        stopRecording: recordingApi.stop,
-        isRecording: recordingApi.isRecording,
-        cancelRecording: recordingApi.cancel,
         createDemoVideo,
         resetPlaywright: async () => {
           const { context: newContext } = await self.resetInternal()

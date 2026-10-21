@@ -1187,17 +1187,18 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 **resizeImageForAgent** - shrink an image so it consumes fewer tokens when read back into context. The resized image is automatically included in the response (visible to the LLM). `await resizeImageForAgent({ input: '/absolute/path/to/screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `format` (default: `'png'`), `output`. Alias: `resizeImage`.
 
-**recording.start / recording.stop** - record the page as a video. Uses CDP screencast piped to `ffmpeg` (**must be on PATH**). No user click needed; works in every mode (extension, direct CDP, headless, cloud, remote). **Recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Auto-resizes viewport to 16:9 (only shrinks, override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`). Output is `.mp4`/`.mov`/`.mkv` (H.264) or `.webm` (VP8). Several pages can record at once. Recording ends when the page closes or the session is reset.
+**recording.start** - record the page as a video. Returns a handle; keep it in `state` to stop it in a later call. Uses CDP screencast piped to `ffmpeg` (**must be on PATH**). No user click needed; works in every mode (extension, direct CDP, headless, cloud, remote). **Recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Auto-resizes viewport to 16:9 (only shrinks, override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`). Output is `.mp4`/`.mov`/`.mkv` (H.264) or `.webm` (VP8). Several pages can record at once. Recording ends when the page closes or the session is reset.
 
 `audio: true` taps page `<audio>`/`<video>` and AudioContexts. It misses cross-origin iframe audio and AudioContext graphs wired before start, and the page can detect the patched audio APIs.
 
 For demos, use interaction methods (`locator.click()`, `page.mouse.move()`) instead of `goto()` to show realistic cursor motion.
 
 ```js
-await recording.start({
+state.video = await recording.start({
   page: state.page,
   outputPath: '/absolute/path/to/recording.mp4',
   frameRate: 30, // default, max 60
+  clock: 'real', // default. 'manual' freezes page time, see below
   audio: false, // default
   maxSize: 1920, // default, longest output edge in pixels
   quality: 90, // default, JPEG frame quality 0-100
@@ -1209,11 +1210,26 @@ await recording.start({
 await state.page.click('a')
 await state.page.waitForLoadState('domcontentloaded')
 
-// Stop — save full result including executionTimestamps for createDemoVideo
-state.recordingResult = await recording.stop({ page: state.page }) // { path, duration, size, executionTimestamps }
+await state.video.setPage(otherPage) // record another tab from now on
 
-// Other: recording.isRecording({ page: state.page }), recording.cancel({ page: state.page })
+// Stop — save full result including executionTimestamps for createDemoVideo
+state.recordingResult = await state.video.stop() // { path, duration, size, executionTimestamps }
+
+// Other: state.video.isRecording, state.video.cancel()
 ```
+
+**Prefer `clock: 'manual'` for demo videos.** With the default `'real'` clock every second you spend thinking is in the video. `'manual'` freezes page time (`Date`, timers, rAF, CSS animations and transitions); it moves only when you add frames, so the video has no idle time and animations stay smooth:
+
+```js
+state.video = await recording.start({ page: state.page, outputPath: '/abs/demo.mp4', clock: 'manual' })
+await state.page.getByRole('button', { name: 'Open' }).click()
+await state.video.wait(400) // capture 400ms of page time (12 frames at 30 fps)
+await state.page.mouse.wheel(0, 200)
+await state.video.frame() // one frame (1000 / frameRate ms)
+await state.video.stop() // page gets real time back
+```
+
+In manual mode input lands instantly between frames: move the mouse in small steps with a `frame()` after each for a visible glide. Use `wait(ms)`, never `waitForTimeout()`, to let the page move on (loading spinners, debounced inputs). Start the recording before `goto()` so timers the page starts are frozen too. Media playback, smooth scroll, workers and iframes still run in real time. No `audio`.
 
 **ghostCursor.show / ghostCursor.hide** - the ghost cursor overlay is always on: the extension injects it hidden on every Playwriter-attached tab, it appears on the first Playwright mouse action (click, move, wheel) and fades out after 5s idle. These methods only matter if you want to change the cursor style or temporarily hide it:
 
@@ -1222,11 +1238,11 @@ await ghostCursor.show({ page: state.page, style: 'screenstudio' }) // 'minimal'
 await ghostCursor.hide({ page: state.page }) // hide until next show() or hard navigation
 ```
 
-**createDemoVideo** - speeds up idle sections (time between execute() calls) while keeping interactions at normal speed. Requires `ffmpeg`/`ffprobe`. Timestamps are tracked automatically during recording and returned by `recording.stop()`. **Timeout**: can take 60–120+ seconds, always pass `--timeout 120000` or higher.
+**createDemoVideo** - for `clock: 'real'` recordings: speeds up idle sections (time between execute() calls) while keeping interactions at normal speed. Requires `ffmpeg`/`ffprobe`. Timestamps are tracked automatically during recording and returned by `state.video.stop()`. **Timeout**: can take 60–120+ seconds, always pass `--timeout 120000` or higher.
 
 ```js
-// After recording.stop(), save full result to state (executionTimestamps powers idle detection)
-state.recordingResult = await recording.stop({ page: state.page })
+// After stop(), save full result to state (executionTimestamps powers idle detection)
+state.recordingResult = await state.video.stop()
 
 // In a SEPARATE execute call with --timeout 120000:
 const demoPath = await createDemoVideo({

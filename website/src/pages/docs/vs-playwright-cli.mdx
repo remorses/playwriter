@@ -57,7 +57,7 @@ to `ffmpeg` for up to 60fps recording with optional page audio. No permission cl
 survives page navigation.
 
 ```bash
-playwriter -s 1 -e "recording.start({ page: state.page, outputPath: './demo.mp4' })"
+playwriter -s 1 -e "state.video = await recording.start({ page: state.page, outputPath: './demo.mp4' })"
 playwriter -s 1 -e "state.page.click('a'); state.page.waitForLoadState('domcontentloaded')"
-playwriter -s 1 -e "recording.stop({ page: state.page })"
+playwriter -s 1 -e "await state.video.stop()"
 ```

@@ -26,11 +26,13 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
+import { once } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
+import util from 'node:util'
 import type { Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
-import type { BrowserContext, Page } from '@xmorse/playwright-core'
+import type { Page } from '@xmorse/playwright-core'
 import { getCDPSessionForPage, type PlaywrightCDPSessionAdapter } from './cdp-session.js'
 import { detectEncoder } from './ffmpeg.js'
 import { mergeScreencastParams } from './relay-state.js'
@@ -300,16 +302,29 @@ export function parseFfmpegProgressLine(line: string): {
  *  would stop all of them: the last one to stop sends it. */
 const capturesByPage = new Map<Page, Set<PageCapture>>()
 
-let audioTapCode: string | null = null
+/** Pages whose clock a manual capture controls. Two captures cannot share one clock. */
+const manualClockPages = new Set<Page>()
 
-function getAudioTapCode(): string {
-  if (audioTapCode) {
-    return audioTapCode
+const clientBundles = new Map<string, string>()
+
+/** Browser IIFE built by scripts/build-client-bundles.ts */
+function readClientBundle(name: 'audio-tap-client' | 'frame-clock-client'): string {
+  const cached = clientBundles.get(name)
+  if (cached) {
+    return cached
   }
   const currentDir = path.dirname(fileURLToPath(import.meta.url))
-  audioTapCode = fs.readFileSync(path.join(currentDir, '..', 'dist', 'audio-tap-client.js'), 'utf-8')
-  return audioTapCode
+  const code = fs.readFileSync(path.join(currentDir, '..', 'dist', `${name}.js`), 'utf-8')
+  clientBundles.set(name, code)
+  return code
 }
+
+/**
+ * - `real`: wall-clock video from the screencast. Agent think time is in the video.
+ * - `manual`: page time is frozen. Each `frame()` moves it by one frame and takes a
+ *   screenshot, so the video only shows time the agent asked for.
+ */
+export type RecordingClock = 'real' | 'manual'
 
 export interface CaptureStats {
   /** Frames written to ffmpeg (constant rate, repeats included) */
@@ -337,6 +352,7 @@ interface PageCaptureOptions {
   page: Page
   fps: number
   audio: boolean
+  clock?: RecordingClock
   /** Explicit output size. Default: viewport in device pixels, capped at maxSize */
   size?: { width: number; height: number }
   maxSize?: number
@@ -348,9 +364,9 @@ interface PageCaptureOptions {
 }
 
 export class PageCapture {
-  readonly page: Page
   readonly fps: number
   readonly audio: boolean
+  readonly clock: RecordingClock
   readonly width: number
   readonly height: number
   readonly startedAt = Date.now()
@@ -358,17 +374,19 @@ export class PageCapture {
   /** Resolves once ffmpeg exited and page hooks are removed */
   readonly done: Promise<CaptureResult>
 
-  private readonly session: PlaywrightCDPSessionAdapter
+  private currentPage: Page
+  private session: PlaywrightCDPSessionAdapter
   private readonly ffmpeg: ChildProcess
   private readonly videoIn: Writable
   private readonly audioIn: Writable | null
   private readonly logger?: Logger
   private readonly redact: (line: string) => string
   private readonly stderrTail: string[] = []
-  private readonly clockStart = performance.now()
-  private readonly ticker: ReturnType<typeof setInterval>
-  private readonly cleanups: Array<() => Promise<unknown>> = []
-  private latestFrame: Buffer
+  private clockStart = performance.now()
+  private ticker: ReturnType<typeof setInterval> | null = null
+  /** Hooks on the current page, removed on setPage() and at the end */
+  private pageCleanups: Array<() => Promise<unknown>> = []
+  private latestFrame: Buffer = Buffer.alloc(0)
   private screencastParams: { format: 'jpeg'; quality: number; maxWidth: number; maxHeight: number; everyNthFrame: number }
   private rateWindow = { startedAt: performance.now(), frames: 0 }
   private audioQueue: Buffer[] = []
@@ -384,12 +402,12 @@ export class PageCapture {
     session: PlaywrightCDPSessionAdapter
     ffmpeg: ChildProcess
     size: { width: number; height: number }
-    seedFrame: Buffer
   }) {
-    const { opts, session, ffmpeg, size, seedFrame } = options
-    this.page = opts.page
+    const { opts, session, ffmpeg, size } = options
+    this.currentPage = opts.page
     this.fps = opts.fps
     this.audio = opts.audio
+    this.clock = opts.clock ?? 'real'
     this.width = size.width
     this.height = size.height
     this.logger = opts.logger
@@ -398,7 +416,6 @@ export class PageCapture {
     this.ffmpeg = ffmpeg
     this.videoIn = ffmpeg.stdin!
     this.audioIn = opts.audio ? (ffmpeg.stdio[3] as Writable) : null
-    this.latestFrame = seedFrame
     this.screencastParams = {
       format: 'jpeg',
       quality: opts.quality ?? DEFAULT_JPEG_QUALITY,
@@ -409,14 +426,13 @@ export class PageCapture {
     this.done = new Promise((resolve) => {
       this.resolveDone = resolve
     })
-    this.ticker = setInterval(() => {
-      this.tick({ final: false })
-    }, 1000 / opts.fps)
   }
 
   static async start(opts: PageCaptureOptions): Promise<PageCapture> {
     const { page, fps, audio } = opts
-    const quality = opts.quality ?? DEFAULT_JPEG_QUALITY
+    if (opts.clock === 'manual' && audio) {
+      throw new Error('audio cannot be recorded with clock: "manual": page audio plays in real time.')
+    }
     const session = await getCDPSessionForPage({ page })
 
     const size = opts.size || (await (async () => {
@@ -430,10 +446,6 @@ export class PageCapture {
         maxSize: opts.maxSize ?? DEFAULT_MAX_SIZE,
       })
     })())
-
-    // Static pages never paint, so Chrome sends no screencast frame. Seed one.
-    const seed = await session.send('Page.captureScreenshot', { format: 'jpeg', quality })
-    const seedFrame = Buffer.from(seed.data, 'base64')
 
     const args = opts.buildArgs({ width: size.width, height: size.height, fps, audio })
     opts.logger?.log(`[capture] ffmpeg ${args.map(opts.redact || ((arg) => arg)).join(' ')}`)
@@ -454,9 +466,16 @@ export class PageCapture {
       throw spawnError
     }
 
-    const capture = new PageCapture({ opts, session, ffmpeg, size, seedFrame })
+    const capture = new PageCapture({ opts, session, ffmpeg, size })
+    capture.wireProcess()
     try {
-      await capture.attach()
+      await capture.attachPage()
+      if (capture.clock === 'manual') {
+        // First frame at the frozen start time, like a video's frame 0
+        await capture.writeFrame(await capture.screenshot())
+      } else {
+        capture.startTicker()
+      }
     } catch (error) {
       await capture.abort()
       throw new Error('Could not start page capture', { cause: error })
@@ -464,12 +483,67 @@ export class PageCapture {
     return capture
   }
 
+  /** The page frames come from. Change it with setPage(). */
+  get page(): Page {
+    return this.currentPage
+  }
+
+  /**
+   * Take frames from another page from now on. The output size stays the same;
+   * frames are scaled and padded to fit. In manual clock mode the old page gets
+   * real time back and the new page is frozen.
+   */
+  async setPage(page: Page): Promise<void> {
+    if (this.finishing) {
+      throw new Error('Capture already stopped')
+    }
+    if (page === this.currentPage) {
+      return
+    }
+    await this.detachPage()
+    this.currentPage = page
+    try {
+      this.session = await getCDPSessionForPage({ page })
+      await this.attachPage()
+    } catch (error) {
+      await this.stop()
+      throw new Error('Could not move the capture to the new page. The capture was stopped.', { cause: error })
+    }
+    // stop() ran while attaching: its cleanup missed the new hooks
+    if (this.finishing) {
+      await this.detachPage()
+    }
+  }
+
+  /**
+   * Manual clock only. Move page time by one frame (1000 / fps ms), take a
+   * screenshot and write it as the next video frame.
+   */
+  async frame(): Promise<void> {
+    if (this.clock !== 'manual') {
+      throw new Error('frame() needs a recording started with clock: "manual"')
+    }
+    if (this.finishing || this.failure) {
+      throw this.failure || new Error('Capture already stopped')
+    }
+    // Integer steps that add up exactly, so 30 fps does not drift by rounding
+    const index = this.stats.videoFrames
+    const stepMs = Math.round((index * 1000) / this.fps) - Math.round(((index - 1) * 1000) / this.fps)
+    await this.evaluate(`globalThis.__playwriterFrameClock?.advance(${stepMs})`).catch((error: unknown) => {
+      // Usually a navigation: the new document is frozen by the init script.
+      this.logger?.error('[capture] could not advance page clock:', error instanceof Error ? error.message : error)
+    })
+    await this.writeFrame(await this.screenshot())
+  }
+
   /** Stop capturing, flush, and wait for ffmpeg to finish the output. */
   stop(): Promise<CaptureResult> {
     if (!this.finishing) {
       this.finishing = true
-      clearInterval(this.ticker)
-      this.tick({ final: true })
+      this.stopTicker()
+      if (this.clock === 'real') {
+        this.tick({ final: true })
+      }
       void this.detach().finally(() => {
         this.videoIn.end()
         this.audioIn?.end()
@@ -483,7 +557,7 @@ export class PageCapture {
   abort(): Promise<CaptureResult> {
     if (!this.finishing) {
       this.finishing = true
-      clearInterval(this.ticker)
+      this.stopTicker()
       void this.detach()
     }
     this.killed = true
@@ -500,14 +574,12 @@ export class PageCapture {
     return [...this.stderrTail]
   }
 
-  private async attach(): Promise<void> {
-    const { session, page } = this
-
+  private wireProcess(): void {
     this.ffmpeg.stdin?.on('error', () => {})
     this.audioIn?.on('error', () => {})
     this.wireStderr()
     this.ffmpeg.once('close', (code, signal) => {
-      clearInterval(this.ticker)
+      this.stopTicker()
       const error = (() => {
         if (this.failure) {
           return this.failure
@@ -531,7 +603,53 @@ export class PageCapture {
         this.resolveDone({ duration: Math.round((this.stats.videoFrames * 1000) / this.fps), error })
       })
     })
+  }
 
+  private startTicker(): void {
+    this.clockStart = performance.now()
+    this.ticker = setInterval(() => {
+      this.tick({ final: false })
+    }, 1000 / this.fps)
+  }
+
+  private stopTicker(): void {
+    if (this.ticker) {
+      clearInterval(this.ticker)
+      this.ticker = null
+    }
+  }
+
+  /** Hook the current page: frame source, close listeners, audio tap. */
+  private async attachPage(): Promise<void> {
+    const page = this.currentPage
+
+    const onClose = () => {
+      void this.stop()
+    }
+    page.once('close', onClose)
+    const browser = page.context().browser()
+    browser?.once('disconnected', onClose)
+    this.pageCleanups.push(async () => {
+      page.off('close', onClose)
+      browser?.off('disconnected', onClose)
+    })
+
+    if (this.clock === 'manual') {
+      await this.freezePage()
+      return
+    }
+
+    // Static pages never paint, so Chrome sends no screencast frame. Seed one.
+    this.latestFrame = await this.screenshot()
+    await this.attachScreencast()
+    if (this.audio) {
+      await this.attachAudio()
+    }
+  }
+
+  private async attachScreencast(): Promise<void> {
+    const { session } = this
+    const page = this.currentPage
     const onFrame = (event: { data: string }) => {
       this.latestFrame = Buffer.from(event.data, 'base64')
       this.stats.capturedFrames += 1
@@ -541,38 +659,45 @@ export class PageCapture {
     const siblings = capturesByPage.get(page) || new Set<PageCapture>()
     siblings.add(this)
     capturesByPage.set(page, siblings)
-    this.cleanups.push(async () => {
+    this.pageCleanups.push(async () => {
       session.off('Page.screencastFrame', onFrame)
       siblings.delete(this)
       if (siblings.size > 0) {
-        await this.sendScreencast()
+        await this.sendScreencast({ page, session })
         return
       }
       capturesByPage.delete(page)
       await session.send('Page.stopScreencast')
     })
-    await this.sendScreencast()
+    await this.sendScreencast({ page, session })
+  }
 
-    const onClose = () => {
-      void this.stop()
+  /** Install the frame clock (frame-clock-client.ts) now and on every new document. */
+  private async freezePage(): Promise<void> {
+    const { session } = this
+    const page = this.currentPage
+    if (manualClockPages.has(page)) {
+      throw new Error('Another clock: "manual" recording already controls this page. Stop it first.')
     }
-    page.once('close', onClose)
-    const browser = page.context().browser()
-    browser?.once('disconnected', onClose)
-    this.cleanups.push(async () => {
-      page.off('close', onClose)
-      browser?.off('disconnected', onClose)
+    manualClockPages.add(page)
+    this.pageCleanups.push(async () => {
+      manualClockPages.delete(page)
     })
-
-    if (this.audio) {
-      await this.attachAudio()
-    }
+    const source = `${readClientBundle('frame-clock-client')}\n;globalThis.__playwriterFrameClock?.freeze()`
+    const { identifier } = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
+    this.pageCleanups.push(async () => {
+      await Promise.allSettled([
+        session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }),
+        this.evaluate('globalThis.__playwriterFrameClock?.release()', session),
+      ])
+    })
+    await this.evaluate(source, session)
   }
 
   private async attachAudio(): Promise<void> {
     const { session } = this
     const bindingName = `__playwriterAudio_${crypto.randomUUID().replace(/-/g, '')}`
-    const source = `${getAudioTapCode()}\n;globalThis.__playwriterAudioTap(${JSON.stringify(bindingName)})`
+    const source = `${readClientBundle('audio-tap-client')}\n;globalThis.__playwriterAudioTap(${JSON.stringify(bindingName)})`
 
     const onBinding = (event: { name: string; payload: string }) => {
       if (event.name !== bindingName) {
@@ -596,7 +721,7 @@ export class PageCapture {
     session.on('Runtime.bindingCalled', onBinding)
     await session.send('Runtime.addBinding', { name: bindingName })
     const { identifier } = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
-    this.cleanups.push(async () => {
+    this.pageCleanups.push(async () => {
       session.off('Runtime.bindingCalled', onBinding)
       await Promise.allSettled([
         session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }),
@@ -607,33 +732,57 @@ export class PageCapture {
     await session.send('Runtime.evaluate', { expression: source })
   }
 
+  /** Main-world evaluate in the top frame. Awaits promises, throws page exceptions. */
+  private async evaluate(expression: string, session = this.session): Promise<void> {
+    const result = await session.send('Runtime.evaluate', { expression, awaitPromise: true })
+    if (result.exceptionDetails) {
+      throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text)
+    }
+  }
+
+  private async screenshot(): Promise<Buffer> {
+    const { data } = await this.session.send('Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: this.screencastParams.quality,
+      optimizeForSpeed: true,
+    })
+    return Buffer.from(data, 'base64')
+  }
+
+  /** Manual clock: write one frame, waiting for ffmpeg when its pipe is full. */
+  private async writeFrame(frame: Buffer): Promise<void> {
+    this.stats.videoFrames += 1
+    if (this.videoIn.write(frame)) {
+      return
+    }
+    await Promise.race([once(this.videoIn, 'drain'), this.done])
+  }
+
   /**
    * Captures of one page share one CDP session, so the relay sees one client:
    * merge their params here. The relay merges across clients (skill recorder,
    * other sessions), so neither ever stops the other's frames.
    */
-  private sendScreencast(): Promise<unknown> {
-    const siblings = [...(capturesByPage.get(this.page) || [])]
-    return this.session.send('Page.startScreencast', mergeScreencastParams(siblings.map((capture) => {
+  private sendScreencast(target: { page: Page; session: PlaywrightCDPSessionAdapter } = { page: this.currentPage, session: this.session }): Promise<unknown> {
+    const siblings = [...(capturesByPage.get(target.page) || [])]
+    return target.session.send('Page.startScreencast', mergeScreencastParams(siblings.map((capture) => {
       return capture.screencastParams
     })))
   }
 
   private detachPromise: Promise<void> | null = null
 
+  /** Final cleanup. Runs once. */
   private detach(): Promise<void> {
-    if (!this.detachPromise) {
-      const cleanups = this.cleanups.splice(0).reverse()
-      this.detachPromise = cleanups.reduce<Promise<void>>((chain, cleanup) => {
-        return chain.then(() => {
-          return cleanup().then(
-            () => {},
-            () => {},
-          )
-        })
-      }, Promise.resolve())
-    }
+    this.detachPromise ||= this.detachPage()
     return this.detachPromise
+  }
+
+  private async detachPage(): Promise<void> {
+    const cleanups = this.pageCleanups.splice(0).reverse()
+    for (const cleanup of cleanups) {
+      await cleanup().catch(() => {})
+    }
   }
 
   private killAfter(ms: number): void {
@@ -764,6 +913,8 @@ export interface StartRecordingOptions {
   maxSize?: number
   /** JPEG quality of captured frames, 0-100 (default 90) */
   quality?: number
+  /** `real` (default) records wall-clock time. `manual` freezes the page; `frame()` and `wait()` add frames. */
+  clock?: RecordingClock
   logger?: Logger
 }
 
@@ -811,6 +962,7 @@ export class ScreenRecording {
       page: options.page,
       fps,
       audio: options.audio ?? false,
+      clock: options.clock,
       maxSize: options.maxSize,
       quality: options.quality,
       logger: options.logger,
@@ -823,6 +975,28 @@ export class ScreenRecording {
 
   get startedAt(): number {
     return this.capture.startedAt
+  }
+
+  get page(): Page {
+    return this.capture.page
+  }
+
+  /** Record another page from now on. See PageCapture.setPage(). */
+  setPage(page: Page): Promise<void> {
+    return this.capture.setPage(page)
+  }
+
+  /** Manual clock only: move page time by one frame and capture it. */
+  frame(): Promise<void> {
+    return this.capture.frame()
+  }
+
+  /** Manual clock only: capture `ms` of page time, one frame per 1000 / fps ms. */
+  async wait(ms: number): Promise<void> {
+    const count = Math.round((ms * this.capture.fps) / 1000)
+    for (let index = 0; index < count; index += 1) {
+      await this.capture.frame()
+    }
   }
 
   get isRecording(): boolean {
@@ -994,139 +1168,204 @@ export interface SandboxStartRecordingOptions extends Omit<StartRecordingOptions
   page: Page
   /** Fit the viewport to this aspect ratio first (default 16:9, only shrinks). null skips resizing. */
   aspectRatio?: { width: number; height: number } | null
-  /** Auto-stop after this many ms (default 15 min). 0 or Infinity disables it. */
+  /** Auto-stop after this many ms of wall time (default 15 min). 0 or Infinity disables it. */
   maxDurationMs?: number
 }
 
-interface SandboxRecording {
-  recording: ScreenRecording
-  completed: boolean
+export type RecordingHandleResult = RecordingResult & { executionTimestamps: ExecutionTimestamp[] }
+
+type AspectRatio = { width: number; height: number } | null
+
+/** Shrink the viewport to the aspect ratio. Returns a function that restores it. */
+async function fitViewport(options: { page: Page; aspectRatio: AspectRatio }): Promise<() => Promise<void>> {
+  const { page, aspectRatio } = options
+  const current = page.viewportSize()
+  if (!aspectRatio || !current) {
+    return async () => {}
+  }
+  const fitted = fitToAspectRatio(current, aspectRatio)
+  if (fitted.width === current.width && fitted.height === current.height) {
+    return async () => {}
+  }
+  await page.setViewportSize(fitted)
+  return async () => {
+    if (!page.isClosed()) {
+      await page.setViewportSize(current).catch(() => {})
+    }
+  }
+}
+
+/**
+ * Returned by `recording.start()` in the sandbox. Keep it in `state` to stop
+ * it, add frames or switch tabs in later execute calls.
+ */
+export class RecordingHandle {
+  private readonly recording: ScreenRecording
+  private readonly aspectRatio: AspectRatio
+  private readonly ghostCursorController: GhostCursorController
   /** Settles when the recording ends for any reason: stop, max duration, page closed, ffmpeg failure */
-  settled: Promise<{ result?: RecordingResult; error?: unknown; executionTimestamps: ExecutionTimestamp[] }>
+  private readonly settled: Promise<{ result?: RecordingResult; error?: unknown; executionTimestamps: ExecutionTimestamp[] }>
+  private restoreViewport: () => Promise<void>
+  private completed = false
+
+  constructor(options: {
+    recording: ScreenRecording
+    aspectRatio: AspectRatio
+    restoreViewport: () => Promise<void>
+    ghostCursorController: GhostCursorController
+    maxDurationMs: number
+    onFinish: () => void
+    getExecutionTimestamps: () => ExecutionTimestamp[]
+  }) {
+    const { recording, maxDurationMs, onFinish, getExecutionTimestamps } = options
+    this.recording = recording
+    this.aspectRatio = options.aspectRatio
+    this.restoreViewport = options.restoreViewport
+    this.ghostCursorController = options.ghostCursorController
+
+    const maxDurationTimer = maxDurationMs > 0 && maxDurationMs < Infinity
+      ? setTimeout(() => {
+          void recording.capture.stop()
+        }, maxDurationMs)
+      : null
+
+    this.settled = recording.result
+      .then(
+        (result) => {
+          return { result }
+        },
+        (error: unknown) => {
+          return { error }
+        },
+      )
+      .then(async (outcome) => {
+        // Idle detection for createDemoVideo only makes sense on wall-clock video
+        const executionTimestamps = this.clock === 'real' ? [...getExecutionTimestamps()] : []
+        this.completed = true
+        if (maxDurationTimer) {
+          clearTimeout(maxDurationTimer)
+        }
+        onFinish()
+        await this.restoreViewport()
+        return { ...outcome, executionTimestamps }
+      })
+  }
+
+  get page(): Page {
+    return this.recording.page
+  }
+
+  get clock(): RecordingClock {
+    return this.recording.capture.clock
+  }
+
+  get outputPath(): string {
+    return this.recording.outputPath
+  }
+
+  get startedAt(): number {
+    return this.recording.startedAt
+  }
+
+  get isRecording(): boolean {
+    return !this.completed
+  }
+
+  /** Record another tab from now on. Viewport fit and ghost cursor move with it. */
+  async setPage(page: Page): Promise<void> {
+    if (this.completed) {
+      throw new Error('Recording already stopped')
+    }
+    if (page === this.page) {
+      return
+    }
+    this.ghostCursorController.attachToPage({ page })
+    const restoreNewViewport = await fitViewport({ page, aspectRatio: this.aspectRatio })
+    try {
+      await this.recording.setPage(page)
+    } catch (error) {
+      await restoreNewViewport()
+      throw error
+    }
+    await this.restoreViewport()
+    this.restoreViewport = restoreNewViewport
+    // Ended while switching: the final cleanup already ran with the old restore
+    if (this.completed) {
+      await restoreNewViewport()
+    }
+  }
+
+  /** clock: 'manual' only. Move page time by one frame and capture it. */
+  frame(): Promise<void> {
+    return this.recording.frame()
+  }
+
+  /** clock: 'manual' only. Capture `ms` of page time. */
+  wait(ms: number): Promise<void> {
+    return this.recording.wait(ms)
+  }
+
+  /** Finish the file. Also returns the file if the recording already ended on its own. */
+  async stop(): Promise<RecordingHandleResult> {
+    await this.recording.capture.stop()
+    const outcome = await this.settled
+    if (!outcome.result) {
+      throw outcome.error
+    }
+    return { ...outcome.result, executionTimestamps: outcome.executionTimestamps }
+  }
+
+  /** Stop without saving the file. */
+  async cancel(): Promise<void> {
+    await this.recording.cancel()
+    await this.settled
+  }
+
+  /** Short summary when an agent logs or returns the handle */
+  [util.inspect.custom](): object {
+    return {
+      outputPath: this.outputPath,
+      clock: this.clock,
+      isRecording: this.isRecording,
+      page: this.page.isClosed() ? '(closed)' : this.page.url(),
+    }
+  }
 }
 
 export function createRecordingApi(options: {
-  context: BrowserContext
   ghostCursorController: GhostCursorController
   logger: Logger
   onStart: () => void
   onFinish: () => void
   getExecutionTimestamps: () => ExecutionTimestamp[]
 }): {
-  start: (opts: SandboxStartRecordingOptions) => Promise<{ isRecording: true; startedAt: number }>
-  stop: (opts: RecordingTargetOptions) => Promise<RecordingResult & { executionTimestamps: ExecutionTimestamp[] }>
-  isRecording: (opts: RecordingTargetOptions) => Promise<{ isRecording: boolean; startedAt?: number }>
-  cancel: (opts: RecordingTargetOptions) => Promise<void>
+  start: (opts: SandboxStartRecordingOptions) => Promise<RecordingHandle>
 } {
   const { ghostCursorController, logger, onStart, onFinish, getExecutionTimestamps } = options
-  // Entries stay after the recording ended on its own, so a later stop() still returns the file
-  const recordings = new Map<Page, SandboxRecording>()
 
   return {
     start: async (opts) => {
       const page = requirePage('recording.start', opts)
-      if (recordings.get(page)?.completed === false) {
-        throw new Error('A recording is already running for this page. Call recording.stop({ page }) first.')
-      }
       ghostCursorController.attachToPage({ page })
-
-      // Only shrinks: never increases width or height beyond current values
       const aspectRatio = opts.aspectRatio === undefined ? DEFAULT_ASPECT_RATIO : opts.aspectRatio
-      const preRecordingViewport = await (async () => {
-        const current = page.viewportSize()
-        if (!aspectRatio || !current) {
-          return null
-        }
-        const fitted = fitToAspectRatio(current, aspectRatio)
-        if (fitted.width === current.width && fitted.height === current.height) {
-          return null
-        }
-        await page.setViewportSize(fitted)
-        return current
-      })()
-      const restoreViewport = async () => {
-        if (preRecordingViewport && !page.isClosed()) {
-          await page.setViewportSize(preRecordingViewport).catch(() => {})
-        }
-      }
-
+      const restoreViewport = await fitViewport({ page, aspectRatio })
       const recording = await ScreenRecording.start({ ...opts, page, logger }).catch(async (error: unknown) => {
         await restoreViewport()
         throw error
       })
-      onStart()
-
-      const maxMs = opts.maxDurationMs ?? DEFAULT_MAX_DURATION_MS
-      const maxDurationTimer = maxMs > 0 && maxMs < Infinity
-        ? setTimeout(() => {
-            void recording.capture.stop()
-          }, maxMs)
-        : null
-
-      const entry: SandboxRecording = {
+      const realClock = recording.capture.clock === 'real'
+      if (realClock) {
+        onStart()
+      }
+      return new RecordingHandle({
         recording,
-        completed: false,
-        settled: recording.result
-          .then(
-            (result) => {
-              return { result }
-            },
-            (error: unknown) => {
-              return { error }
-            },
-          )
-          .then(async (outcome) => {
-            const executionTimestamps = [...getExecutionTimestamps()]
-            entry.completed = true
-            if (maxDurationTimer) {
-              clearTimeout(maxDurationTimer)
-            }
-            onFinish()
-            await restoreViewport()
-            return { ...outcome, executionTimestamps }
-          }),
-      }
-      recordings.set(page, entry)
-      return { isRecording: true, startedAt: recording.startedAt }
-    },
-
-    stop: async (opts) => {
-      const page = requirePage('recording.stop', opts)
-      const entry = recordings.get(page)
-      if (!entry) {
-        throw new Error('No active recording for this page')
-      }
-      await entry.recording.capture.stop()
-      const outcome = await entry.settled
-      if (recordings.get(page) === entry) {
-        recordings.delete(page)
-      }
-      if (!outcome.result) {
-        throw outcome.error
-      }
-      return { ...outcome.result, executionTimestamps: outcome.executionTimestamps }
-    },
-
-    isRecording: async (opts) => {
-      const page = requirePage('recording.isRecording', opts)
-      const entry = recordings.get(page)
-      if (!entry || entry.completed) {
-        return { isRecording: false }
-      }
-      return { isRecording: true, startedAt: entry.recording.startedAt }
-    },
-
-    cancel: async (opts) => {
-      const page = requirePage('recording.cancel', opts)
-      const entry = recordings.get(page)
-      if (!entry) {
-        return
-      }
-      await entry.recording.cancel()
-      await entry.settled
-      if (recordings.get(page) === entry) {
-        recordings.delete(page)
-      }
+        aspectRatio,
+        restoreViewport,
+        ghostCursorController,
+        maxDurationMs: opts.maxDurationMs ?? DEFAULT_MAX_DURATION_MS,
+        onFinish: realClock ? onFinish : () => {},
+        getExecutionTimestamps,
+      })
     },
   }
 }
