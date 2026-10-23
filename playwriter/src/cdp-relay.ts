@@ -790,7 +790,7 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       case 'Page.captureScreenshot': {
-        // Hide playwriter UI, scrollbars, caret during screenshots (2 blocking + 1 fire-and-forget round trips)
+        // Hide playwriter UI, scrollbars, caret during screenshots (3 blocking round trips)
         const screenshotSessionId = sessionId
         const addClassExpr = `(() => {
           const id = '__playwriter_screenshot_style__';
@@ -817,17 +817,20 @@ export async function startPlayWriterCDPRelayServer({
           params: { sessionId: screenshotSessionId, method: 'Runtime.evaluate', params: { expression }, source },
         })
 
-        // 1. add class (must complete before capture)
-        await sendToExtension(evalCmd(addClassExpr))
-        // 2. capture screenshot
-        const result = await sendToExtension({
-          extensionId: resolvedExtensionId,
-          method: 'forwardCDPCommand',
-          params: { sessionId: screenshotSessionId, method, params, source },
-        })
-        // 3. remove class
-        await sendToExtension(evalCmd(`document.documentElement.classList.remove('playwriter-screenshot')`)).catch(() => {})
-        return result
+        try {
+          // 1. add class (must complete before capture)
+          await sendToExtension(evalCmd(addClassExpr))
+          // 2. capture screenshot
+          return await sendToExtension({
+            extensionId: resolvedExtensionId,
+            method: 'forwardCDPCommand',
+            params: { sessionId: screenshotSessionId, method, params, source },
+          })
+        } finally {
+          // 3. remove class even if adding it or capturing failed, so the page UI is not left hidden.
+          // Best effort: a cleanup error must not replace the capture result or error.
+          await sendToExtension(evalCmd(`document.documentElement.classList.remove('playwriter-screenshot')`)).catch(() => {})
+        }
       }
 
       case 'Page.startScreencast':

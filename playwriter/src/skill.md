@@ -252,6 +252,8 @@ playwriter -s 1 -e '...'
 
 PLAYWRITER_EXEC_TIMEOUT is the default fallback. --timeout overrides it, and MCP clients can set the env var or pass a per-call timeout.
 
+A timeout does not cancel the code: it keeps running, and the session rejects new calls ("This code did not run") until it settles. Retry later to see its outcome, then check the page before repeating actions.
+
 Calls in one session run in order.
 
 **File-based execution:** for complex multi-line code, write a `.js` file and run it with `-f` instead of fighting with bash quoting:

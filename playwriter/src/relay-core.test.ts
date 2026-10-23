@@ -975,6 +975,116 @@ describe('Relay Core Tests', () => {
     }
   })
 
+  it('rejects executions while a timed-out script is still running, then reports its outcome', async () => {
+    await ensureConnectedTabForExecute()
+    const sessionId = await createCliSession()
+
+    try {
+      const timedOut = await executeCli({
+        sessionId,
+        timeout: 300,
+        code: `
+          state.lateDone = false
+          await new Promise((resolve) => setTimeout(resolve, 600))
+          state.lateDone = true
+        `,
+      })
+      expect(timedOut.isError).toBe(true)
+      expect(timedOut.text).toContain('timed out after 300ms')
+      expect(timedOut.text).toContain('may still be running')
+
+      const rejected = await executeCli({ sessionId, code: `state.ranWhileBusy = true` })
+      expect(rejected.isError).toBe(true)
+      expect(rejected.text).toContain('This code did not run')
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 600)
+      })
+      const afterLateFinish = await executeCli({ sessionId, code: `return [state.lateDone, state.ranWhileBusy]` })
+      expect(afterLateFinish.isError).toBe(false)
+      expect(afterLateFinish.text).toContain('[WARNING] The execution that timed out after 300ms finished')
+      expect(afterLateFinish.text).toContain('[ true, undefined ]')
+
+      const lateFailure = await executeCli({
+        sessionId,
+        timeout: 300,
+        code: `
+          await new Promise((resolve) => setTimeout(resolve, 600))
+          throw new Error('late boom')
+        `,
+      })
+      expect(lateFailure.isError).toBe(true)
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 600)
+      })
+      const afterLateFailure = await executeCli({ sessionId, code: `return 'ok'` })
+      expect(afterLateFailure.isError).toBe(false)
+      expect(afterLateFailure.text).toContain('failed with: late boom')
+
+      const quiet = await executeCli({ sessionId, code: `return 'quiet'` })
+      expect(quiet.text).not.toContain('WARNING')
+    } finally {
+      await deleteCliSession(sessionId)
+    }
+  }, 30000)
+
+  it('reset unblocks a session whose timed-out script never settles', async () => {
+    await ensureConnectedTabForExecute()
+    const sessionId = await createCliSession()
+
+    try {
+      const timedOut = await executeCli({ sessionId, timeout: 300, code: `await new Promise(() => {})` })
+      expect(timedOut.isError).toBe(true)
+
+      const rejected = await executeCli({ sessionId, code: `return 1` })
+      expect(rejected.text).toContain('This code did not run')
+
+      const resetResponse = await withTimeout({
+        promise: fetch(`${SERVER_URL}/cli/reset`, {
+          method: 'POST',
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ sessionId }),
+        }),
+        timeoutMs: 10000,
+        errorMessage: 'Reset was blocked by the timed-out script',
+      })
+      expect(resetResponse.status).toBe(200)
+
+      const afterReset = await executeCli({ sessionId, code: `return 'after reset'` })
+      expect(afterReset).toMatchObject({ isError: false, text: expect.stringContaining('after reset') })
+    } finally {
+      await deleteCliSession(sessionId)
+    }
+  }, 30000)
+
+  it('restores the page UI when a screenshot capture fails', async () => {
+    await ensureConnectedTabForExecute()
+    const sessionId = await createCliSession()
+
+    try {
+      const result = await executeCli({
+        sessionId,
+        code: `
+          const target = context.pages()[0]
+          const cdp = await getCDPSession({ page: target })
+          let captureError = null
+          try {
+            await cdp.send('Page.captureScreenshot', { format: 'not-a-format' })
+          } catch (error) {
+            captureError = error.message
+          }
+          const stillHidden = await target.evaluate(() => document.documentElement.classList.contains('playwriter-screenshot'))
+          return { captureFailed: Boolean(captureError), stillHidden }
+        `,
+      })
+      expect(result.isError).toBe(false)
+      expect(result.text).toContain('captureFailed: true')
+      expect(result.text).toContain('stillHidden: false')
+    } finally {
+      await deleteCliSession(sessionId)
+    }
+  }, 30000)
+
   it('invalidates snapshot refs and diff state after navigation', async () => {
     await ensureConnectedTabForExecute()
     const pageServer = await createSimpleServer({
