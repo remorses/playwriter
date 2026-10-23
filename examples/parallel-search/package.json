@@ -1,0 +1,12 @@
+{
+  "name": "playwriter-parallel-search-example",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "playwriter": "0.8.0"
+  }
+}
