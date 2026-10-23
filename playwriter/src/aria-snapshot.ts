@@ -1657,11 +1657,13 @@ export async function screenshotWithAccessibilityLabels({
   // Take viewport screenshot as PNG for Kitty Graphics Protocol compatibility.
   // PNG is lossless and the only format extracted by kitty-graphics-agent (f=100).
   const screenshotStart = Date.now()
-  const rawBuffer = await page.screenshot({
-    type: 'png',
-    scale: 'css',
-    clip: { x: 0, y: 0, width: clipWidth, height: clipHeight },
-  })
+  const rawBuffer = await page
+    .screenshot({
+      type: 'png',
+      scale: 'css',
+      clip: { x: 0, y: 0, width: clipWidth, height: clipHeight },
+    })
+    .finally(() => hideAriaRefLabels({ page }))
   if (log) {
     log(`page.screenshot: ${Date.now() - screenshotStart}ms`)
   }
@@ -1690,9 +1692,6 @@ export async function screenshotWithAccessibilityLabels({
 
   // Convert to base64
   const base64 = buffer.toString('base64')
-
-  // Hide labels
-  await hideAriaRefLabels({ page })
 
   // Add to collector array
   collector.push({
