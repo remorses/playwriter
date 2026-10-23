@@ -2,6 +2,6 @@
 "playwriter": patch
 ---
 
-Stop a timed-out `execute` from overlapping the next one. A timeout does not cancel the running script, so later calls in that session now fail fast with "This code did not run" until the old script settles. The next execute after it settles reports whether it finished or failed. `reset` still works while it runs.
+Abort timed-out `execute` code so it cannot overlap the next call. On timeout, the script's next Playwright call throws and a new `signal` global (AbortSignal) is aborted. New execute calls always run at once. Pass `signal` to `fetch` or check `signal.aborted` in long loops so they stop on timeout.
 
 Screenshots and `screenshotWithAccessibilityLabels` now always restore the hidden toolbar, scrollbars, caret and labels when capture fails.

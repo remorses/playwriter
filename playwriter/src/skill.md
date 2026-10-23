@@ -252,7 +252,14 @@ playwriter -s 1 -e '...'
 
 PLAYWRITER_EXEC_TIMEOUT is the default fallback. --timeout overrides it, and MCP clients can set the env var or pass a per-call timeout.
 
-A timeout does not cancel the code: it keeps running, and the session rejects new calls ("This code did not run") until it settles. Retry later to see its outcome, then check the page before repeating actions.
+On timeout the code is aborted: its next Playwright call throws and the global `signal` (AbortSignal) is aborted. An action already in progress may still complete, so check the page before retrying. In long-running code, pass `signal` to `fetch` and check `signal.aborted` in loops so it stops on timeout:
+
+```js
+for (const url of urls) {
+  if (signal.aborted) break
+  state.results.push(await (await fetch(url, { signal })).text())
+}
+```
 
 Calls in one session run in order.
 

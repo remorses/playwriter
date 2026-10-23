@@ -13,6 +13,7 @@ import util from 'node:util'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import * as acorn from 'acorn'
 import { createSmartDiff } from './diff-utils.js'
 import { getCdpUrl, parseRelayHost, sleep } from './utils.js'
@@ -123,18 +124,33 @@ export function resolveSessionCwd(rawCwd: string | undefined): { cwd: string | n
 export class CodeExecutionTimeoutError extends Error {
   constructor(timeout: number) {
     super(
-      `Code execution timed out after ${timeout}ms. The code may still be running and its effects are not rolled back. ` +
-        `New calls in this session are rejected until it settles or the session is reset.`,
+      `Code execution timed out after ${timeout}ms and was aborted: \`signal\` is aborted and its next Playwright call throws. ` +
+        `An action already in progress may still complete, so check the page before retrying.`,
     )
     this.name = 'CodeExecutionTimeoutError'
   }
 }
 
-export class PreviousExecutionRunningError extends Error {
-  constructor() {
-    super('This code did not run. A previous execution timed out and is still running. Retry later, or reset the session.')
-    this.name = 'PreviousExecutionRunningError'
+// Holds the AbortSignal of the running execute. Async work started by a script (awaits, timers)
+// inherits it, so a timed-out script can be told apart from the next execute.
+const executionScope = new AsyncLocalStorage<AbortSignal>()
+const abortAwareInstrumentations = new WeakSet<object>()
+
+/** Reject Playwright calls made by a timed-out script, so it cannot interleave with later executes. */
+function rejectAbortedPlaywrightCalls(browser: Browser) {
+  // TODO: _instrumentation is private. Use a public fork hook if we add one (must also work with patchright).
+  const instrumentation = (browser as any)._instrumentation
+  if (abortAwareInstrumentations.has(instrumentation)) {
+    return
   }
+  abortAwareInstrumentations.add(instrumentation)
+  instrumentation.addListener({
+    onApiCallBegin: () => {
+      if (executionScope.getStore()?.aborted) {
+        throw new Error('This execution timed out and was aborted')
+      }
+    },
+  })
 }
 
 const usefulGlobals = {
@@ -488,8 +504,6 @@ export class PlaywrightExecutor {
   private pagesWithListeners = new WeakSet<Page>()
   private suppressPageCloseWarnings = false
   private operationTail: Promise<void> = Promise.resolve()
-  // A timed-out script keeps running. Tracked outside operationTail so it never blocks reset/dispose.
-  private timedOutScript: Promise<void> | null = null
   private disposing = false
   private disposePromise: Promise<void> | null = null
 
@@ -625,7 +639,6 @@ export class PlaywrightExecutor {
     this.nextOutputEventId = 0
     this.lastDeliveredOutputEventId = 0
     this.activeOutputScopes.clear()
-    this.timedOutScript = null
   }
 
   private clearConnectionState() {
@@ -1150,6 +1163,7 @@ export class PlaywrightExecutor {
 
     try {
       const { browser, context } = await this.connectToBrowser()
+      rejectAbortedPlaywrightCalls(browser)
 
       this.browser = browser
       this.context = context
@@ -1203,6 +1217,7 @@ export class PlaywrightExecutor {
     this.clearExecutionState()
 
     const { browser, context } = await this.connectToBrowser()
+    rejectAbortedPlaywrightCalls(browser)
 
     this.browser = browser
     this.context = context
@@ -1242,12 +1257,9 @@ export class PlaywrightExecutor {
       return text + '\n'
     }
 
-    try {
-      // Checked inside the queued operation so calls queued before the timeout are rejected too
-      if (this.timedOutScript) {
-        throw new PreviousExecutionRunningError()
-      }
+    const abortController = new AbortController()
 
+    try {
       // Warn if cloud VM is approaching its hard timeout (deduped by minute bucket)
       if (this.cloudSession?.timeoutAt) {
         const remainingMs = this.cloudSession.timeoutAt - Date.now()
@@ -1742,6 +1754,7 @@ export class PlaywrightExecutor {
         context,
         browser: this.browser,
         state: this.userState,
+        signal: abortController.signal,
         console: customConsole,
         snapshot,
         accessibilitySnapshot: snapshot, // backward compat alias
@@ -1793,7 +1806,8 @@ export class PlaywrightExecutor {
           : undefined,
         createDemoVideo,
         resetPlaywright: async () => {
-          const { context: newContext } = await self.resetInternal()
+          // Connect outside this script's scope, or browser events would inherit its abort signal
+          const { context: newContext } = await executionScope.exit(() => self.resetInternal())
           vmContextObj.context = newContext
           vmContextObj.browser = self.browser
           vmContextObj.state = self.userState
@@ -1878,21 +1892,14 @@ export class PlaywrightExecutor {
       const result = await (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
-          const scriptPromise: Promise<unknown> = script.runInContext(vmContext, { timeout, displayErrors: true })
           return await Promise.race([
-            scriptPromise,
+            executionScope.run(abortController.signal, () => script.runInContext(vmContext, { timeout, displayErrors: true })),
             new Promise((_, reject) => {
               timer = setTimeout(() => {
-                // The race does not cancel the script. Block later calls until it settles, then report it.
-                const pending = scriptPromise
-                  .then(() => 'finished', (error: any) => `failed with: ${error?.message ?? String(error)}`)
-                  .then((outcome) => {
-                    if (this.timedOutScript !== pending) return
-                    this.timedOutScript = null
-                    this.enqueueWarning(`The execution that timed out after ${timeout}ms ${outcome}. Check the page and state.`)
-                  })
-                this.timedOutScript = pending
-                reject(new CodeExecutionTimeoutError(timeout))
+                // The race does not stop the script. Abort it so its next Playwright call throws.
+                const error = new CodeExecutionTimeoutError(timeout)
+                abortController.abort(error)
+                reject(error)
               }, timeout)
             }),
           ])
@@ -1968,7 +1975,6 @@ export class PlaywrightExecutor {
       const isExecutionTimeout =
         error instanceof CodeExecutionTimeoutError || error?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT'
       const isTimeoutError = isExecutionTimeout || error?.name === 'TimeoutError' || error?.name === 'AbortError'
-      const isPreviousExecutionRunning = error instanceof PreviousExecutionRunningError
 
       this.logger.error('Error in execute:', errorStack)
 
@@ -1979,7 +1985,7 @@ export class PlaywrightExecutor {
       // Give a clear actionable message instead of a generic "call reset" hint.
       const isDisconnect = error instanceof Error && isDisconnectionError(error)
       const resetHint = (() => {
-        if (isTimeoutError || isPreviousExecutionRunning) return ''
+        if (isTimeoutError) return ''
         if (this.cloudSession && isDisconnect) {
           return `\n\n[Cloud browser expired or disconnected. Create a new session with: playwriter session new --browser cloud]`
         }
@@ -1987,7 +1993,7 @@ export class PlaywrightExecutor {
       })()
 
       // timeout stacks are internal noise (Promise.race / setTimeout); only show the message
-      const errorText = isTimeoutError || isPreviousExecutionRunning ? error.message : errorStack
+      const errorText = isTimeoutError ? error.message : errorStack
       return {
         text: `${outputText}${logsText}\nError executing code: ${errorText}${resetHint}`,
         images: [],
