@@ -28,14 +28,11 @@ playwriter session new --tab-group docs
 
 **Always use your own session** - pass `-s <id>` to all commands. Using the same session preserves your `state` between calls. Using a different session gives you a fresh `state`.
 
-List all active sessions with their state keys:
+List sessions (with cwd, tab count, last activity and state keys) and every tab with the session or agent that opened and last used it:
 
 ```bash
 playwriter session list
-# ID  State Keys
-# --------------
-# 1   myPage, userData
-# 2   -
+playwriter tabs
 ```
 
 Reset a session if the browser connection is stale or broken:
@@ -827,6 +824,8 @@ await state.page.locator('li').nth(3).click() // 4th item (0-indexed)
 ## working with pages
 
 **Pages are shared, state is not.** `context.pages()` returns all browser tabs with playwriter enabled — shared across all sessions. Multiple agents see the same tabs. If another agent navigates or closes a page you're using, you'll be affected. To avoid interference, **get your own page**.
+
+**Don't open duplicate tabs.** Reuse `state.page` instead of calling `context.newPage()` again on retries. If you navigate to a page already open in another tab, you get `[WARNING] <page> is open in N tabs` naming who used each one: reuse your own tab, and never drive a tab another agent is using unless the user asks. `playwriter tabs` lists every tab and its agent.
 
 There is **no default `page`** in the sandbox. Reading `page` throws. Helpers that take `page` (`snapshot`, `getLatestLogs`, `waitForPageLoad`, `recording`, `ghostCursor`, `refToLocator`) need `{ page: state.page }`. `snapshot` also accepts a `locator` or `frame` from your tab.
 

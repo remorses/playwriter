@@ -146,6 +146,8 @@ describe('ExecutorManager.listSessions', () => {
           cwd: sessionDir,
           tabGroup: null,
           tabGroupColor: null,
+          createdAt: expect.any(Number),
+          lastActivityAt: null,
         },
       ])
     } finally {

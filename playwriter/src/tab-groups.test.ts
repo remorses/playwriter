@@ -3,16 +3,26 @@
  * - `session new --tab-group` puts tabs created by that session in a custom group.
  * - Manually toggled tabs stay in the default 'playwriter' group.
  * - `/cli/session/update` renames the group and moves its tabs.
+ * Also covers the tab index: which agent opened / last used each tab, duplicate
+ * tab warnings, MCP agents in the session list, and the activity log.
  */
 
+import fs from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { chromium } from '@xmorse/playwright-core'
 import {
   setupTestContext,
   cleanupTestContext,
   getExtensionServiceWorker,
+  createSimpleServer,
+  safeCloseCDPBrowser,
+  type SimpleServer,
   type TestContext,
   js,
 } from './test-utils.js'
+import { ACTIVITY_LOG_FILE_PATH, getCdpUrl } from './utils.js'
+import type { ActivityEntry } from './activity-log.js'
+import type { AgentSummary, TabView } from './tab-index.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19972
@@ -472,4 +482,205 @@ describe('Session tab groups', () => {
     const cleaned = await waitForGroups((g) => !g.some((group) => group.title === 'agent-shared'))
     expect(cleaned.some((g) => g.title === 'agent-shared')).toBe(false)
   }, 60000)
+})
+
+describe('Tab index', () => {
+  const INDEX_PORT = 19973
+  const INDEX_URL = `http://127.0.0.1:${INDEX_PORT}`
+  let testCtx: TestContext | null = null
+  let server: SimpleServer | null = null
+  // Unique cwd so this file's activity log entries can be told apart from
+  // other test files writing the same log in parallel
+  fs.mkdirSync(`${process.cwd()}/tmp`, { recursive: true })
+  const sessionCwd = fs.mkdtempSync(`${process.cwd()}/tmp/tabindex-cwd-`)
+  const sessionIds: { a?: string; b?: string } = {}
+
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: INDEX_PORT, tempDirPrefix: 'pw-tabindex-', toggleExtension: true })
+    server = await createSimpleServer({
+      routes: {
+        '/console?from=a': '<title>Console</title><h1>console</h1>',
+        '/console?from=b': '<title>Console</title><h1>console</h1>',
+        '/other': '<title>Other</title><h1>other</h1>',
+      },
+    })
+  }, 600000)
+
+  afterAll(async () => {
+    await server?.close()
+    await cleanupTestContext(testCtx, null)
+    testCtx = null
+    fs.rmSync(sessionCwd, { recursive: true, force: true })
+  })
+
+  const newSession = async (): Promise<string> => {
+    const response = await fetch(`${INDEX_URL}/cli/session/new`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ cwd: sessionCwd }),
+    })
+    const { id } = (await response.json()) as { id: string }
+    return id
+  }
+
+  const execute = async ({ sessionId, code }: { sessionId: string; code: string }) => {
+    const response = await fetch(`${INDEX_URL}/cli/execute`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId, code }),
+    })
+    return (await response.json()) as { text: string; isError: boolean }
+  }
+
+  const readTabs = async () => {
+    const response = await fetch(`${INDEX_URL}/cli/tabs`)
+    const { tabs } = (await response.json()) as { tabs: TabView[]; agents: AgentSummary[] }
+    return tabs
+      .filter((tab) => {
+        return tab.url.startsWith(server!.baseUrl)
+      })
+      .map((tab) => {
+        return `${tab.url.replace(server!.baseUrl, '')} opened=${tab.openedBy} used=${tab.lastUsedBy}`
+      })
+      .sort()
+  }
+
+  const stabilize = (text: string) => {
+    return text
+      .replaceAll(new URL(server!.baseUrl).host, 'HOST')
+      .replaceAll(sessionCwd.split('/').at(-1)!, 'CWD')
+      .replace(/just now|\d+s ago/g, 'RECENTLY')
+  }
+
+  it('records which session opened and last used each tab, and warns about duplicates', async () => {
+    sessionIds.a = await newSession()
+    sessionIds.b = await newSession()
+
+    const first = await execute({
+      sessionId: sessionIds.a,
+      code: js`
+        state.page = await context.newPage();
+        await state.page.goto('${server!.baseUrl}/console?from=a');
+      `,
+    })
+    expect(first.isError).toBeFalsy()
+    expect(first.text).not.toContain('is open in')
+
+    // Same path, different query: the same part of the UI
+    const second = await execute({
+      sessionId: sessionIds.b,
+      code: js`
+        state.page = await context.newPage();
+        await state.page.goto('${server!.baseUrl}/console?from=b');
+      `,
+    })
+    expect(second.isError).toBeFalsy()
+    const warning = second.text.split('\n').find((line) => {
+      return line.includes('is open in')
+    })
+    expect(stabilize(warning || '')).toMatchInlineSnapshot(`"[WARNING] HOST/console is open in 2 tabs: used by you RECENTLY; used by 1 (CWD) RECENTLY. Reuse an existing tab from context.pages() instead of opening another, and coordinate before driving a tab another agent is using. Run \`playwriter tabs\` to see all tabs."`)
+
+    // Driving an existing tab without navigating never warns
+    const click = await execute({
+      sessionId: sessionIds.a,
+      code: js`
+        await state.page.click('h1');
+        return await state.page.title();
+      `,
+    })
+    expect(click.text).not.toContain('is open in')
+
+    expect(await readTabs()).toMatchInlineSnapshot(`
+      [
+        "/console?from=a opened=1 used=1",
+        "/console?from=b opened=2 used=2",
+      ]
+    `)
+  }, 60000)
+
+  it('lists MCP agents and the tabs they opened', async () => {
+    const browser = await chromium.connectOverCDP(
+      getCdpUrl({ port: INDEX_PORT, client: 'mcp', agentId: 'test01', agentLabel: 'tester', agentCwd: '/work/site' }),
+    )
+    const page = await browser.contexts()[0].newPage()
+    await page.goto(`${server!.baseUrl}/other`)
+
+    const response = await fetch(`${INDEX_URL}/cli/sessions`)
+    const { sessions, agents } = (await response.json()) as {
+      sessions: Array<{ id: string; tabCount: number; lastActivityAt: number | null }>
+      agents: Array<AgentSummary & { tabCount: number }>
+    }
+    expect(
+      agents.map((agent) => {
+        return `${agent.key} label=${agent.label} cwd=${agent.cwd} tabs=${agent.tabCount} connected=${agent.connected}`
+      }),
+    ).toMatchInlineSnapshot(`
+      [
+        "mcp:test01 label=tester cwd=/work/site tabs=1 connected=true",
+      ]
+    `)
+    expect(
+      sessions
+        .filter((session) => {
+          return session.id === sessionIds.a || session.id === sessionIds.b
+        })
+        .map((session) => {
+          return `${session.id} tabs=${session.tabCount} active=${session.lastActivityAt !== null}`
+        }),
+    ).toMatchInlineSnapshot(`
+      [
+        "1 tabs=1 active=true",
+        "2 tabs=1 active=true",
+      ]
+    `)
+    expect(await readTabs()).toMatchInlineSnapshot(`
+      [
+        "/console?from=a opened=1 used=1",
+        "/console?from=b opened=2 used=2",
+        "/other opened=mcp:test01 used=mcp:test01",
+      ]
+    `)
+
+    await safeCloseCDPBrowser(browser)
+  }, 60000)
+
+  it('logs each execute call to the activity log without the code', async () => {
+    const entries = fs
+      .readFileSync(ACTIVITY_LOG_FILE_PATH, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        return JSON.parse(line) as ActivityEntry
+      })
+      .filter((entry) => {
+        return entry.cwd === sessionCwd
+      })
+    expect(
+      entries.map((entry) => {
+        const navigated = entry.navigated.map((url) => {
+          return url.replace(server!.baseUrl, '')
+        })
+        return `session=${entry.session} agent=${entry.agent} client=${entry.client} ok=${entry.ok} navigated=${navigated.join(',')}`
+      }),
+    ).toMatchInlineSnapshot(`
+      [
+        "session=1 agent=1 client=cli ok=true navigated=/console?from=a",
+        "session=2 agent=2 client=cli ok=true navigated=/console?from=b",
+        "session=1 agent=1 client=cli ok=true navigated=",
+      ]
+    `)
+    expect(Object.keys(entries[0]).sort()).toMatchInlineSnapshot(`
+      [
+        "agent",
+        "client",
+        "cwd",
+        "label",
+        "ms",
+        "navigated",
+        "ok",
+        "session",
+        "time",
+      ]
+    `)
+  })
 })

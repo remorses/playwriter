@@ -80,7 +80,8 @@ Each session is an **isolated sandbox** with its own `state` object. Browser tab
 
 ```bash
 playwriter session new              # create sandbox, outputs id (e.g. 1)
-playwriter session list             # show sessions + state keys
+playwriter session list             # show sessions, MCP agents, tab counts, last activity, state keys
+playwriter tabs                     # show every tab and which session/agent opened and last used it
 playwriter session reset <id>       # reconnect if connection is stale
 playwriter session delete <id>      # remove session and clear state
 ```
@@ -155,7 +156,7 @@ playwriter recorder status                # list active recordings and their pag
 ## Other commands
 
 ```bash
-playwriter logfile                        # print log file path
+playwriter logfile                        # print relay, CDP and activity log paths
 playwriter skill                          # print agent instructions
 playwriter completions install            # install shell completions (zsh/bash)
 ```

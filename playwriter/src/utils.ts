@@ -55,6 +55,9 @@ export function getCdpUrl({
   tabGroup,
   tabGroupColor,
   client,
+  agentId,
+  agentLabel,
+  agentCwd,
 }: {
   port?: number
   host?: string
@@ -68,6 +71,12 @@ export function getCdpUrl({
   tabGroup?: string
   /** Explicit tab group color chosen with --tab-group-color. Old relays ignore it. */
   tabGroupColor?: TabGroupColor
+  /** Per-process id for clients without a relay session (MCP), used by the tab index. Old relays ignore it. */
+  agentId?: string
+  /** Human label for the tab index (PLAYWRITER_AGENT). Old relays ignore it. */
+  agentLabel?: string
+  /** Working directory shown in the tab index for clients without a relay session. Old relays ignore it. */
+  agentCwd?: string
 } = {}) {
   const id = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
   const params = new URLSearchParams()
@@ -89,6 +98,15 @@ export function getCdpUrl({
   if (client) {
     params.set('client', client)
   }
+  if (agentId) {
+    params.set('agent', agentId)
+  }
+  if (agentLabel) {
+    params.set('agentLabel', agentLabel)
+  }
+  if (agentCwd) {
+    params.set('agentCwd', agentCwd)
+  }
   const queryString = params.toString()
   const suffix = queryString ? `?${queryString}` : ''
   const { wsBaseUrl } = parseRelayHost(host, port)
@@ -108,6 +126,8 @@ const LOG_BASE_DIR = path.join(os.homedir(), '.playwriter')
 export const LOG_FILE_PATH = process.env.PLAYWRITER_LOG_FILE_PATH || path.join(LOG_BASE_DIR, 'relay-server.log')
 export const LOG_CDP_FILE_PATH =
   process.env.PLAYWRITER_CDP_LOG_FILE_PATH || path.join(path.dirname(LOG_FILE_PATH), 'cdp.jsonl')
+export const ACTIVITY_LOG_FILE_PATH =
+  process.env.PLAYWRITER_ACTIVITY_LOG_PATH || path.join(path.dirname(LOG_FILE_PATH), 'activity.jsonl')
 
 const packageJsonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json')
 export const VERSION = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')).version as string

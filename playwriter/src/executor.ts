@@ -17,6 +17,14 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import * as acorn from 'acorn'
 import { createSmartDiff } from './diff-utils.js'
 import { getCdpUrl, parseRelayHost, sleep } from './utils.js'
+import { appendActivity } from './activity-log.js'
+import {
+  agentKeyFor,
+  formatDuplicateWarning,
+  normalizeTabLocation,
+  type AgentSummary,
+  type DuplicateTabGroup,
+} from './tab-index.js'
 import type { TabGroupColor } from './protocol.js'
 import { isRemoteExtensionKey } from './relay-state.js'
 import { REMOTE_EXTENSION_NOT_CONNECTED_ERROR } from './remote-control.js'
@@ -406,6 +414,12 @@ export interface CdpConfig {
   tabGroupColor?: TabGroupColor
   /** Sent as ?client= on the /cdp URL for anonymous usage stats */
   client?: 'mcp'
+  /** Per-process tab index id for clients without a relay session (MCP), sent as ?agent= */
+  agentId?: string
+  /** Human label for the tab index (PLAYWRITER_AGENT), sent as ?agentLabel= */
+  agentLabel?: string
+  /** Working directory for the tab index, sent as ?agentCwd= */
+  agentCwd?: string
 }
 
 export interface SessionMetadata {
@@ -425,6 +439,10 @@ export interface SessionInfo {
   tabGroup: string | null
   /** Explicit tab group color, null when derived from the title hash */
   tabGroupColor: TabGroupColor | null
+  /** Epoch ms the session was created */
+  createdAt: number
+  /** Epoch ms of the last execute call, null if none yet */
+  lastActivityAt: number | null
 }
 
 export interface CloudSessionInfo {
@@ -523,6 +541,11 @@ export class PlaywrightExecutor {
   private cloudAuth: CloudAuth | undefined
   /** Last minute bucket for which a cloud timeout warning was enqueued (dedup) */
   private lastCloudTimeoutWarningMinute: number | null = null
+
+  createdAt = Date.now()
+  lastActivityAt: number | null = null
+  /** URLs pages navigated to during the last execute call, for the activity log */
+  private lastExecuteNavigations: string[] = []
 
   constructor(options: ExecutorOptions) {
     this.cdpConfig = options.cdpConfig
@@ -1227,12 +1250,123 @@ export class PlaywrightExecutor {
   }
 
   async execute(code: string, timeout = 10000): Promise<ExecuteResult> {
-    return this.runExclusive({ operation: () => this.executeInternal(code, timeout) })
+    return this.runExclusive({
+      operation: async () => {
+        const startedAt = Date.now()
+        this.lastActivityAt = startedAt
+        this.lastExecuteNavigations = []
+        const result = await this.executeInternal(code, timeout)
+        this.lastActivityAt = Date.now()
+        this.logActivity({ startedAt, ok: !result.isError })
+        return result
+      },
+    })
+  }
+
+  /** Tab index identity (session id or mcp:<id>), null in direct CDP and headless modes. */
+  private getAgentKey(): string | null {
+    if (this.isDirectCdpMode() || this.isHeadlessMode()) {
+      return null
+    }
+    return agentKeyFor({
+      sessionId: this.cdpConfig.sessionId,
+      kind: this.cdpConfig.client,
+      agentId: this.cdpConfig.agentId,
+    })
+  }
+
+  private logActivity({ startedAt, ok }: { startedAt: number; ok: boolean }) {
+    appendActivity({
+      entry: {
+        time: new Date(startedAt).toISOString(),
+        agent: this.getAgentKey(),
+        session: this.cdpConfig.sessionId ?? null,
+        client: this.cdpConfig.client === 'mcp' ? 'mcp' : 'cli',
+        label: this.cdpConfig.agentLabel ?? null,
+        cwd: this.sessionCwd,
+        ms: Date.now() - startedAt,
+        ok,
+        navigated: this.lastExecuteNavigations,
+      },
+    }).catch((error) => {
+      this.logger.error('Failed to write activity log:', error)
+    })
+  }
+
+  private snapshotPageLocations(context: BrowserContext): Map<Page, string> {
+    return new Map(
+      context.pages().map((page) => {
+        return [page, page.url()]
+      }),
+    )
+  }
+
+  /** URLs of pages opened or navigated since `before`, skipping blank and browser-internal pages. */
+  private collectNavigations({ context, before }: { context: BrowserContext; before: Map<Page, string> }): string[] {
+    return context.pages().flatMap((page) => {
+      const url = page.url()
+      if (before.get(page) === url || !normalizeTabLocation(url)) {
+        return []
+      }
+      return [url]
+    })
+  }
+
+  /**
+   * Ask the relay whether pages this call navigated are also open in other tabs,
+   * and queue a warning naming who is using them. Best-effort: relays without
+   * the tab index return 404 and the call is skipped.
+   */
+  private async warnAboutDuplicateTabs({ urls, since }: { urls: string[]; since: number }): Promise<void> {
+    const agentKey = this.getAgentKey()
+    if (!agentKey || urls.length === 0) {
+      return
+    }
+    const { host = '127.0.0.1', port = 19988, token } = this.cdpConfig
+    const { httpBaseUrl } = parseRelayHost(host, port)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    const effectiveToken = token || process.env.PLAYWRITER_TOKEN
+    if (effectiveToken) {
+      headers['Authorization'] = `Bearer ${effectiveToken}`
+    }
+    try {
+      const response = await fetch(`${httpBaseUrl}/cli/tabs/duplicates`, {
+        method: 'POST',
+        headers,
+        // MCP servers can run on another machine than the relay, so allow some clock skew
+        body: JSON.stringify({ agent: agentKey, since: since - 2000, urls }),
+        signal: AbortSignal.timeout(2000),
+      })
+      if (!response.ok) {
+        return
+      }
+      const { duplicates, agents } = (await response.json()) as {
+        duplicates: DuplicateTabGroup[]
+        agents: AgentSummary[]
+      }
+      const now = Date.now()
+      for (const group of duplicates) {
+        this.enqueueWarning(formatDuplicateWarning({ group, agentKey, agents, now }))
+      }
+    } catch (error) {
+      this.logger.error('Duplicate tab check failed:', error)
+    }
   }
 
   private async executeInternal(code: string, timeout: number): Promise<ExecuteResult> {
     const consoleLogs: Array<{ method: string; args: any[] }> = []
     const outputScope = this.beginOutputScope()
+    const executeStartedAt = Date.now()
+    // Filled once connected; read on both the success and error paths
+    const navigationTracking: { context?: BrowserContext; before?: Map<Page, string> } = {}
+    const finishNavigationTracking = async () => {
+      if (!navigationTracking.context || !navigationTracking.before) {
+        return
+      }
+      const urls = this.collectNavigations({ context: navigationTracking.context, before: navigationTracking.before })
+      this.lastExecuteNavigations = urls
+      await this.warnAboutDuplicateTabs({ urls, since: executeStartedAt })
+    }
 
     const formatConsoleLogs = (logs: Array<{ method: string; args: any[] }>, prefix = 'Console output') => {
       if (logs.length === 0) {
@@ -1279,6 +1413,8 @@ export class PlaywrightExecutor {
       }
 
       const { context } = await this.ensureConnection()
+      navigationTracking.context = context
+      navigationTracking.before = this.snapshotPageLocations(context)
 
       this.logger.log('Executing code:', code)
 
@@ -1943,6 +2079,7 @@ export class PlaywrightExecutor {
         }
       }
 
+      await finishNavigationTracking()
       responseText = this.flushOutputForScope(outputScope) + responseText
 
       if (!responseText.trim()) {
@@ -1979,6 +2116,7 @@ export class PlaywrightExecutor {
       this.logger.error('Error in execute:', errorStack)
 
       const logsText = formatConsoleLogs(consoleLogs, 'Console output (before error)')
+      await finishNavigationTracking()
       const outputText = this.flushOutputForScope(outputScope)
 
       // Cloud sessions: disconnection errors mean the VM expired or was destroyed.
@@ -2045,6 +2183,8 @@ export class PlaywrightExecutor {
       cwd: this.sessionCwd,
       tabGroup: this.cdpConfig.tabGroup || null,
       tabGroupColor: this.cdpConfig.tabGroupColor || null,
+      createdAt: this.createdAt,
+      lastActivityAt: this.lastActivityAt,
     }
   }
 

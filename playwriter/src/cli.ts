@@ -16,7 +16,8 @@ Buffer.prototype[util.inspect.custom] = function () {
 }
 import { killPortProcess } from './kill-port.js'
 import { canEmitKittyGraphics, emitKittyImage } from './kitty-graphics.js'
-import { VERSION, LOG_FILE_PATH, LOG_CDP_FILE_PATH, parseRelayHost } from './utils.js'
+import { VERSION, LOG_FILE_PATH, LOG_CDP_FILE_PATH, ACTIVITY_LOG_FILE_PATH, parseRelayHost } from './utils.js'
+import { describeAgent, formatAgo, type AgentSummary, type TabView } from './tab-index.js'
 import { TAB_GROUP_ALL_COLORS, normalizeTabGroupColor } from './protocol.js'
 import {
   ensureRelayServer,
@@ -1230,93 +1231,185 @@ cli
     }
 
     const serverUrl = await getServerUrl(options.host)
-    let sessions: Array<{
-      id: string
-      stateKeys: string[]
-      browser: string | null
-      profile: { email: string; id: string } | null
-      extensionId: string | null
-      cwd: string | null
-      tabGroup?: string | null
-    }> = []
-
-    try {
-      const response = await fetch(`${serverUrl}/cli/sessions`, {
-        headers: buildAuthHeaders({ token: options.token }),
-        signal: AbortSignal.timeout(2000),
-      })
-      if (!response.ok) {
-        console.error(`Error: ${response.status} ${await response.text()}`)
+    // tabCount, createdAt, lastActivityAt and agents are missing on relays older than the tab index
+    type SessionListResponse = {
+      sessions: Array<{
+        id: string
+        stateKeys: string[]
+        browser: string | null
+        profile: { email: string; id: string } | null
+        extensionId: string | null
+        cwd: string | null
+        tabGroup?: string | null
+        tabCount?: number
+        createdAt?: number
+        lastActivityAt?: number | null
+      }>
+      agents?: Array<AgentSummary & { tabCount: number }>
+    }
+    const result: SessionListResponse = await (async () => {
+      try {
+        const response = await fetch(`${serverUrl}/cli/sessions`, {
+          headers: buildAuthHeaders({ token: options.token }),
+          signal: AbortSignal.timeout(2000),
+        })
+        if (!response.ok) {
+          console.error(`Error: ${response.status} ${await response.text()}`)
+          process.exit(1)
+        }
+        return (await response.json()) as SessionListResponse
+      } catch (error: any) {
+        console.error(`Error: ${error.message}`)
         process.exit(1)
       }
-      const result = (await response.json()) as {
-        sessions: Array<{
-          id: string
-          stateKeys: string[]
-          browser: string | null
-          profile: { email: string; id: string } | null
-          extensionId: string | null
-          cwd: string | null
-          tabGroup?: string | null
-        }>
-      }
-      sessions = result.sessions
-    } catch (error: any) {
-      console.error(`Error: ${error.message}`)
-      process.exit(1)
-    }
+    })()
 
-    if (sessions.length === 0) {
+    const { sessions } = result
+    const agents = result.agents || []
+    if (sessions.length === 0 && agents.length === 0) {
       console.log('No active sessions')
       return
     }
 
-    const idWidth = Math.max(2, ...sessions.map((session) => String(session.id).length))
-    const browserWidth = Math.max(7, ...sessions.map((session) => (session.browser || 'Chrome').length))
-    const profileWidth = Math.max(7, ...sessions.map((session) => (session.profile?.email || '').length || 1))
-    const extensionWidth = Math.max(2, ...sessions.map((session) => (session.extensionId || '').length || 1))
-    const groupWidth = Math.max(5, ...sessions.map((session) => (session.tabGroup || '').length || 1))
-    const cwdWidth = Math.max(3, ...sessions.map((session) => (session.cwd || '').length || 1))
-    const stateWidth = Math.max(10, ...sessions.map((session) => session.stateKeys.join(', ').length || 1))
+    const now = Date.now()
+    if (sessions.length > 0) {
+      printTable({
+        headers: ['ID', 'BROWSER', 'PROFILE', 'EXT', 'GROUP', 'CWD', 'TABS', 'ACTIVE', 'STATE KEYS'],
+        rows: sessions.map((session) => {
+          return [
+            String(session.id),
+            session.browser || 'Chrome',
+            session.profile?.email || '-',
+            session.extensionId || '-',
+            session.tabGroup || '-',
+            session.cwd || '-',
+            session.tabCount === undefined ? '-' : String(session.tabCount),
+            formatAgo({ timestamp: session.lastActivityAt ?? session.createdAt ?? null, now }),
+            session.stateKeys.length > 0 ? session.stateKeys.join(', ') : '-',
+          ]
+        }),
+      })
+    }
 
-    console.log(
-      'ID'.padEnd(idWidth) +
-        '  ' +
-        'BROWSER'.padEnd(browserWidth) +
-        '  ' +
-        'PROFILE'.padEnd(profileWidth) +
-        '  ' +
-        'EXT'.padEnd(extensionWidth) +
-        '  ' +
-        'GROUP'.padEnd(groupWidth) +
-        '  ' +
-        'CWD'.padEnd(cwdWidth) +
-        '  ' +
-        'STATE KEYS',
-    )
-    console.log(
-      '-'.repeat(idWidth + browserWidth + profileWidth + extensionWidth + groupWidth + cwdWidth + stateWidth + 12),
-    )
+    if (agents.length > 0) {
+      if (sessions.length > 0) {
+        console.log('')
+      }
+      console.log('MCP agents (no session id, cannot be used with -s):')
+      printTable({
+        headers: ['AGENT', 'LABEL', 'CWD', 'TABS', 'ACTIVE', 'CONNECTED'],
+        rows: agents.map((agent) => {
+          return [
+            agent.key,
+            agent.label || '-',
+            agent.cwd || '-',
+            String(agent.tabCount),
+            formatAgo({ timestamp: agent.lastActivityAt, now }),
+            agent.connected ? 'yes' : 'no',
+          ]
+        }),
+      })
+    }
+  })
 
-    for (const session of sessions) {
-      const stateStr = session.stateKeys.length > 0 ? session.stateKeys.join(', ') : '-'
-      const profileLabel = session.profile?.email || '-'
-      const cwdLabel = session.cwd || '-'
-      console.log(
-        String(session.id).padEnd(idWidth) +
-          '  ' +
-          (session.browser || 'Chrome').padEnd(browserWidth) +
-          '  ' +
-          profileLabel.padEnd(profileWidth) +
-          '  ' +
-          (session.extensionId || '-').padEnd(extensionWidth) +
-          '  ' +
-          (session.tabGroup || '-').padEnd(groupWidth) +
-          '  ' +
-          cwdLabel.padEnd(cwdWidth) +
-          '  ' +
-          stateStr,
-      )
+function truncateCell({ value, max }: { value: string; max: number }): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+/** Two-space separated table; the last column is not padded. */
+function printTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  const widths = headers.map((header, column) => {
+    return Math.max(
+      header.length,
+      ...rows.map((row) => {
+        return row[column].length
+      }),
+    )
+  })
+  const formatRow = (cells: string[]) => {
+    return cells
+      .map((cell, column) => {
+        return column === cells.length - 1 ? cell : cell.padEnd(widths[column])
+      })
+      .join('  ')
+  }
+  console.log(formatRow(headers))
+  const totalWidth = widths.reduce((sum, width) => {
+    return sum + width
+  }, 0)
+  console.log('-'.repeat(totalWidth + 2 * (widths.length - 1)))
+  rows.forEach((row) => {
+    console.log(formatRow(row))
+  })
+}
+
+cli
+  .command('tabs', 'List tabs Playwriter controls, with the agent that opened and last used each one')
+  .option('--host <host>', 'Remote relay server host')
+  .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
+  .option('--json', 'Print the raw tab index as JSON')
+  .action(async (options) => {
+    if (!options.host && !process.env.PLAYWRITER_HOST) {
+      await ensureRelayServer({ logger: console })
+    }
+
+    const serverUrl = await getServerUrl(options.host)
+    const result = await (async () => {
+      try {
+        const response = await fetch(`${serverUrl}/cli/tabs`, {
+          headers: buildAuthHeaders({ token: options.token }),
+          signal: AbortSignal.timeout(2000),
+        })
+        if (response.status === 404) {
+          console.error('The running relay is too old for `playwriter tabs`. Restart it with: playwriter serve --replace')
+          process.exit(1)
+        }
+        if (!response.ok) {
+          console.error(`Error: ${response.status} ${await response.text()}`)
+          process.exit(1)
+        }
+        return (await response.json()) as { tabs: TabView[]; agents: AgentSummary[] }
+      } catch (error: any) {
+        console.error(`Error: ${error.message}`)
+        process.exit(1)
+      }
+    })()
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2))
+      return
+    }
+    if (result.tabs.length === 0) {
+      console.log('No tabs connected. Click the Playwriter extension icon on a tab, or let an agent open one.')
+      return
+    }
+
+    const now = Date.now()
+    const { agents } = result
+    printTable({
+      headers: ['#', 'URL', 'TITLE', 'OPENED BY', 'LAST USED BY', 'ACTIVE'],
+      rows: result.tabs.map((tab, index) => {
+        return [
+          String(index + 1),
+          truncateCell({ value: tab.url.replace(/^https?:\/\//, ''), max: 60 }),
+          truncateCell({ value: tab.title || '-', max: 30 }),
+          describeAgent({ key: tab.openedBy, agents }),
+          describeAgent({ key: tab.lastUsedBy, agents }),
+          formatAgo({ timestamp: Math.max(tab.openedAt ?? 0, tab.lastUsedAt ?? 0) || null, now }),
+        ]
+      }),
+    })
+
+    const idleAgents = agents.filter((agent) => {
+      return !result.tabs.some((tab) => {
+        return tab.lastUsedBy === agent.key || tab.openedBy === agent.key
+      })
+    })
+    if (idleAgents.length > 0) {
+      const names = idleAgents.map((agent) => {
+        return describeAgent({ key: agent.key, agents })
+      })
+      console.log(`\nAgents without tabs: ${names.join(', ')}`)
     }
   })
 
@@ -2323,6 +2416,7 @@ cli
 cli.command('logfile', 'Print the path to the relay server log file').action(() => {
   console.log(`relay: ${LOG_FILE_PATH}`)
   console.log(`cdp: ${LOG_CDP_FILE_PATH}`)
+  console.log(`activity: ${ACTIVITY_LOG_FILE_PATH}`)
 })
 
 cli.command('skill', 'Print the full playwriter usage instructions').action(() => {
