@@ -679,7 +679,7 @@ const pages = context.pages()
 const loginPage = pages[pages.length - 1]
 
 // Complete login flow in loginPage, cookies are shared with original page
-await loginPage.locator('[data-email]').first().click()
+await loginPage.getByText('me@example.com', { exact: true }).click()
 await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
@@ -747,7 +747,7 @@ URL: https://example.com/
 
 Each interactive line ends with a Playwright locator you can pass to `state.page.locator()`.
 If multiple elements share the same locator, a `>> nth=N` suffix is added (0-based)
-to make it unique.
+to make it unique. It is positional and only valid for that snapshot. Before destructive actions, prefer scoping to a unique parent (dialog, row, form) instead.
 
 **Use snapshot locators directly — never invent selectors.** The snapshot output IS the selector. Do not guess CSS selectors or `getByText` when the snapshot already gives you the exact match:
 
@@ -813,16 +813,11 @@ Combine locators for precision:
 
 ```js
 state.page.locator('tr').filter({ hasText: 'John' }).locator('button').click()
-state.page.locator('button').nth(2).click()
+state.page.getByRole('button', { name: 'Send', exact: true }).click()
 ```
 
-If a locator matches multiple elements, Playwright throws "strict mode violation". Use `.first()`, `.last()`, or `.nth(n)`:
-
-```js
-await state.page.locator('button').first().click() // first match
-await state.page.locator('.item').last().click() // last match
-await state.page.locator('li').nth(3).click() // 4th item (0-indexed)
-```
+- `name` and `hasText` match substrings. Pass `exact: true` for actions.
+- `filter({ hasText: '' })` or `null`/`undefined` applies no filter at all. Check computed values before using them in locators.
 
 ## working with pages
 
@@ -1366,10 +1361,7 @@ Clean up listeners when done: `state.page.removeAllListeners('request'); state.p
 await state.page.locator('button[name="Submit"]').click()
 await state.page.locator('text=Login').click({ button: 'right' })
 await state.page.locator('text=Login').dblclick()
-await state.page
-  .locator('a')
-  .first()
-  .click({ modifiers: ['Meta'] }) // cmd+click opens link in new background tab
+await state.page.getByRole('link', { name: 'Docs' }).click({ modifiers: ['Meta'] }) // cmd+click opens link in new background tab
 
 // By coordinates (when locators aren't available, e.g. canvas, maps, custom widgets)
 await state.page.mouse.click(450, 320) // left click

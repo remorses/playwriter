@@ -1715,6 +1715,47 @@ describe('Relay Core Tests', () => {
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
 
+  it('should list every match on strict mode violation so agents can pick one', async () => {
+    await ensureConnectedTabForExecute()
+
+    await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          state.strictTestPage = await context.newPage();
+          await state.strictTestPage.setContent(\`
+            <div role="dialog">
+              <button>From</button>
+              <button>Send</button>
+              <button>Discard</button>
+            </div>
+          \`);
+        `,
+      },
+    })
+    const result = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          await state.strictTestPage.locator('[role=dialog] button').click({ timeout: 1000 });
+        `,
+      },
+    })
+    expect(result.isError).toBe(true)
+    // stack trace has machine-specific paths, keep only the message
+    const text = (result.content as any)[0].text as string
+    expect(text.slice(0, text.indexOf('Call log:'))).toMatchInlineSnapshot(`
+      "
+      Error executing code: locator.click: Error: strict mode violation: locator('[role=dialog] button') resolved to 3 elements:
+          1) <button>From</button> aka getByRole('button', { name: 'From' })
+          2) <button>Send</button> aka getByRole('button', { name: 'Send' })
+          3) <button>Discard</button> aka getByRole('button', { name: 'Discard' })
+
+      "
+    `)
+    await client.callTool({ name: 'execute', arguments: { code: js`await state.strictTestPage.close(); delete state.strictTestPage;` } })
+  }, 30000)
+
   it('should show descriptive error when clicking an element covered by another', async () => {
     await ensureConnectedTabForExecute()
 
