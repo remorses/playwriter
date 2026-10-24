@@ -679,7 +679,7 @@ const pages = context.pages()
 const loginPage = pages[pages.length - 1]
 
 // Complete login flow in loginPage, cookies are shared with original page
-await loginPage.getByText('me@example.com', { exact: true }).click()
+await loginPage.getByText('me@example.com').click()
 await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
@@ -813,11 +813,9 @@ Combine locators for precision:
 
 ```js
 state.page.locator('tr').filter({ hasText: 'John' }).locator('button').click()
-state.page.getByRole('button', { name: 'Send', exact: true }).click()
 ```
 
-- `name` and `hasText` match substrings. Pass `exact: true` for actions.
-- `filter({ hasText: '' })` or `null`/`undefined` applies no filter at all. Check computed values before using them in locators.
+`filter({ hasText: '' })` or `null`/`undefined` applies no filter at all. Check computed values before using them in locators.
 
 ## working with pages
 
