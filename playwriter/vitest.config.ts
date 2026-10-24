@@ -12,6 +12,10 @@ export default defineConfig({
     env: {
       PLAYWRITER_NODE_ENV: 'development',
       PLAYWRITER_TELEMETRY: '0',
+      // Keep test relays out of ~/.playwriter: a relay truncates its logs on start,
+      // which would wipe the logs of the user's live relay (e.g. security.test.ts)
+      PLAYWRITER_LOG_FILE_PATH: 'tmp/test-relay-server.log',
+      PLAYWRITER_CDP_LOG_FILE_PATH: 'tmp/test-cdp.jsonl',
     },
   },
 })

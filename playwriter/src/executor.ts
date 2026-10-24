@@ -319,6 +319,33 @@ function isDisconnectionError(error: Error): boolean {
 
 const MAX_LOGS_PER_PAGE = 5000
 
+/** After a browser disconnect, treat page losses as connection drops for this long. */
+const RECONNECT_WINDOW_MS = 30_000
+/** How long to wait at the start of a call for tabs to be re-attached after a disconnect. */
+const RECONNECT_REBIND_WAIT_MS = 10_000
+/** Wait for a single page that dropped recently: the extension re-attaches tabs Chrome
+ *  detached while open, which takes seconds in a busy Chrome, and Playwright then
+ *  needs a moment to initialize the new Page before context.pages() lists it. */
+const RECENT_LOSS_WINDOW_MS = 15_000
+const RECENT_LOSS_REBIND_WAIT_MS = 5000
+/** How long an unrecovered page in state can still be re-bound if its tab comes back. */
+const LOST_PAGE_TTL_MS = 10 * 60_000
+
+/**
+ * A page stored in `state` that closed. It may come back: after a connection drop
+ * the extension re-attaches the same tab, which Playwright exposes as a new Page
+ * with the same targetId.
+ */
+type LostStatePage = {
+  page: Page
+  targetId: string | undefined
+  url: string
+  stateKeys: string[]
+  lostAt: number
+  /** The agent was already told this page is gone */
+  reported: boolean
+}
+
 const ALLOWED_MODULES = new Set([
   'path',
   'node:path',
@@ -503,6 +530,8 @@ export class PlaywrightExecutor {
   private activeOutputScopes = new Set<OutputScope>()
   private pagesWithListeners = new WeakSet<Page>()
   private suppressPageCloseWarnings = false
+  private lostStatePages: LostStatePage[] = []
+  private lastBrowserDisconnectAt = 0
   private operationTail: Promise<void> = Promise.resolve()
   private disposing = false
   private disposePromise: Promise<void> | null = null
@@ -630,6 +659,7 @@ export class PlaywrightExecutor {
 
   private clearExecutionState() {
     this.userState = {}
+    this.lostStatePages = []
     this.browserLogs = new Map()
     this.pageLogCursor = new Map()
     this.lastSnapshots = new WeakMap()
@@ -774,19 +804,124 @@ export class PlaywrightExecutor {
   }
 
   private setupPageCloseDetection(page: Page) {
+    // Playwright closes pages both when the tab is closed and when the connection
+    // to Chrome drops, and fires these close events before the browser's
+    // 'disconnected' event. Record the loss and decide on the next execute call,
+    // once it is known whether the same tab came back (see recoverLostStatePages).
     page.on('close', () => {
-      const stateKeysForClosedPage = this.stateKeysForPage(page)
-      if (!this.isConnected || this.suppressPageCloseWarnings || stateKeysForClosedPage.length === 0) {
+      const stateKeys = this.stateKeysForPage(page)
+      if (this.suppressPageCloseWarnings || stateKeys.length === 0) {
         return
       }
-
-      const stateKeyLabel = stateKeysForClosedPage.map((key) => `state.${key}`).join(', ')
-      const closedUrl = page.url() || 'unknown'
-      this.enqueueWarning(
-        `Page closed (url: ${closedUrl}) for ${stateKeyLabel}. ` +
-          `Assign a new open page to ${stateKeyLabel} before reusing it, e.g. ${stateKeyLabel.split(', ')[0]} = await context.newPage().`,
-      )
+      this.lostStatePages.push({
+        page,
+        targetId: page.targetId(),
+        url: page.url() || 'unknown',
+        stateKeys,
+        lostAt: Date.now(),
+        reported: false,
+      })
     })
+  }
+
+  private hasRecentBrowserDisconnect(): boolean {
+    return Date.now() - this.lastBrowserDisconnectAt < RECONNECT_WINDOW_MS
+  }
+
+  /** How long the start of a call waits for lost state pages to come back. */
+  private rebindWaitMs(): number {
+    if (this.hasRecentBrowserDisconnect()) {
+      return RECONNECT_REBIND_WAIT_MS
+    }
+    const recentUnreportedLoss = this.lostStatePages.some((lost) => {
+      return !lost.reported && Date.now() - lost.lostAt < RECENT_LOSS_WINDOW_MS
+    })
+    return recentUnreportedLoss ? RECENT_LOSS_REBIND_WAIT_MS : 0
+  }
+
+  /**
+   * Point `state` entries whose page closed back at the same tab when it returns.
+   *
+   * After a connection drop (relay or extension reconnect, debugger detached) the
+   * extension re-attaches the same tab under a new CDP session, so Playwright
+   * creates a new Page with the same targetId. Telling the agent the page
+   * "closed" made it abandon tabs that were still open in Chrome and open
+   * duplicates. Matching is by targetId only: another agent may have the same
+   * URL open.
+   *
+   * Called at the start of every execute (waiting up to `waitMs` for tabs to come
+   * back) and at the end (no wait, so a page the code itself closed is reported in
+   * the same call). Unrecovered pages are reported once and kept for a while, so a
+   * tab that comes back later (user re-enables it) is still re-bound.
+   */
+  private async recoverLostStatePages({ context, waitMs }: { context: BrowserContext; waitMs: number }): Promise<void> {
+    const now = Date.now()
+    // Drop entries the agent reassigned, or that are too old to come back
+    this.lostStatePages = this.lostStatePages.filter((lost) => {
+      const stillReferenced = lost.stateKeys.some((key) => {
+        return this.userState[key] === lost.page
+      })
+      return stillReferenced && now - lost.lostAt < LOST_PAGE_TTL_MS
+    })
+    if (this.lostStatePages.length === 0) {
+      return
+    }
+
+    const findReplacement = (lost: LostStatePage): Page | undefined => {
+      if (!lost.targetId) {
+        return undefined
+      }
+      return context.pages().find((candidate) => {
+        return candidate !== lost.page && !candidate.isClosed() && candidate.targetId() === lost.targetId
+      })
+    }
+    const deadline = now + waitMs
+    while (
+      Date.now() < deadline &&
+      this.lostStatePages.some((lost) => {
+        return !lost.reported && !findReplacement(lost)
+      })
+    ) {
+      await sleep(100)
+    }
+
+    const unresolved: LostStatePage[] = []
+    for (const lost of this.lostStatePages) {
+      const keys = lost.stateKeys.filter((key) => {
+        return this.userState[key] === lost.page
+      })
+      const label = keys.map((key) => `state.${key}`).join(', ')
+      const replacement = findReplacement(lost)
+      if (replacement) {
+        for (const key of keys) {
+          this.userState[key] = replacement
+        }
+        this.enqueueWarning(
+          `The connection to the tab behind ${label} (${lost.url}) dropped and was restored. ` +
+            `${label} points at the same tab again, keep using it.`,
+        )
+        continue
+      }
+      unresolved.push(lost)
+      if (lost.reported) {
+        continue
+      }
+      lost.reported = true
+      const host = (() => {
+        try {
+          return new URL(lost.url).host
+        } catch {
+          return lost.url
+        }
+      })()
+      this.enqueueWarning(
+        `${label} (${lost.url}) was closed or lost its Playwriter connection. ` +
+          `If your code or the user closed it, assign a new page to ${label}. ` +
+          `If the tab is still open in Chrome, do not open a duplicate: ask the user to click the Playwriter ` +
+          `extension icon on it, then use context.pages().findLast((p) => p.url().includes('${host}')).`,
+      )
+    }
+    this.lostStatePages = unresolved
   }
 
   private setupNewPageLogging(page: Page) {
@@ -943,7 +1078,11 @@ export class PlaywrightExecutor {
     }
   }
 
-  /** Remote dials drop and retry; wait instead of showing the local-extension error. */
+  /**
+   * Remote dials drop and retry; wait instead of showing the local-extension error.
+   * A local extension that just dropped (service worker restart, socket reconnect)
+   * comes back within seconds, so wait for it too instead of failing the call.
+   */
   private async requireConnectedExtension(): Promise<{
     connected: boolean
     activeTargets: number
@@ -951,8 +1090,13 @@ export class PlaywrightExecutor {
   }> {
     let status = await this.checkExtensionStatus()
     const remote = isRemoteExtensionKey(this.cdpConfig.extensionId || '')
-    if (!status.connected && remote) {
-      const deadline = Date.now() + 8000
+    const reconnecting =
+      this.hasRecentBrowserDisconnect() ||
+      this.lostStatePages.some((lost) => {
+        return !lost.reported
+      })
+    if (!status.connected && (remote || reconnecting)) {
+      const deadline = Date.now() + (remote ? 8000 : 10_000)
       while (!status.connected && Date.now() < deadline) {
         await sleep(200)
         status = await this.checkExtensionStatus()
@@ -992,6 +1136,7 @@ export class PlaywrightExecutor {
 
       browser.on('disconnected', () => {
         this.logger.log('Browser disconnected, clearing connection state')
+        this.lastBrowserDisconnectAt = Date.now()
         this.clearConnectionState()
       })
 
@@ -1029,6 +1174,7 @@ export class PlaywrightExecutor {
 
     browser.on('disconnected', () => {
       this.logger.log('Browser disconnected, clearing connection state')
+      this.lastBrowserDisconnectAt = Date.now()
       this.clearConnectionState()
     })
 
@@ -1233,8 +1379,9 @@ export class PlaywrightExecutor {
   private async executeInternal(code: string, timeout: number): Promise<ExecuteResult> {
     const consoleLogs: Array<{ method: string; args: any[] }> = []
     const outputScope = this.beginOutputScope()
+    const executeStartedAt = Date.now()
 
-    const formatConsoleLogs = (logs: Array<{ method: string; args: any[] }>, prefix = 'Console output') => {
+    const formatConsoleLogs =(logs: Array<{ method: string; args: any[] }>, prefix = 'Console output') => {
       if (logs.length === 0) {
         return ''
       }
@@ -1279,6 +1426,7 @@ export class PlaywrightExecutor {
       }
 
       const { context } = await this.ensureConnection()
+      await this.recoverLostStatePages({ context, waitMs: this.rebindWaitMs() })
 
       this.logger.log('Executing code:', code)
 
@@ -1943,6 +2091,7 @@ export class PlaywrightExecutor {
         }
       }
 
+      await this.recoverLostStatePages({ context, waitMs: 0 })
       responseText = this.flushOutputForScope(outputScope) + responseText
 
       if (!responseText.trim()) {
@@ -1984,11 +2133,26 @@ export class PlaywrightExecutor {
       // Cloud sessions: disconnection errors mean the VM expired or was destroyed.
       // Give a clear actionable message instead of a generic "call reset" hint.
       const isDisconnect = error instanceof Error && isDisconnectionError(error)
+      // A page in state (or the whole browser connection) dropped while this call ran.
+      // Usually the tab is still open: recoverLostStatePages re-binds it next call.
+      // Don't suggest reset here, it wipes state and leads to duplicate tabs.
+      const droppedDuringCall =
+        this.lastBrowserDisconnectAt >= executeStartedAt ||
+        this.lostStatePages.some((lost) => {
+          return lost.lostAt >= executeStartedAt
+        })
       const resetHint = (() => {
-        if (isTimeoutError) return ''
         if (this.cloudSession && isDisconnect) {
           return `\n\n[Cloud browser expired or disconnected. Create a new session with: playwriter session new --browser cloud]`
         }
+        if (droppedDuringCall) {
+          return (
+            '\n\n[HINT: The connection to Chrome dropped during this call. This does not mean the tab was closed. ' +
+            'Retry the same step: your pages in state are re-attached to the same tabs on the next call. ' +
+            'Do not open a new tab and do not call reset.]'
+          )
+        }
+        if (isTimeoutError) return ''
         return '\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call reset to reconnect.]'
       })()
 

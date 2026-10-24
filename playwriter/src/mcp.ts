@@ -311,7 +311,7 @@ server.tool(
 
       const resetHint = isTimeoutError
         ? ''
-        : '\n\n[HINT: If this is an internal Playwright error, page/browser closed, or connection issue, call the `reset` tool to reconnect. Do NOT reset for other non-connection non-internal errors.]'
+        : '\n\n[HINT: If the connection to Chrome dropped, retry first: the next call reconnects and re-attaches your pages in state. Call the `reset` tool only if calls keep failing with internal Playwright or connection errors; it clears state. Do NOT reset for other errors.]'
 
       // timeout stacks are internal noise (Promise.race / setTimeout); only show the message
       const errorText = isTimeoutError ? error.message : errorStack
@@ -326,7 +326,7 @@ server.tool(
 server.tool(
   'reset',
   dedent`
-    Recreates the CDP connection and resets the browser/context. Use this when the MCP stops responding, you get connection errors, assertion failures, or other issues.
+    Recreates the CDP connection and resets the browser/context. Use this when the MCP stops responding or calls keep failing with connection errors, assertion failures, or other internal issues. A single dropped connection does not need a reset: the next execute call reconnects and re-attaches pages in \`state\` to the same tabs.
 
     After calling this tool, the context variable is automatically updated in the execution environment.
 
