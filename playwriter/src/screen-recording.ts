@@ -106,10 +106,10 @@ function captureInputArgs(options: { fps: number; audio: boolean }): string[] {
   ]
 }
 
-/** Frames keep their aspect ratio if the viewport changes mid-capture. */
+/** Fix dimensions and SAR so viewport changes never reconfigure the encoder. */
 function fitFilter(options: { width: number; height: number }): string {
   const { width, height } = options
-  return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p`
+  return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1`
 }
 
 /** Bitrate for hardware and VP8 encoders, sized for screen content. */
@@ -628,8 +628,6 @@ export class PageCapture {
       browser?.off('disconnected', onClose)
     })
 
-    // Static pages never paint, so Chrome sends no screencast frame. Seed one.
-    this.latestFrame = await this.screenshot()
     await this.attachScreencast()
     if (this.audio) {
       await this.attachAudio()
@@ -639,10 +637,16 @@ export class PageCapture {
   private async attachScreencast(): Promise<void> {
     const { session } = this
     const page = this.currentPage
+    const capturedFrames = this.stats.capturedFrames
+    let resolveFirstFrame!: () => void
+    const firstFrame = new Promise<void>((resolve) => {
+      resolveFirstFrame = resolve
+    })
     const onFrame = (event: { data: string }) => {
       this.latestFrame = Buffer.from(event.data, 'base64')
       this.stats.capturedFrames += 1
       this.rateWindow.frames += 1
+      resolveFirstFrame()
     }
     session.on('Page.screencastFrame', onFrame)
     const siblings = capturesByPage.get(page) || new Set<PageCapture>()
@@ -659,6 +663,19 @@ export class PageCapture {
       await session.send('Page.stopScreencast')
     })
     await this.sendScreencast({ page, session })
+    if (this.stats.capturedFrames > capturedFrames) {
+      return
+    }
+    // Start screencast first: it wakes the compositor on pages where screenshots stall.
+    // A live frame makes the seed optional; a late seed must not overwrite newer frames.
+    await Promise.race([
+      firstFrame,
+      this.screenshot().then((frame) => {
+        if (!this.finishing && this.currentPage === page && this.session === session && this.stats.capturedFrames === capturedFrames) {
+          this.latestFrame = frame
+        }
+      }),
+    ])
   }
 
   private async attachAudio(): Promise<void> {
