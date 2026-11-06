@@ -847,7 +847,7 @@ describe('Extension Connection Tests', () => {
       },
     })
     expect((storedCloseResult as any).isError).not.toBe(true)
-    expect((storedCloseResult as any).content[0].text).toMatchInlineSnapshot(`"[WARNING] Page closed (url: https://example.com/close-warning-a) for state.page. Assign a new open page to state.page before reusing it, e.g. state.page = await context.newPage()."`)
+    expect((storedCloseResult as any).content[0].text).toMatchInlineSnapshot(`"[WARNING] state.page (https://example.com/close-warning-a) was closed or lost its Playwriter connection. If your code or the user closed it, assign a new page to state.page. If the tab is still open in Chrome, do not open a duplicate: ask the user to click the Playwriter extension icon on it, then use context.pages().findLast((p) => p.url().includes('example.com'))."`)
 
     const unstoredCloseResult = await client.callTool({
       name: 'execute',
@@ -1340,4 +1340,78 @@ describe('Extension connect during relay handshake', () => {
       }
     `)
   }, 60000)
+})
+
+describe('Agent pages survive an extension reconnect', () => {
+  const PORT = 19984
+  let testCtx: TestContext | null = null
+  let mcp: Awaited<ReturnType<typeof createMCPClient>> | null = null
+
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: PORT, tempDirPrefix: 'pw-reconnect-test-', toggleExtension: true })
+    mcp = await createMCPClient({ port: PORT })
+  }, 600000)
+
+  afterAll(async () => {
+    await mcp?.cleanup()
+    await cleanupTestContext(testCtx, null)
+    testCtx = null
+  })
+
+  const execute = async (code: string) => {
+    const result = (await mcp!.client.callTool({ name: 'execute', arguments: { code } })) as {
+      content: Array<{ text: string }>
+      isError?: boolean
+    }
+    return { text: result.content[0].text, isError: Boolean(result.isError) }
+  }
+
+  // Regression: when the relay restarts (or the extension socket drops) the extension
+  // re-attaches the same tabs, but agents were told their page "closed" and opened
+  // duplicate tabs. The MCP executor runs in its own process, so it outlives the relay.
+  it('re-binds state.page to the same tab after the relay restarts', async () => {
+    const opened = await execute(js`
+      state.page = await context.newPage();
+      await state.page.goto('https://example.com/?reconnect-rebind');
+      return state.page.url();
+    `)
+    expect(opened.isError).toBe(false)
+
+    const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
+    testCtx!.relayServer.close()
+    await serviceWorker.evaluate(async () => {
+      while (globalThis.getExtensionState().connectionState === 'connected') {
+        await new Promise((r) => setTimeout(r, 20))
+      }
+    })
+    testCtx!.relayServer = await startPlayWriterCDPRelayServer({
+      port: PORT,
+      logger: createFileLogger({ logFilePath: path.join(process.cwd(), 'relay-server.log') }),
+    })
+
+    const afterReconnect = await execute(js`
+      const sameUrlTabs = context.pages().filter((p) => p.url().includes('reconnect-rebind')).length;
+      return { url: state.page.url(), closed: state.page.isClosed(), sameUrlTabs };
+    `)
+    expect(afterReconnect).toMatchInlineSnapshot(`
+      {
+        "isError": false,
+        "text": "[WARNING] The connection to the tab behind state.page (https://example.com/?reconnect-rebind) dropped and was restored. state.page points at the same tab again, keep using it.
+      [return value] {
+        url: 'https://example.com/?reconnect-rebind',
+        closed: false,
+        sameUrlTabs: 1
+      }",
+      }
+    `)
+
+    // The re-bound page is usable, and the agent is not told again
+    const usable = await execute(js`return await state.page.evaluate(() => location.search)`)
+    expect(usable).toMatchInlineSnapshot(`
+      {
+        "isError": false,
+        "text": "[return value] ?reconnect-rebind",
+      }
+    `)
+  }, 120000)
 })

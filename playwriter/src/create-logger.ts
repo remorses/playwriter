@@ -45,7 +45,10 @@ export function createFileLogger({ logFilePath }: { logFilePath?: string } = {})
         return redactRemoteControlSecrets(value)
       })
       .join(' ')
-    buffer.push(stripAnsi(message))
+    // PLAYWRITER_LOG_TIMESTAMPS=1 prefixes each line with an ISO time, to correlate
+    // extension debug lines with cdp.jsonl when diagnosing slow tab creation
+    const timestamp = process.env.PLAYWRITER_LOG_TIMESTAMPS === '1' ? `${new Date().toISOString()} ` : ''
+    buffer.push(timestamp + stripAnsi(message))
     if (!flushTimer) {
       flushTimer = setInterval(() => {
         queue = queue.then(flushBuffer)
