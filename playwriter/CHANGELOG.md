@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.10.0
+
+1. **`recording.start()` returns a handle and supports a manual clock**: a manual clock keeps agent thinking time out of demo videos.
+
+   ```js
+   state.video = await recording.start({ page: state.page, outputPath: '/abs/demo.mp4', clock: 'manual' })
+
+   await state.page.getByRole('button', { name: 'Open' }).click()
+   await state.video.wait(800)          // records the next 800ms
+
+   await state.video.setPage(otherTab)  // record another tab from now on
+   await state.video.stop()
+   ```
+
+   With `clock: 'manual'` frames are written only inside `wait(ms)`. The page keeps running normally, so the video has no idle time and needs no `createDemoVideo` pass. Put each action and its `wait()` in the same execute call. The default `clock: 'real'` records wall-clock time like before. The library `startRecording()` also accepts `clock: 'manual'` and has `wait(ms)` and `setPage(page)`.
+
+   **Breaking:** `recording.stop({ page })`, `recording.isRecording({ page })` and `recording.cancel({ page })` are removed, and so are the `startRecording`, `stopRecording`, `isRecording` and `cancelRecording` sandbox aliases. Use the handle:
+
+   ```js
+   state.video = await recording.start({ page: state.page, outputPath })
+   await state.video.stop() // also: state.video.cancel(), state.video.isRecording
+   ```
+
+   This also fixes `recording.stop()` in a later execute call, which failed with "No active recording for this page" and left the recording running.
+
+2. **Timed-out `execute` code is aborted and cannot overlap the next call**: on timeout the script's running Playwright action is cancelled (a pending click never fires later), its later calls throw, and a new `signal` global (AbortSignal) is aborted. New execute calls always run at once. Pass `signal` to `fetch` or check `signal.aborted` in long loops so they stop on timeout:
+
+   ```js
+   for (const url of urls) {
+     if (signal.aborted) break
+     await fetch(url, { signal })
+   }
+   ```
+
+3. **Idle headless sessions are deleted after 30 minutes**: the shared headless Chrome now exits when its last session goes away, instead of running for days when agents forget `playwriter session delete`.
+
+4. **Headless mode keeps the Chromium sandbox on**: `--browser headless` sessions now run sandboxed, so a page that exploits a Chrome bug stays inside the renderer sandbox. Linux as root (Docker) keeps the old behaviour, since Chromium cannot start sandboxed there.
+
+5. **Recording no longer crashes NVIDIA NVENC encoders when the viewport changes**: frames keep a fixed sample aspect ratio. Recording also starts faster: the first live frame is used without waiting for a slow screenshot.
+
+6. **Screenshots always restore the page UI**: page screenshots and `screenshotWithAccessibilityLabels` restore the hidden toolbar, scrollbars, caret and labels when capture fails.
+
+7. **Skill docs no longer suggest `.first()`, `.last()` or `.nth()` for strict mode violations**: these click by position and can hit the wrong element. Agents now retry with the unique locator listed in the Playwright error.
+
+8. **Shorter agent install prompt on the extension welcome page**.
+
 ## 0.9.0
 
 1. **Screen recording and streaming without an extension click**: `recording.*` and `stream.*` now use CDP screencast piped to `ffmpeg` instead of `chrome.tabCapture`. No user click and no special Chrome flags. Recording now also works in direct CDP mode, headless, cloud browsers and Remote control, and survives cross-site navigation.
