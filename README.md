@@ -11,6 +11,8 @@
     <br/>
 </div>
 
+https://github.com/user-attachments/assets/72fe022b-63ce-41f3-a1ff-1107286f5c2b
+
 Other browser MCPs spawn a fresh Chrome — no logins, no extensions, instantly flagged by bot detectors, double the memory. Playwriter connects to **your running browser** instead. One Chrome extension, full Playwright API, everything you're already logged into.
 
 ## Installation

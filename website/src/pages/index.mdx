@@ -28,13 +28,22 @@ If Playwriter is useful to you, [star it on GitHub](https://github.com/remorses/
 </Tip>
 </Aside>
 
-<Image
-  src='/screenshot-2x.png'
-  alt='Playwriter controlling Chrome with accessibility labels overlay'
-  width={1280}
-  height={800}
-
+<div className='bleed'>
+<video
+  src='https://assets.playwriter.dev/playwriter-demo.mp4'
+  poster='/playwriter-demo-poster.jpg'
+  aria-label='Agents using Playwriter to fill a form, generate images on Midjourney and ChatGPT, read Hacker News, and debug a dev server in Chrome'
+  width={1920}
+  height={940}
+  autoPlay
+  muted
+  loop
+  playsInline
+  controls
+  preload='metadata'
+  style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 12 }}
 />
+</div>
 
 
 Other browser MCPs either **spawn a fresh Chrome** or give agents a fixed set of tools. New Chrome
