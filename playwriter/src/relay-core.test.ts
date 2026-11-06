@@ -1008,6 +1008,37 @@ describe('Relay Core Tests', () => {
     }
   }, 30000)
 
+  it('cancels a Playwright action still running when execute times out', async () => {
+    await ensureConnectedTabForExecute()
+    const sessionId = await createCliSession()
+
+    try {
+      const timedOut = await executeCli({ sessionId, timeout: 300, code: `await context.pages()[0].click('#late-button')` })
+      expect(timedOut.isError).toBe(true)
+
+      // Without server-side cancel, the pending click would fire once the button appears
+      const result = await executeCli({
+        sessionId,
+        code: `
+          const target = context.pages()[0]
+          await target.evaluate(() => {
+            const button = document.createElement('button')
+            button.id = 'late-button'
+            button.onclick = () => { window.lateClicked = true }
+            document.body.append(button)
+          })
+          await target.waitForTimeout(1500)
+          const clicked = await target.evaluate(() => window.lateClicked === true)
+          await target.evaluate(() => document.getElementById('late-button').remove())
+          return clicked
+        `,
+      })
+      expect(result).toMatchObject({ isError: false, text: expect.stringContaining('false') })
+    } finally {
+      await deleteCliSession(sessionId)
+    }
+  }, 30000)
+
   it('restores the page UI when a screenshot capture fails', async () => {
     await ensureConnectedTabForExecute()
     const sessionId = await createCliSession()

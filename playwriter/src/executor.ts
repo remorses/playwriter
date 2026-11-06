@@ -13,7 +13,6 @@ import util from 'node:util'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
-import { AsyncLocalStorage } from 'node:async_hooks'
 import * as acorn from 'acorn'
 import { createSmartDiff } from './diff-utils.js'
 import { getCdpUrl, parseRelayHost, sleep } from './utils.js'
@@ -124,33 +123,11 @@ export function resolveSessionCwd(rawCwd: string | undefined): { cwd: string | n
 export class CodeExecutionTimeoutError extends Error {
   constructor(timeout: number) {
     super(
-      `Code execution timed out after ${timeout}ms and was aborted: \`signal\` is aborted and its next Playwright call throws. ` +
-        `An action already in progress may still complete, so check the page before retrying.`,
+      `Code execution timed out after ${timeout}ms and was aborted: its running and later Playwright calls fail and \`signal\` is aborted. ` +
+        `Check the page before retrying.`,
     )
     this.name = 'CodeExecutionTimeoutError'
   }
-}
-
-// Holds the AbortSignal of the running execute. Async work started by a script (awaits, timers)
-// inherits it, so a timed-out script can be told apart from the next execute.
-const executionScope = new AsyncLocalStorage<AbortSignal>()
-const abortAwareInstrumentations = new WeakSet<object>()
-
-/** Reject Playwright calls made by a timed-out script, so it cannot interleave with later executes. */
-function rejectAbortedPlaywrightCalls(browser: Browser) {
-  // TODO: _instrumentation is private. Use a public fork hook if we add one (must also work with patchright).
-  const instrumentation = (browser as any)._instrumentation
-  if (abortAwareInstrumentations.has(instrumentation)) {
-    return
-  }
-  abortAwareInstrumentations.add(instrumentation)
-  instrumentation.addListener({
-    onApiCallBegin: () => {
-      if (executionScope.getStore()?.aborted) {
-        throw new Error('This execution timed out and was aborted')
-      }
-    },
-  })
 }
 
 const usefulGlobals = {
@@ -1163,7 +1140,6 @@ export class PlaywrightExecutor {
 
     try {
       const { browser, context } = await this.connectToBrowser()
-      rejectAbortedPlaywrightCalls(browser)
 
       this.browser = browser
       this.context = context
@@ -1217,7 +1193,6 @@ export class PlaywrightExecutor {
     this.clearExecutionState()
 
     const { browser, context } = await this.connectToBrowser()
-    rejectAbortedPlaywrightCalls(browser)
 
     this.browser = browser
     this.context = context
@@ -1806,8 +1781,7 @@ export class PlaywrightExecutor {
           : undefined,
         createDemoVideo,
         resetPlaywright: async () => {
-          // Connect outside this script's scope, or browser events would inherit its abort signal
-          const { context: newContext } = await executionScope.exit(() => self.resetInternal())
+          const { context: newContext } = await self.resetInternal()
           vmContextObj.context = newContext
           vmContextObj.browser = self.browser
           vmContextObj.state = self.userState
@@ -1892,11 +1866,14 @@ export class PlaywrightExecutor {
       const result = await (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
+          const chromium = await getChromium()
+          const runScript = () => script.runInContext(vmContext, { timeout, displayErrors: true })
           return await Promise.race([
-            executionScope.run(abortController.signal, () => script.runInContext(vmContext, { timeout, displayErrors: true })),
+            // TODO: patchright-core lacks runWithAbortSignal until playwriter.patch is synced. Then always call it.
+            chromium.runWithAbortSignal ? chromium.runWithAbortSignal(abortController.signal, runScript) : runScript(),
             new Promise((_, reject) => {
               timer = setTimeout(() => {
-                // The race does not stop the script. Abort it so its next Playwright call throws.
+                // The race does not stop the script. Abort it so its running and later Playwright calls fail.
                 const error = new CodeExecutionTimeoutError(timeout)
                 abortController.abort(error)
                 reject(error)
