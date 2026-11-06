@@ -3156,6 +3156,20 @@ export async function startPlayWriterCDPRelayServer({
     }
   }, 60_000)
 
+  // Headless sessions each hold a context in one shared local Chrome. Agents often never
+  // run `session delete`, so delete idle ones; Chrome exits with the last headless session.
+  const HEADLESS_IDLE_TIMEOUT_MS = 30 * 60 * 1000
+  const headlessIdleInterval = setInterval(async () => {
+    try {
+      const deleted = (await executorManager?.deleteIdleHeadlessSessions({ idleTimeoutMs: HEADLESS_IDLE_TIMEOUT_MS })) ?? []
+      for (const sessionId of deleted) {
+        logger?.log(pc.yellow(`[Headless] Deleted idle session ${sessionId} (idle > 30 min)`))
+      }
+    } catch (error) {
+      logger?.error('[Headless] Idle cleanup failed:', error)
+    }
+  }, 60_000)
+
   // Use createAdaptorServer instead of serve() so we control the listen()
   // timing. This lets us inject WebSocket upgrade handlers before binding and
   // await the bind to surface EADDRINUSE as a catchable error (issue #75).
@@ -3215,6 +3229,7 @@ export async function startPlayWriterCDPRelayServer({
         playwrightClients: new Map(),
       })
       clearInterval(cloudIdleInterval)
+      clearInterval(headlessIdleInterval)
       cloudSessionTracking.clear()
       persistCloudSessions() // Remove the file on graceful shutdown
       server.close()

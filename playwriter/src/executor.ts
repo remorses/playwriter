@@ -481,6 +481,9 @@ export class PlaywrightExecutor {
   private pagesWithListeners = new WeakSet<Page>()
   private suppressPageCloseWarnings = false
   private operationTail: Promise<void> = Promise.resolve()
+  /** Queued or running operations. Used with lastActivityAt for idle cleanup. */
+  private pendingOperations = 0
+  private lastActivityAt = Date.now()
   private disposing = false
   private disposePromise: Promise<void> | null = null
 
@@ -635,12 +638,26 @@ export class PlaywrightExecutor {
       return Promise.reject(new Error('Session is being deleted'))
     }
 
-    const result = this.operationTail.then(operation, operation)
+    this.pendingOperations++
+    const run = async () => {
+      try {
+        return await operation()
+      } finally {
+        this.pendingOperations--
+        this.lastActivityAt = Date.now()
+      }
+    }
+    const result = this.operationTail.then(run, run)
     this.operationTail = result.then(
       () => {},
       () => {},
     )
     return result
+  }
+
+  /** Ms since the last operation finished, or 0 while one is queued or running. */
+  idleMs(): number {
+    return this.pendingOperations > 0 ? 0 : Date.now() - this.lastActivityAt
   }
 
   enqueueWarning(message: string) {
@@ -945,7 +962,7 @@ export class PlaywrightExecutor {
     return !!this.cdpConfig.directCdpUrl
   }
 
-  private isHeadlessMode(): boolean {
+  isHeadlessMode(): boolean {
     return !!this.cdpConfig.headless
   }
 
@@ -2116,6 +2133,22 @@ export class ExecutorManager {
     this.executors.delete(sessionId)
     await executor.dispose()
     return true
+  }
+
+  /** Delete headless sessions idle longer than idleTimeoutMs. The shared headless
+   *  Chrome closes with the last headless session. Returns the deleted session IDs. */
+  async deleteIdleHeadlessSessions({ idleTimeoutMs }: { idleTimeoutMs: number }): Promise<string[]> {
+    const deleted: string[] = []
+    for (const [sessionId, executor] of [...this.executors]) {
+      // Re-check per session: deleting earlier ones awaits, and new executes may start meanwhile
+      if (!executor.isHeadlessMode() || executor.idleMs() <= idleTimeoutMs) {
+        continue
+      }
+      if (await this.deleteExecutor(sessionId)) {
+        deleted.push(sessionId)
+      }
+    }
+    return deleted
   }
 
   async disposeAll(): Promise<void> {

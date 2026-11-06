@@ -184,7 +184,7 @@ playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto(
 playwriter -s 1 -e "console.log(await snapshot({ page: state.page }))"
 ```
 
-Multiple sessions reuse the same headless Chrome process.
+Multiple sessions reuse the same headless Chrome process. A headless session is deleted after 30 minutes with no execute; Chrome exits with the last one. Run `playwriter session delete <id>` when done.
 
 If no Chrome binary is found, `playwriter session new --browser headless` will tell you to run `playwriter browser install` first to download Chrome for Testing.
 
