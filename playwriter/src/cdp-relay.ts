@@ -40,6 +40,7 @@ import { WebSocket as NodeWebSocket } from 'ws'
 import { getRemoteDialRetryMs, parseRemoteControlUrl, REMOTE_DIAL_GIVE_UP_MS, type RemoteHelloMessage } from './remote-control.js'
 import type { CloudAuth } from './cloud-client.js'
 import { recordExecute, trackEvent, type SessionKind } from './telemetry.js'
+import { TabIndex, agentKeyFor, isTabUseCommand, type AgentSummary, type TabTarget } from './tab-index.js'
 
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
@@ -124,6 +125,9 @@ export async function startPlayWriterCDPRelayServer({
   // start while the extension keeps tabs and their keys, so the key includes a per-relay-start id.
   const relayInstanceId = crypto.randomUUID()
   const ownershipKey = (sessionId: string) => `${relayInstanceId}:${sessionId}`
+  // Which agent opened / last drove each tab. The extension's groupKey is never
+  // reported back to the relay, so this is tracked here from routed CDP traffic.
+  const tabIndex = new TabIndex()
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
@@ -1188,6 +1192,9 @@ export async function startPlayWriterCDPRelayServer({
       const clientTabGroup = normalizeTabGroupTitle(url.searchParams.get('tabGroup')) || undefined
       const clientTabGroupColor = normalizeTabGroupColor(url.searchParams.get('tabGroupColor')) || undefined
       const clientKind = url.searchParams.get('client')
+      const clientAgentId = url.searchParams.get('agent')
+      const clientAgentKey =
+        agentKeyFor({ sessionId: clientSessionId, kind: clientKind, agentId: clientAgentId }) || undefined
       // When extensionId is explicit, resolve directly. Otherwise use fallback which
       // handles single-extension and uniquely-active-extension cases (#52).
       const resolvedExtension = requestedExtensionId
@@ -1226,8 +1233,20 @@ export async function startPlayWriterCDPRelayServer({
               sessionId: clientSessionId,
               tabGroup: clientTabGroup,
               tabGroupColor: clientTabGroupColor,
+              agentKey: clientAgentKey,
             })
           })
+          // Session-backed clients are described by their executor; only
+          // session-less clients (MCP servers) need their own agent record.
+          if (clientAgentKey && !clientSessionId) {
+            tabIndex.upsertAgent({
+              key: clientAgentKey,
+              kind: 'mcp',
+              label: url.searchParams.get('agentLabel'),
+              cwd: url.searchParams.get('agentCwd'),
+              now: Date.now(),
+            })
+          }
           const extensionConnection = getExtensionConnection(clientExtensionId)
           const targetCount = extensionConnection?.connectedTargets.size || 0
           logger?.log(
@@ -1282,6 +1301,12 @@ export async function startPlayWriterCDPRelayServer({
             return
           }
 
+          const commandAgentKey = store.getState().playwrightClients.get(clientId)?.agentKey || null
+          const usedTarget = sessionId && isTabUseCommand(method) ? extensionConn.connectedTargets.get(sessionId) : undefined
+          if (usedTarget) {
+            tabIndex.recordTabUsed({ targetId: usedTarget.targetId, agentKey: commandAgentKey, now: Date.now() })
+          }
+
           try {
             const result = await routeCdpCommand({
               extensionId: extensionConn.id,
@@ -1291,6 +1316,13 @@ export async function startPlayWriterCDPRelayServer({
               source,
               clientId,
             })
+
+            if (method === 'Target.createTarget') {
+              const createdTargetId = (result as Protocol.Target.CreateTargetResponse | undefined)?.targetId
+              if (createdTargetId) {
+                tabIndex.recordTabOpened({ targetId: createdTargetId, agentKey: commandAgentKey, now: Date.now() })
+              }
+            }
 
             if (method === 'Target.setAutoAttach' && !sessionId) {
               // Re-read state after async routeCdpCommand — targets may have changed
@@ -1881,7 +1913,10 @@ export async function startPlayWriterCDPRelayServer({
                     extensionId: connectionId,
                     sessionId,
                     url: frameParams.frame.url,
-                    title: frameParams.frame.name || undefined,
+                    // frame.name is the window name, not the document title, and is usually
+                    // empty. Clear the title rather than keep the previous document's one;
+                    // Target.targetInfoChanged fills in the real title when Chrome sends it.
+                    title: frameParams.frame.name || '',
                   }),
                 )
                 logger?.log(
@@ -2413,9 +2448,117 @@ export async function startPlayWriterCDPRelayServer({
     }
   })
 
+  // ============================================================================
+  // Tab index: which agent opened / last drove each tab (see tab-index.ts)
+  // ============================================================================
+
+  const collectPageTargets = (): TabTarget[] => {
+    return Array.from(store.getState().extensions.values()).flatMap((extension) => {
+      return Array.from(extension.connectedTargets.values())
+        .filter((target) => {
+          return target.targetInfo.type === 'page' && !isRestrictedTarget(target.targetInfo)
+        })
+        .map((target): TabTarget => {
+          return {
+            targetId: target.targetId,
+            url: target.targetInfo.url,
+            title: target.targetInfo.title,
+            extensionId: extension.stableKey,
+          }
+        })
+    })
+  }
+
+  /** Sessions plus session-less agents (MCP), after pruning stale records. */
+  const listAgents = async ({ targets }: { targets: TabTarget[] }): Promise<AgentSummary[]> => {
+    const now = Date.now()
+    const connectedAgentKeys = new Set(
+      Array.from(store.getState().playwrightClients.values()).flatMap((client) => {
+        return client.agentKey ? [client.agentKey] : []
+      }),
+    )
+    tabIndex.prune({
+      liveTargetIds: new Set(
+        targets.map((target) => {
+          return target.targetId
+        }),
+      ),
+      connectedAgentKeys,
+      now,
+    })
+    const manager = await getExecutorManager()
+    const sessions = manager.listSessions().map((session): AgentSummary => {
+      return {
+        key: session.id,
+        kind: 'session',
+        label: null,
+        cwd: session.cwd,
+        lastActivityAt: session.lastActivityAt ?? session.createdAt,
+        connected: connectedAgentKeys.has(session.id),
+      }
+    })
+    const sessionlessAgents = Array.from(tabIndex.agents.values()).map((agent): AgentSummary => {
+      return {
+        key: agent.key,
+        kind: agent.kind,
+        label: agent.label,
+        cwd: agent.cwd,
+        lastActivityAt: agent.lastActivityAt,
+        connected: connectedAgentKeys.has(agent.key),
+      }
+    })
+    return [...sessions, ...sessionlessAgents]
+  }
+
+  app.get('/cli/tabs', async (c) => {
+    const targets = collectPageTargets()
+    const agents = await listAgents({ targets })
+    return c.json({ tabs: tabIndex.listTabs({ targets }), agents })
+  })
+
+  // Called by executors after an execute that navigated pages, to warn the
+  // agent when the same page is already open in another tab.
+  app.post('/cli/tabs/duplicates', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { agent?: string; since?: number; urls?: unknown[] }
+    if (!body.agent || !Array.isArray(body.urls)) {
+      return c.json({ error: 'agent and urls are required' }, 400)
+    }
+    const targets = collectPageTargets()
+    const duplicates = tabIndex.findDuplicates({
+      targets,
+      agentKey: body.agent,
+      since: typeof body.since === 'number' ? body.since : 0,
+      urls: body.urls.filter((url): url is string => {
+        return typeof url === 'string'
+      }),
+    })
+    const agents = duplicates.length > 0 ? await listAgents({ targets }) : []
+    return c.json({ duplicates, agents })
+  })
+
   app.get('/cli/sessions', async (c) => {
     const manager = await getExecutorManager()
-    return c.json({ sessions: manager.listSessions() })
+    const targets = collectPageTargets()
+    const agents = await listAgents({ targets })
+    const tabs = tabIndex.listTabs({ targets })
+    const countTabs = (key: string) => {
+      return tabs.filter((tab) => {
+        return tab.lastUsedBy === key || tab.openedBy === key
+      }).length
+    }
+    return c.json({
+      sessions: manager.listSessions().map((session) => {
+        return { ...session, tabCount: countTabs(session.id) }
+      }),
+      // Session-less agents (MCP servers), which can't be used with -s
+      agents: agents
+        .filter((agent) => {
+          return agent.kind !== 'session'
+        })
+        .map((agent) => {
+          return { ...agent, tabCount: countTabs(agent.key) }
+        }),
+    })
   })
 
   app.get('/cli/session/suggest', (c) => {

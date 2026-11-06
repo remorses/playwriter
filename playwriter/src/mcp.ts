@@ -18,6 +18,7 @@ import { LOG_FILE_PATH, VERSION, parseRelayHost } from './utils.js'
 import { ensureRelayServer, RELAY_PORT } from './relay-client.js'
 import { PlaywrightExecutor, CodeExecutionTimeoutError } from './executor.js'
 import { discoverChromeInstances, resolveDirectInput, appendSessionToWsUrl } from './chrome-discovery.js'
+import { generateAgentId } from './tab-index.js'
 import crypto from 'node:crypto'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -27,6 +28,8 @@ const require = createRequire(import.meta.url)
 // Single executor instance for MCP (created lazily)
 let executor: PlaywrightExecutor | null = null
 let executorPromise: Promise<PlaywrightExecutor> | null = null
+// Stable for the whole MCP process so the tab index keeps one identity across resets
+const MCP_AGENT_ID = generateAgentId()
 
 interface RemoteConfig {
   host: string
@@ -154,8 +157,15 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
       await ensureRelayServerForMcp()
     }
 
-    // Pass config instead of pre-generated URL so executor can generate unique URLs for each connection
-    const cdpConfig = { ...(remote || { port: RELAY_PORT }), client: 'mcp' as const }
+    // Pass config instead of pre-generated URL so executor can generate unique URLs for each connection.
+    // MCP has no relay session, so it identifies itself to the tab index with a per-process id.
+    const cdpConfig = {
+      ...(remote || { port: RELAY_PORT }),
+      client: 'mcp' as const,
+      agentId: MCP_AGENT_ID,
+      agentLabel: process.env.PLAYWRITER_AGENT || undefined,
+      agentCwd: process.cwd(),
+    }
     return new PlaywrightExecutor({
       cdpConfig,
       logger: mcpLogger,

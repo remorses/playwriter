@@ -13,12 +13,8 @@ Sessions let you run **multiple agents at once** without interference. Each sess
 playwriter session new    # => 1
 playwriter session new    # => 2
 
-# List all sessions with their stored keys
+# List all sessions with their cwd, tab count, last activity and stored keys
 playwriter session list
-# ID  State Keys
-# --------------
-# 1   page, userData
-# 2   -
 ```
 
 Pass `-s <id>` to all commands to use a specific session:
@@ -74,6 +70,49 @@ Only use a page from `context.pages()` if the user points you to a specific tab.
 ```js
 state.page = context.pages().findLast((p) => p.url().includes('myapp.com'))
 if (!state.page) throw new Error('No myapp.com page found')
+```
+
+## Which agent uses which tab
+
+The relay records which session or agent **opened** each tab and which one **last drove it** (navigated, clicked, typed, took a screenshot). Reading the page does not count, so connecting to the browser never claims a tab.
+
+```bash
+playwriter tabs
+# #  URL                              TITLE    OPENED BY             LAST USED BY          ACTIVE
+# -----------------------------------------------------------------------------------------------
+# 1  play.google.com/console/app/123  Console  3 (halfhour/launch)   3 (halfhour/launch)   2m ago
+# 2  developers.facebook.com/apps     Apps     mcp:a1b2c3 (social)   mcp:a1b2c3 (social)   14s ago
+```
+
+Agents are shown by session id plus their working directory. Claude Code worktrees show as `repo/worktree`. Use `--json` for the raw index.
+
+**Duplicate tab warnings.** When an execute call navigates to a page that is already open in another tab, the result includes a warning naming who used each tab. Query strings and hashes are ignored, so `/app/123?tab=a` and `/app/123` count as the same page:
+
+```
+[WARNING] play.google.com/console/app/123 is open in 2 tabs: used by you just now; used by 3 (halfhour/launch) 2m ago. ...
+```
+
+The tab still opens. The warning lets the agent reuse its own tab, or coordinate instead of driving another agent's tab.
+
+**MCP agents.** MCP servers have no session id, so they appear as `mcp:<id>` in `playwriter tabs` and in a separate section of `playwriter session list`. Set `PLAYWRITER_AGENT` in the MCP server's environment to give it a readable label:
+
+```json
+{
+  "mcpServers": {
+    "playwriter": {
+      "command": "npx",
+      "args": ["playwriter@latest"],
+      "env": { "PLAYWRITER_AGENT": "reviewer" }
+    }
+  }
+}
+```
+
+**Activity log.** Every execute call appends a line to `~/.playwriter/activity.jsonl` with the time, session, agent, working directory, duration, success and the URLs it navigated to. The code itself is never logged, and the file never leaves your machine. It rotates to `activity.jsonl.1` at 10 MB. Run `playwriter logfile` to print its path.
+
+```bash
+# What did each agent do in the last hour?
+jq -r 'select(.time > (now - 3600 | todate)) | "\(.time) \(.agent) \(.ms)ms \(.navigated | join(" "))"' ~/.playwriter/activity.jsonl
 ```
 
 ## Tab groups per session
