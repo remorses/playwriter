@@ -1094,6 +1094,10 @@ export class PlaywrightExecutor {
 
       const browser = await chromium.launch({
         headless: true,
+        // Playwright passes --no-sandbox unless chromiumSandbox is true.
+        // Agents browse untrusted pages, so keep the Chromium sandbox on,
+        // except as root on Linux (Docker), where Chromium cannot start sandboxed.
+        chromiumSandbox: !(process.platform === 'linux' && process.getuid?.() === 0),
         executablePath,
       })
 
