@@ -44,6 +44,7 @@ import { createDemoVideo } from './ffmpeg.js'
 import { type GhostCursorClientOptions } from './ghost-cursor.js'
 import { GhostCursorController } from './ghost-cursor-controller.js'
 import { createCloudScope } from './cloud-scope.js'
+import { challengeWarning, detectChallenge, MAX_CHALLENGE_WAIT_MS, PROBE_TIMEOUT_MS } from './challenge-detection.js'
 import type { CloudAuth } from './cloud-client.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -619,6 +620,8 @@ export class PlaywrightExecutor {
   private executionTimestamps: Array<{ start: number; end: number }> = []
   private activeOutputScopes = new Set<OutputScope>()
   private pagesWithListeners = new WeakSet<Page>()
+  /** Pages whose main frame navigated during the running execute script; null outside of one. */
+  private navigatedPages: Set<Page> | null = null
   private suppressPageCloseWarnings = false
   private operationTail: Promise<void> = Promise.resolve()
   /** Queued or running operations. Used with lastActivityAt for idle cleanup. */
@@ -954,6 +957,7 @@ export class PlaywrightExecutor {
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) {
         this.invalidateSnapshotState(page)
+        this.navigatedPages?.add(page)
       }
     })
     page.on('close', () => {
@@ -1444,6 +1448,11 @@ export class PlaywrightExecutor {
     const outputScope = this.beginOutputScope()
 
     const abortController = new AbortController()
+    let scriptStartedAt = 0
+    // Bot challenge checks use what is left of the execute timeout, so they never extend a successful call.
+    const challengeDeadline = () => {
+      return Math.min(scriptStartedAt + timeout, Date.now() + MAX_CHALLENGE_WAIT_MS)
+    }
 
     try {
       // The caller left while this execute waited for the session lock.
@@ -2047,6 +2056,8 @@ export class PlaywrightExecutor {
         ? (Date.now() - recordingStartSnapshot) / 1000
         : -1
 
+      scriptStartedAt = Date.now()
+      this.navigatedPages = new Set()
       const result = await (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined
         let onCallerAbort: (() => void) | undefined
@@ -2108,6 +2119,8 @@ export class PlaywrightExecutor {
         }
       }
 
+      await this.reportBotChallenges({ pages: this.navigatedPages, deadline: challengeDeadline(), signal })
+
       const responseText = boundExecuteOutput({
         before: this.flushOutputForScope(outputScope) + formatConsoleLogs({ logs: consoleLogs }),
         after: returnText,
@@ -2139,6 +2152,17 @@ export class PlaywrightExecutor {
 
       this.logger.error('Error in execute:', errorStack)
 
+      // A failed action often means a challenge appeared, also without a navigation, so check state pages too.
+      if (this.navigatedPages && !(error instanceof ExecuteCancelledError)) {
+        const statePages = Object.values(this.userState).filter((value) => this.pagesWithListeners.has(value))
+        await this.reportBotChallenges({
+          pages: new Set([...this.navigatedPages, ...statePages]),
+          // The call already failed, often by timing out behind a captcha: allow one probe even with no time left.
+          deadline: Math.max(challengeDeadline(), Date.now() + PROBE_TIMEOUT_MS),
+          signal,
+        })
+      }
+
       const logsText = formatConsoleLogs({ logs: consoleLogs, title: 'Console output (before error)' })
       const outputText = this.flushOutputForScope(outputScope)
 
@@ -2163,6 +2187,37 @@ export class PlaywrightExecutor {
         images: [],
         screenshots: [],
         isError: true,
+      }
+    } finally {
+      this.navigatedPages = null
+    }
+  }
+
+  private async reportBotChallenges({
+    pages,
+    deadline,
+    signal,
+  }: {
+    pages: Set<Page> | null
+    deadline: number
+    signal?: AbortSignal
+  }) {
+    if (!pages || pages.size === 0) {
+      return
+    }
+    const outcomes = await Promise.all(
+      [...pages].map((page) => {
+        return detectChallenge({ page, deadline, signal }).catch(() => undefined)
+      }),
+    )
+    for (const outcome of outcomes) {
+      if (!outcome) {
+        continue
+      }
+      this.logger.log(`[Executor] Bot challenge ${outcome.status}: ${outcome.vendor} ${outcome.kind} after ${outcome.waitedMs}ms`)
+      const warning = challengeWarning(outcome)
+      if (warning) {
+        this.enqueueWarning(warning)
       }
     }
   }

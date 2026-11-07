@@ -36,6 +36,7 @@ import { VERSION, EXTENSION_IDS } from './utils.js'
 import { createCdpLogger, type CdpLogEntry, type CdpLogger } from './cdp-log.js'
 import { appendSessionToWsUrl } from './chrome-discovery.js'
 import * as relayState from './relay-state.js'
+import { createHumanInput, isHumanInputEnabledByEnv, isPacedInput } from './human-input.js'
 import { WebSocket as NodeWebSocket } from 'ws'
 import { getRemoteDialRetryMs, parseRemoteControlUrl, REMOTE_DIAL_GIVE_UP_MS, type RemoteHelloMessage } from './remote-control.js'
 import type { CloudAuth } from './cloud-client.js'
@@ -121,6 +122,7 @@ export async function startPlayWriterCDPRelayServer({
   sessionsFile,
   onDrained,
   extensionTimeouts,
+  humanInput: humanInputEnabled = isHumanInputEnabledByEnv(),
 }: {
   port?: number
   host?: string
@@ -133,8 +135,11 @@ export async function startPlayWriterCDPRelayServer({
   onDrained?: () => void
   /** Timeouts for commands forwarded to the extension, in ms. Tests pass short values */
   extensionTimeouts?: Partial<typeof DEFAULT_EXTENSION_TIMEOUTS>
+  /** Human-like mouse paths, clicks, scrolling and typing for Playwright input. Default: PLAYWRITER_HUMAN_INPUT env */
+  humanInput?: boolean
 } = {}): Promise<RelayServer> {
   const timeouts = { ...DEFAULT_EXTENSION_TIMEOUTS, ...extensionTimeouts }
+  const humanInput = createHumanInput({ log: (message) => logger?.log(message) })
   const emitter = new EventEmitter()
   // Lets a client tell this relay apart from one that replaced it on the same port.
   const relayInstanceId = crypto.randomUUID()
@@ -904,6 +909,27 @@ export async function startPlayWriterCDPRelayServer({
           throw error
         }
       }
+    }
+
+    const input = { method, params }
+    if (humanInputEnabled && sessionId && resolvedExtensionId && isPacedInput(input)) {
+      await humanInput
+        .beforeInput({
+          extensionId: resolvedExtensionId,
+          sessionId,
+          input,
+          root: connectedTargets.get(sessionId)?.targetInfo.type === 'page',
+          send: (extraMethod, extraParams) => {
+            return sendToExtension({
+              extensionId: resolvedExtensionId,
+              method: 'forwardCDPCommand',
+              params: { sessionId, method: extraMethod, params: extraParams, source },
+            })
+          },
+        })
+        .catch((error) => {
+          logger?.log(pc.yellow(`[HumanInput] ${method} pacing failed: ${String(error)}`))
+        })
     }
 
     const awaitsPromise =
@@ -1908,6 +1934,7 @@ export async function startPlayWriterCDPRelayServer({
             } else if (method === 'Target.detachedFromTarget') {
               const detachParams = params!
               screencasts.delete(`${connectionId}\0${detachParams.sessionId}`)
+              humanInput.forget({ extensionId: connectionId, sessionId: detachParams.sessionId })
               store.setState((s) =>
                 relayState.removeTarget(s, { extensionId: connectionId, sessionId: detachParams.sessionId }),
               )
@@ -2074,6 +2101,7 @@ export async function startPlayWriterCDPRelayServer({
             : undefined
 
           forgetExtensionRuntimes(connectionId)
+          humanInput.forget({ extensionId: connectionId })
 
           // Chrome-side screencasts end with this connection's debugger sessions
           Array.from(screencasts.entries())
