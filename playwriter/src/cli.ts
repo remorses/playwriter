@@ -311,7 +311,8 @@ async function executeCode(options: {
         }
       })()
       console.error(`Error: ${response.status} ${message}`)
-      process.exit(1)
+      process.exitCode = 1
+      return
     }
 
     const result = (await response.json()) as {
@@ -367,8 +368,9 @@ async function executeCode(options: {
       console.error(pc.dim(`\nCloud session. Run \`playwriter session delete ${sessionId}\` when done.`))
     }
 
+    // Not process.exit(1): it drops stdout/stderr past 64 KiB when piped
     if (result.isError) {
-      process.exit(1)
+      process.exitCode = 1
     }
   } catch (error: any) {
     if (error.cause?.code === 'ECONNREFUSED') {
@@ -378,7 +380,7 @@ async function executeCode(options: {
     } else {
       console.error(`Error: ${error.message}`)
     }
-    process.exit(1)
+    process.exitCode = 1
   }
 }
 
