@@ -80,6 +80,7 @@ export async function setupTestContext({
   toggleExtension = false,
   additionalExtensions = [],
   executablePath = process.env.PLAYWRITER_TEST_BROWSER,
+  relayOptions,
 }: {
   port: number
   tempDirPrefix: string
@@ -88,6 +89,7 @@ export async function setupTestContext({
   /** Additional extension paths to load alongside the main playwriter extension */
   additionalExtensions?: string[]
   executablePath?: string
+  relayOptions?: Partial<Parameters<typeof startPlayWriterCDPRelayServer>[0]>
 }): Promise<TestContext> {
   await killPortProcess({ port }).catch(() => {})
 
@@ -103,7 +105,7 @@ export async function setupTestContext({
   const sessionsFile = path.join(userDataDir, 'playwriter-sessions.json')
   const localLogPath = path.join(process.cwd(), 'relay-server.log')
   const logger = createFileLogger({ logFilePath: localLogPath })
-  const relayServer = await startPlayWriterCDPRelayServer({ port, logger, sessionsFile })
+  const relayServer = await startPlayWriterCDPRelayServer({ ...relayOptions, port, logger, sessionsFile })
 
   const extensionPath = path.resolve('../extension', distDir)
   const allExtensionPaths = [extensionPath, ...additionalExtensions].join(',')

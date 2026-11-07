@@ -2061,3 +2061,43 @@ describe('Relay Core Tests', () => {
   }, 60000)
 
 })
+
+describe('Relay extension timeouts', () => {
+  const PORT = 19969
+  let testCtx: TestContext | null = null
+
+  beforeAll(async () => {
+    testCtx = await setupTestContext({
+      port: PORT,
+      tempDirPrefix: 'pw-timeouts-',
+      toggleExtension: true,
+      relayOptions: { extensionTimeouts: { command: 1000 } },
+    })
+  }, 600000)
+
+  afterAll(async () => {
+    await cleanupTestContext(testCtx)
+    testCtx = null
+  })
+
+  it('lets an awaited evaluate run longer than the command timeout', async () => {
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: PORT }))
+    try {
+      const page = browser.contexts()[0].pages()[0]
+      const result = await page
+        .evaluate(() => {
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolve('done')
+            }, 1500)
+          })
+        })
+        .catch((error: Error) => {
+          return error.message.split('\n')[0]
+        })
+      expect(result).toMatchInlineSnapshot(`"done"`)
+    } finally {
+      await safeCloseCDPBrowser(browser)
+    }
+  }, 30000)
+})

@@ -79,6 +79,12 @@ function isRestrictedTarget(targetInfo: Protocol.Target.TargetInfo): boolean {
 // Only events that no Playwright API depends on. See: https://github.com/remorses/playwriter/issues/96
 // NOTE: *ExtraInfo events feed Playwright's ResponseExtraInfoTracker for request/response.allHeaders().
 // webSocketFrame* events feed page.on('websocket') frame events. Both must be forwarded.
+const DEFAULT_EXTENSION_TIMEOUTS = {
+  command: 60_000,
+  // page.evaluate() and waitForFunction() await a page promise that can take minutes
+  awaitPromise: 5 * 60_000,
+}
+
 const DROPPED_CDP_EVENTS = new Set([
   'Network.dataReceived',
   'Network.resourceChangedPriority',
@@ -114,6 +120,7 @@ export async function startPlayWriterCDPRelayServer({
   cdpLogger,
   sessionsFile,
   onDrained,
+  extensionTimeouts,
 }: {
   port?: number
   host?: string
@@ -124,7 +131,10 @@ export async function startPlayWriterCDPRelayServer({
   sessionsFile?: string
   /** Called when a `/cli/drain` request finished waiting for running executes. Daemons exit the process here. Default: close the server */
   onDrained?: () => void
+  /** Timeouts for commands forwarded to the extension, in ms. Tests pass short values */
+  extensionTimeouts?: Partial<typeof DEFAULT_EXTENSION_TIMEOUTS>
 } = {}): Promise<RelayServer> {
+  const timeouts = { ...DEFAULT_EXTENSION_TIMEOUTS, ...extensionTimeouts }
   const emitter = new EventEmitter()
   // Lets a client tell this relay apart from one that replaced it on the same port.
   const relayInstanceId = crypto.randomUUID()
@@ -396,7 +406,7 @@ export async function startPlayWriterCDPRelayServer({
     extensionId,
     method,
     params,
-    timeout = 30000,
+    timeout = timeouts.command,
   }: {
     extensionId?: string | null
     method: string
@@ -896,10 +906,17 @@ export async function startPlayWriterCDPRelayServer({
       }
     }
 
+    const awaitsPromise =
+      (method === 'Runtime.evaluate' || method === 'Runtime.callFunctionOn') &&
+      !!params &&
+      typeof params === 'object' &&
+      'awaitPromise' in params &&
+      params.awaitPromise === true
     return await sendToExtension({
       extensionId: resolvedExtensionId,
       method: 'forwardCDPCommand',
       params: { sessionId, method, params, source },
+      timeout: awaitsPromise ? timeouts.awaitPromise : timeouts.command,
     })
   }
 
