@@ -1,5 +1,7 @@
 this is the playwriter codebase
 
+Active plan: `plans/stealth-bench.md`. Read it before starting work.
+
 the extension uses chrome.debugger to manage the user browser
 
 read ./README.md for an overview of how this extension and mcp work
