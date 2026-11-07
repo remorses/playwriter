@@ -1,6 +1,7 @@
 import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
 import { installProcessGuard } from './process-guard.js'
+import { defaultSessionCatalogPath } from './session-catalog.js'
 import { RELAY_PORT, waitForRelayVersion } from './relay-client.js'
 import { flushTelemetry, startRelayTelemetry } from './telemetry.js'
 import { LOG_CDP_FILE_PATH } from './utils.js'
@@ -18,7 +19,7 @@ export async function startServer({
 }: { port?: number; host?: string; token?: string } = {}) {
   let server
   try {
-    server = await startPlayWriterCDPRelayServer({ port, host, token, logger })
+    server = await startPlayWriterCDPRelayServer({ port, host, token, logger, sessionsFile: defaultSessionCatalogPath(port) })
   } catch (err: unknown) {
     // When two relay processes race to start (issue #75), the loser gets
     // EADDRINUSE. Check if the winner is a valid relay and exit cleanly

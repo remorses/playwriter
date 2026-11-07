@@ -1951,6 +1951,7 @@ cli
     const { createFileLogger } = await import('./create-logger.js')
     const { startPlayWriterCDPRelayServer } = await import('./cdp-relay.js')
     const { installProcessGuard } = await import('./process-guard.js')
+    const { defaultSessionCatalogPath } = await import('./session-catalog.js')
 
     const logger = createFileLogger()
 
@@ -1963,6 +1964,7 @@ cli
       host: options.host,
       token,
       logger,
+      sessionsFile: defaultSessionCatalogPath(RELAY_PORT),
     })
 
     console.log('Playwriter CDP relay server started')

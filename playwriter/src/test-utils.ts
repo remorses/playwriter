@@ -70,6 +70,8 @@ export interface TestContext {
   browserContext: BrowserContext
   userDataDir: string
   relayServer: RelayServer
+  /** Pass to a restarted relay so it finds the sessions saved by the first one */
+  sessionsFile: string
 }
 
 export async function setupTestContext({
@@ -96,11 +98,13 @@ export async function setupTestContext({
   await buildExtension({ port, distDir })
   console.log('Extension built')
 
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix))
+  // Keep saved sessions out of ~/.playwriter and away from other test runs
+  const sessionsFile = path.join(userDataDir, 'playwriter-sessions.json')
   const localLogPath = path.join(process.cwd(), 'relay-server.log')
   const logger = createFileLogger({ logFilePath: localLogPath })
-  const relayServer = await startPlayWriterCDPRelayServer({ port, logger })
+  const relayServer = await startPlayWriterCDPRelayServer({ port, logger, sessionsFile })
 
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix))
   const extensionPath = path.resolve('../extension', distDir)
   const allExtensionPaths = [extensionPath, ...additionalExtensions].join(',')
 
@@ -122,7 +126,7 @@ export async function setupTestContext({
     })
   }
 
-  return { browserContext, userDataDir, relayServer }
+  return { browserContext, userDataDir, relayServer, sessionsFile }
 }
 
 export async function cleanupTestContext(

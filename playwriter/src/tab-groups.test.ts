@@ -13,6 +13,7 @@ import {
   type TestContext,
   js,
 } from './test-utils.js'
+import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19972
@@ -471,5 +472,72 @@ describe('Session tab groups', () => {
     })
     const cleaned = await waitForGroups((g) => !g.some((group) => group.title === 'agent-shared'))
     expect(cleaned.some((g) => g.title === 'agent-shared')).toBe(false)
+  }, 60000)
+
+  it('keeps sessions, ids and tab ownership across a relay restart', async () => {
+    const createResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ tabGroup: 'agent-restart' }),
+    })
+    const { id: sessionId } = (await createResponse.json()) as { id: string }
+    const before = await executeCli({
+      sessionId,
+      code: js`
+        state.marker = 'before restart';
+        state.ownPage = await context.newPage();
+        await state.ownPage.goto('about:blank');
+      `,
+    })
+    expect(before.isError).toBeFalsy()
+    await waitForGroups((g) => g.some((group) => group.title === 'agent-restart' && group.tabCount === 1))
+
+    const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
+    const waitForConnectionState = async (connected: boolean) => {
+      await serviceWorker.evaluate(async (expected) => {
+        while ((globalThis.getExtensionState().connectionState === 'connected') !== expected) {
+          await new Promise((r) => setTimeout(r, 50))
+        }
+      }, connected)
+    }
+    testCtx!.relayServer.close()
+    await waitForConnectionState(false)
+    testCtx!.relayServer = await startPlayWriterCDPRelayServer({ port: TEST_PORT, sessionsFile: testCtx!.sessionsFile })
+    await waitForConnectionState(true)
+
+    // the saved session is listed before its executor exists again
+    const listed = (await (await fetch(`${SERVER_URL}/cli/sessions`)).json()) as { sessions: Array<{ id: string }> }
+    expect(listed.sessions.map((session) => session.id)).toContain(sessionId)
+
+    // ids are never reused after a restart
+    const nextResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({}),
+    })
+    const { id: nextId } = (await nextResponse.json()) as { id: string }
+    expect(Number(nextId)).toBeGreaterThan(Number(sessionId))
+
+    const after = await executeCli({ sessionId, code: js`return state.marker ?? 'state cleared'` })
+    expect(after.text.replace(`session ${sessionId}`, 'session N')).toMatchInlineSnapshot(`
+      "[WARNING] The Playwriter relay restarted, so session N was restored and \`state\` was cleared. The session tabs are still open: use context.pages() to find them again.
+      [return value] state cleared"
+    `)
+
+    // the stable ownership key still finds the tab created before the restart
+    const deleteResponse = await fetch(`${SERVER_URL}/cli/session/delete`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId, closeCreatedTabs: true }),
+    })
+    expect(await deleteResponse.json()).toEqual({ success: true })
+    const cleaned = await waitForGroups((g) => !g.some((group) => group.title === 'agent-restart'))
+    expect(cleaned.some((g) => g.title === 'agent-restart')).toBe(false)
+
+    await fetch(`${SERVER_URL}/cli/session/delete`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId: nextId }),
+    })
   }, 60000)
 })

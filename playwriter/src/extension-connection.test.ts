@@ -413,8 +413,8 @@ describe('Extension Connection Tests', () => {
       }, createdTabId)
       expect(createdGroup).toEqual({
         groupTitle: 'remote',
-        // relay ownership key is `<relay instance uuid>:<session id>`
-        groupKey: expect.stringMatching(new RegExp(`^remote:[0-9a-f-]{36}:${sessionId}$`)),
+        // relay ownership key is a random per-session uuid
+        groupKey: expect.stringMatching(/^remote:[0-9a-f-]{36}$/),
         active: false,
       })
 
@@ -1329,6 +1329,7 @@ describe('Extension connect during relay handshake', () => {
     testCtx!.relayServer = await startPlayWriterCDPRelayServer({
       port: PORT,
       logger: createFileLogger({ logFilePath: path.join(process.cwd(), 'relay-server.log') }),
+      sessionsFile: testCtx!.sessionsFile,
     })
     expect(await toggle).toMatchInlineSnapshot(`
       {

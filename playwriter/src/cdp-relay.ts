@@ -40,6 +40,8 @@ import { WebSocket as NodeWebSocket } from 'ws'
 import { getRemoteDialRetryMs, parseRemoteControlUrl, REMOTE_DIAL_GIVE_UP_MS, type RemoteHelloMessage } from './remote-control.js'
 import type { CloudAuth } from './cloud-client.js'
 import { recordExecute, trackEvent, type SessionKind } from './telemetry.js'
+import { loadSessionCatalog, saveSessionCatalog, type SavedSession } from './session-catalog.js'
+import type { ExecutorManager, PlaywrightExecutor, SessionInfo } from './executor.js'
 
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
@@ -110,20 +112,19 @@ export async function startPlayWriterCDPRelayServer({
   token,
   logger,
   cdpLogger,
+  sessionsFile,
 }: {
   port?: number
   host?: string
   token?: string
   logger?: { log(...args: any[]): void; error(...args: any[]): void }
   cdpLogger?: CdpLogger
+  /** Where extension and remote sessions are saved so they survive relay restarts. Omit to keep them in memory only */
+  sessionsFile?: string
 } = {}): Promise<RelayServer> {
   const emitter = new EventEmitter()
   const store = relayState.createRelayStore()
   const extensionDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
-  // Tab ownership key the extension stores as groupKey. Session ids restart at "1" on every relay
-  // start while the extension keeps tabs and their keys, so the key includes a per-relay-start id.
-  const relayInstanceId = crypto.randomUUID()
-  const ownershipKey = (sessionId: string) => `${relayInstanceId}:${sessionId}`
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
@@ -2212,11 +2213,104 @@ export async function startPlayWriterCDPRelayServer({
   // CLI Execute Endpoints - For stateful code execution via CLI
   // ============================================================================
 
-  // Session counter for suggesting next session number
-  let nextSessionNumber = 1
+  // Extension and remote sessions are saved to disk so `-s N` survives relay restarts. Their
+  // executors are created again lazily on first use. Ids are never reused: an agent holding a
+  // stale id gets "not found" instead of silently running in another agent's session.
+  const sessionCatalog = sessionsFile
+    ? loadSessionCatalog({ filePath: sessionsFile, logger })
+    : { nextSessionNumber: 1, sessions: [] }
+  const savedSessions = new Map(sessionCatalog.sessions.map((session) => [session.id, session]))
+  let nextSessionNumber = sessionCatalog.nextSessionNumber
+
+  function persistSessions(): void {
+    if (!sessionsFile) {
+      return
+    }
+    saveSessionCatalog({
+      filePath: sessionsFile,
+      catalog: { nextSessionNumber, sessions: [...savedSessions.values()] },
+      logger,
+    })
+  }
+
+  function allocateSessionId(): string {
+    const sessionId = String(nextSessionNumber++)
+    persistSessions()
+    return sessionId
+  }
+
+  function saveSession(session: SavedSession): void {
+    savedSessions.set(session.id, session)
+    persistSessions()
+  }
+
+  /** Tab ownership key the extension stores as groupKey. Opaque to the extension. */
+  function ownershipKey(sessionId: string): string | undefined {
+    return savedSessions.get(sessionId)?.ownershipKey
+  }
+
+  function createSavedSessionExecutor({
+    manager,
+    session,
+    cloudAuth,
+  }: {
+    manager: ExecutorManager
+    session: SavedSession
+    cloudAuth?: CloudAuth
+  }): PlaywrightExecutor {
+    return manager.getExecutor({
+      sessionId: session.id,
+      cwd: session.cwd || undefined,
+      tabGroup: session.tabGroup || undefined,
+      tabGroupColor: session.tabGroupColor || undefined,
+      sessionMetadata: { extensionId: session.extensionId, browser: session.browser, profile: session.profile },
+      enableCloudScope: session.kind === 'extension',
+      cloudAuth,
+    })
+  }
+
+  function savedSessionInfo(session: SavedSession): SessionInfo {
+    return {
+      id: session.id,
+      stateKeys: [],
+      extensionId: session.extensionId,
+      browser: session.browser,
+      profile: session.profile,
+      cwd: session.cwd,
+      tabGroup: session.tabGroup,
+      tabGroupColor: session.tabGroupColor,
+    }
+  }
+
+  /** Live executor, or one created again from the saved session after a relay restart. */
+  async function getSessionExecutor(sessionId: string): Promise<PlaywrightExecutor | null> {
+    const manager = await getExecutorManager()
+    const live = manager.getSession(sessionId)
+    if (live) {
+      return live
+    }
+    const session = savedSessions.get(sessionId)
+    if (!session) {
+      return null
+    }
+    if (session.kind === 'remote' && session.remoteControlUrl) {
+      await connectRemoteExtension({ url: session.remoteControlUrl, sessionId })
+      // A concurrent request may have restored it while we waited for the dial
+      const raced = manager.getSession(sessionId)
+      if (raced) {
+        return raced
+      }
+    }
+    const executor = createSavedSessionExecutor({ manager, session })
+    logger?.log(pc.yellow(`[session ${sessionId}] Restored saved session after relay restart`))
+    executor.enqueueWarning(
+      `The Playwriter relay restarted, so session ${sessionId} was restored and \`state\` was cleared. The session tabs are still open: use context.pages() to find them again.`,
+    )
+    return executor
+  }
 
   // Lazy-load ExecutorManager to avoid circular imports and only when needed
-  let executorManager: import('./executor.js').ExecutorManager | null = null
+  let executorManager: ExecutorManager | null = null
 
   const getExecutorManager = async () => {
     if (!executorManager) {
@@ -2349,8 +2443,7 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ error: 'sessionId and code are required' }, 400)
       }
 
-      const manager = await getExecutorManager()
-      const existingExecutor = manager.getSession(sessionId)
+      const existingExecutor = await getSessionExecutor(sessionId)
       if (!existingExecutor) {
         return c.json(
           { text: `Session ${sessionId} not found. Run 'playwriter session new' first.`, images: [], screenshots: [], isError: true },
@@ -2395,8 +2488,7 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ error: 'sessionId is required' }, 400)
       }
 
-      const manager = await getExecutorManager()
-      const existingExecutor = manager.getSession(sessionId)
+      const existingExecutor = await getSessionExecutor(sessionId)
       if (!existingExecutor) {
         return c.json({ error: `Session ${sessionId} not found. Run 'playwriter session new' first.` }, 404)
       }
@@ -2415,7 +2507,13 @@ export async function startPlayWriterCDPRelayServer({
 
   app.get('/cli/sessions', async (c) => {
     const manager = await getExecutorManager()
-    return c.json({ sessions: manager.listSessions() })
+    const live = manager.listSessions()
+    const liveIds = new Set(live.map((session) => session.id))
+    const notRestoredYet = [...savedSessions.values()]
+      .filter((session) => !liveIds.has(session.id))
+      .map(savedSessionInfo)
+    const sessions = [...live, ...notRestoredYet].sort((a, b) => Number(a.id) - Number(b.id))
+    return c.json({ sessions })
   })
 
   app.get('/cli/session/suggest', (c) => {
@@ -2453,7 +2551,7 @@ export async function startPlayWriterCDPRelayServer({
         blockProxyResources?: boolean
       }
     }
-    const sessionId = String(nextSessionNumber++)
+    const sessionId = allocateSessionId()
     // Resolve cwd with cross-OS awareness: if CLI runs on Windows and relay on
     // Linux (WSL), translate the Windows path to /mnt/<drive>/... so the sandbox
     // can actually reach it. See issue #107.
@@ -2564,18 +2662,20 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ error: error instanceof Error ? error.message : String(error) }, 502)
       }
 
-      const manager = await getExecutorManager()
-      const executor = manager.getExecutor({
-        sessionId,
-        cwd: cwd || undefined,
+      const session: SavedSession = {
+        id: sessionId,
+        kind: 'remote',
+        ownershipKey: crypto.randomUUID(),
+        extensionId: remoteEntry.stableKey,
+        remoteControlUrl: body.remoteControlUrl,
+        browser: remoteEntry.info.browser || 'Remote browser',
+        profile: remoteEntry.info.email ? { email: remoteEntry.info.email, id: remoteEntry.info.id || '' } : null,
+        cwd: cwd || null,
         tabGroup,
-        tabGroupColor: tabGroupColor || undefined,
-        sessionMetadata: {
-          extensionId: remoteEntry.stableKey,
-          browser: remoteEntry.info.browser || 'Remote browser',
-          profile: remoteEntry.info.email ? { email: remoteEntry.info.email, id: remoteEntry.info.id || '' } : null,
-        },
-      })
+        tabGroupColor,
+      }
+      saveSession(session)
+      const executor = createSavedSessionExecutor({ manager: await getExecutorManager(), session })
       const metadata = executor.getSessionMetadata()
       const tabGroupWarning: string | undefined = await (async () => {
         try {
@@ -2585,7 +2685,7 @@ export async function startPlayWriterCDPRelayServer({
             params: {
               from: DEFAULT_TAB_GROUP_TITLE,
               to: tabGroup,
-              key: ownershipKey(sessionId),
+              key: session.ownershipKey,
               color: tabGroupColor || undefined,
             },
             timeout: 10000,
@@ -2633,27 +2733,25 @@ export async function startPlayWriterCDPRelayServer({
     if (body.tabGroupColor !== undefined && !tabGroupColor) {
       return c.json({ error: 'tabGroupColor must be one of: grey, blue, red, yellow, green, pink, purple, cyan, orange' }, 400)
     }
-    const manager = await getExecutorManager()
-    const executor = manager.getExecutor({
-      sessionId,
-      cwd: cwd || undefined,
-      tabGroup: tabGroup || undefined,
-      tabGroupColor: tabGroupColor || undefined,
-      sessionMetadata: {
-        extensionId: conn.stableKey,
-        browser: conn.info.browser || null,
-        profile: conn.info ? { email: conn.info.email || '', id: conn.info.id || '' } : null,
-      },
-      enableCloudScope: true,
-      cloudAuth: body.cloudAuth,
-    })
+    const session: SavedSession = {
+      id: sessionId,
+      kind: 'extension',
+      ownershipKey: crypto.randomUUID(),
+      extensionId: conn.stableKey,
+      browser: conn.info.browser || null,
+      profile: conn.info ? { email: conn.info.email || '', id: conn.info.id || '' } : null,
+      cwd: cwd || null,
+      tabGroup,
+      tabGroupColor,
+    }
+    saveSession(session)
+    const executor = createSavedSessionExecutor({ manager: await getExecutorManager(), session, cloudAuth: body.cloudAuth })
     const metadata = executor.getSessionMetadata()
     return c.json({
       id: sessionId,
       mode: 'extension' as const,
-      // SDK connections send this back on delete, so a stale close after a relay restart
-      // cannot delete the new session that reused the same id
-      ownershipKey: ownershipKey(sessionId),
+      // SDK connections send this back on delete, so a stale close cannot delete another session
+      ownershipKey: session.ownershipKey,
       extensionId: metadata.extensionId,
       browser: metadata.browser,
       profile: metadata.profile,
@@ -2686,8 +2784,7 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ error: 'Pass tabGroup and/or tabGroupColor' }, 400)
       }
 
-      const manager = await getExecutorManager()
-      const executor = manager.getSession(sessionId)
+      const executor = await getSessionExecutor(sessionId)
       if (!executor) {
         return c.json({ error: `Session ${sessionId} not found. Run 'playwriter session new' first.` }, 404)
       }
@@ -2702,6 +2799,10 @@ export async function startPlayWriterCDPRelayServer({
         tabGroup: tabGroup || undefined,
         tabGroupColor: tabGroupColor || undefined,
       })
+      const saved = savedSessions.get(sessionId)
+      if (saved) {
+        saveSession({ ...saved, tabGroup: executor.getTabGroup(), tabGroupColor: executor.getTabGroupColor() })
+      }
       // Update live /cdp clients of this session so tabs created without a
       // reconnect already use the new group name/color.
       store.setState((s) =>
@@ -2759,10 +2860,14 @@ export async function startPlayWriterCDPRelayServer({
     const sessionId = c.req.param('id')
     const manager = await getExecutorManager()
     const executor = manager.getSession(sessionId)
-    if (!executor) {
-      return c.json({ error: 'not found' }, 404)
+    const saved = savedSessions.get(sessionId)
+    if (executor) {
+      return c.json(executor.getSessionInfo({ id: sessionId }))
     }
-    return c.json(executor.getSessionInfo({ id: sessionId }))
+    if (saved) {
+      return c.json(savedSessionInfo(saved))
+    }
+    return c.json({ error: 'not found' }, 404)
   })
 
   app.post('/cli/session/delete', async (c) => {
@@ -2775,21 +2880,27 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ error: 'sessionId is required' }, 400)
       }
 
-      if (body.ownershipKey !== undefined && body.ownershipKey !== ownershipKey(sessionId)) {
-        return c.json({ error: `Session ${sessionId} belongs to another relay start; nothing deleted` }, 409)
+      const manager = await getExecutorManager()
+      const executor = manager.getSession(sessionId)
+      const saved = savedSessions.get(sessionId)
+      if (!executor && !saved) {
+        return c.json({ error: `Session ${sessionId} not found` }, 404)
+      }
+      if (body.ownershipKey !== undefined && body.ownershipKey !== saved?.ownershipKey) {
+        return c.json({ error: `Session ${sessionId} belongs to another owner; nothing deleted` }, 409)
       }
 
-      const manager = await getExecutorManager()
-      const extensionId = manager.getSession(sessionId)?.getSessionMetadata().extensionId
+      // Saved sessions may not have an executor yet after a relay restart; their tabs still carry the key.
+      const extensionId = executor?.getSessionMetadata().extensionId || saved?.extensionId
       // The extension tracks tab ownership: tabs a session creates (and their popups) carry its
       // ownership key. Old extensions reply `{id}` with no result, so tabs stay open.
       let closeTabsWarning: string | undefined
-      if (body.closeCreatedTabs && extensionId) {
+      if (body.closeCreatedTabs && extensionId && saved) {
         try {
           const result = (await sendToExtension({
             extensionId,
             method: 'closeTabsForKey',
-            params: { key: ownershipKey(sessionId) },
+            params: { key: saved.ownershipKey },
             timeout: 10000,
           })) as CloseTabsForKeyResult | undefined
           if (result?.success !== true) {
@@ -2800,10 +2911,10 @@ export async function startPlayWriterCDPRelayServer({
         }
       }
 
-      const deleted = await manager.deleteExecutor(sessionId)
-
-      if (!deleted) {
-        return c.json({ error: `Session ${sessionId} not found` }, 404)
+      await manager.deleteExecutor(sessionId)
+      if (saved) {
+        savedSessions.delete(sessionId)
+        persistSessions()
       }
 
       // Close the remote-control tunnel dial when its last session goes away
@@ -2903,18 +3014,22 @@ export async function startPlayWriterCDPRelayServer({
         if (!conn) {
           throw new Error('Extension is not connected. Enable Playwriter on a tab first.')
         }
-        const createdId = String(nextSessionNumber++)
-        manager.getExecutor({
-          sessionId: createdId,
-          sessionMetadata: {
-            extensionId: conn.stableKey,
-            browser: conn.info.browser || null,
-            profile: conn.info ? { email: conn.info.email || '', id: conn.info.id || '' } : null,
-          },
-        })
-        return createdId
+        const session: SavedSession = {
+          id: allocateSessionId(),
+          kind: 'extension',
+          ownershipKey: crypto.randomUUID(),
+          extensionId: conn.stableKey,
+          browser: conn.info.browser || null,
+          profile: conn.info ? { email: conn.info.email || '', id: conn.info.id || '' } : null,
+          cwd: null,
+          tabGroup: null,
+          tabGroupColor: null,
+        }
+        saveSession(session)
+        createSavedSessionExecutor({ manager, session })
+        return session.id
       })()
-      const executor = manager.getSession(sessionId)
+      const executor = await getSessionExecutor(sessionId)
       if (!executor) {
         return c.json({ error: `Session ${sessionId} not found. Run 'playwriter session new' first.` }, 404)
       }
