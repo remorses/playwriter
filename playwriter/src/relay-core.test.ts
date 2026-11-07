@@ -421,6 +421,75 @@ describe('Relay Core Tests', () => {
     expect(unexpectedRelayCrashes).toEqual([])
   }, 60000)
 
+  it('keeps an in-flight evaluate and handles alive when a second CDP client connects', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const server = await createSimpleServer({ routes: { '/': '<!doctype html><body><button>hi</button></body>' } })
+    const page = await browserContext.newPage()
+    let browserA: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+    let browserB: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+    try {
+      await page.goto(server.baseUrl)
+      await page.bringToFront()
+      await serviceWorker.evaluate(async () => {
+        await globalThis.toggleExtensionForActiveTab()
+      })
+
+      browserA = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+      const pageA = browserA
+        .contexts()[0]
+        .pages()
+        .find((p) => {
+          return p.url() === server.baseUrl + '/'
+        })!
+      const button = await pageA.$('button')
+      const errorLine = (error: Error) => {
+        return error.message.split('\n')[0]
+      }
+      const pending = pageA
+        .evaluate(() => {
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolve('done')
+            }, 1000)
+          })
+        })
+        .catch(errorLine)
+
+      browserB = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+      const pageB = browserB
+        .contexts()[0]
+        .pages()
+        .find((p) => {
+          return p.url() === server.baseUrl + '/'
+        })!
+
+      const results = await Promise.all([
+        pending,
+        button!.textContent().catch(errorLine),
+        pageB.evaluate(() => {
+          return document.querySelector('button')!.textContent
+        }),
+      ])
+      expect(results).toMatchInlineSnapshot(`
+        [
+          "done",
+          "hi",
+          "hi",
+        ]
+      `)
+    } finally {
+      if (browserA) {
+        await safeCloseCDPBrowser(browserA)
+      }
+      if (browserB) {
+        await safeCloseCDPBrowser(browserB)
+      }
+      await page.close()
+      await server.close()
+    }
+  }, 60000)
+
   it('should execute code and capture console output', async () => {
     await client.callTool({
       name: 'execute',

@@ -857,42 +857,42 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       case 'Runtime.enable': {
-        if (!sessionId) {
+        if (!sessionId || !resolvedExtensionId) {
           break
         }
-
-        const contextCreatedPromise = new Promise<void>((resolve) => {
-          const handler = ({ event }: { event: CDPEventBase }) => {
-            if (event.method === 'Runtime.executionContextCreated' && event.sessionId === sessionId) {
-              const params = event.params as Protocol.Runtime.ExecutionContextCreatedEvent | undefined
-              if (params?.context?.auxData?.isDefault === true) {
-                clearTimeout(timeout)
-                emitter.off('cdp:event', handler)
-                resolve()
-              }
-            }
+        const key = `${resolvedExtensionId}\0${sessionId}`
+        const runtime = runtimes.get(key)
+        if (runtime && clientId) {
+          await runtime.enabled
+          // Round trip on the same session first: Chrome answers in order, so this client's
+          // earlier commands (Page.getFrameTree) are answered before the contexts arrive.
+          // Playwright drops contexts of frames it does not know yet.
+          await sendToExtension({
+            extensionId: resolvedExtensionId,
+            method: 'forwardCDPCommand',
+            params: { sessionId, method: 'Runtime.getIsolateId', params: {}, source },
+          }).catch(() => {})
+          // Replay to this client only. Re-enabling would re-emit contexts to every client.
+          for (const context of runtime.contexts.values()) {
+            sendToPlaywright({
+              message: { sessionId, method: 'Runtime.executionContextCreated', params: { context } },
+              clientId,
+              source: 'server',
+            })
           }
-          const timeout = setTimeout(() => {
-            emitter.off('cdp:event', handler)
-            logger?.log(
-              pc.yellow(
-                `IMPORTANT: Runtime.enable timed out waiting for main frame executionContextCreated (sessionId: ${sessionId}). This may cause pages to not be visible immediately.`,
-              ),
-            )
-            resolve()
-          }, 3000)
-          emitter.on('cdp:event', handler)
-        })
-
-        const result = await sendToExtension({
-          extensionId: resolvedExtensionId,
-          method: 'forwardCDPCommand',
-          params: { sessionId, method, params, source },
-        })
-
-        await contextCreatedPromise
-
-        return result
+          return {}
+        }
+        // Set before any event arrives, so the contexts of this enable are tracked
+        const enabled = enableRuntime({ extensionId: resolvedExtensionId, sessionId, method, params, source })
+        runtimes.set(key, { enabled, contexts: new Map() })
+        try {
+          return await enabled
+        } catch (error) {
+          if (runtimes.get(key)?.enabled === enabled) {
+            runtimes.delete(key)
+          }
+          throw error
+        }
       }
     }
 
@@ -901,6 +901,95 @@ export async function startPlayWriterCDPRelayServer({
       method: 'forwardCDPCommand',
       params: { sessionId, method, params, source },
     })
+  }
+
+  // Runtime.enable is per tab, not per CDP client. The extension answers each one with
+  // Runtime.disable + enable, which re-emits every context to all clients, and Playwright
+  // then destroys the old ones: in-flight evaluates and handles of other clients fail.
+  // So only the first enable per target session is forwarded. Later clients get the
+  // contexts tracked from events, replayed to them only.
+  const runtimes = new Map<
+    string,
+    { enabled: Promise<unknown>; contexts: Map<number, Protocol.Runtime.ExecutionContextDescription> }
+  >()
+
+  function trackRuntimeEvent({ extensionId, event }: { extensionId: string; event: CDPEventBase }): void {
+    if (event.method === 'Target.detachedFromTarget') {
+      const params = event.params as Protocol.Target.DetachedFromTargetEvent
+      runtimes.delete(`${extensionId}\0${params.sessionId}`)
+      return
+    }
+    const contexts = runtimes.get(`${extensionId}\0${event.sessionId}`)?.contexts
+    if (!contexts) {
+      return
+    }
+    if (event.method === 'Runtime.executionContextCreated') {
+      const { context } = event.params as Protocol.Runtime.ExecutionContextCreatedEvent
+      contexts.set(context.id, context)
+    } else if (event.method === 'Runtime.executionContextDestroyed') {
+      const params = event.params as Protocol.Runtime.ExecutionContextDestroyedEvent
+      contexts.delete(params.executionContextId)
+    } else if (event.method === 'Runtime.executionContextsCleared') {
+      contexts.clear()
+    }
+  }
+
+  function forgetExtensionRuntimes(extensionId: string): void {
+    Array.from(runtimes.keys())
+      .filter((key) => {
+        return key.startsWith(`${extensionId}\0`)
+      })
+      .forEach((key) => {
+        runtimes.delete(key)
+      })
+  }
+
+  async function enableRuntime({
+    extensionId,
+    sessionId,
+    method,
+    params,
+    source,
+  }: {
+    extensionId: string
+    sessionId: string
+    method: string
+    params: CDPCommand['params']
+    source?: CDPCommand['source']
+  }): Promise<unknown> {
+    // Wait for the main frame context, so the page is usable when the enable returns
+    const contextCreatedPromise = new Promise<void>((resolve) => {
+      const handler = ({ event }: { event: CDPEventBase }) => {
+        if (event.method === 'Runtime.executionContextCreated' && event.sessionId === sessionId) {
+          const params = event.params as Protocol.Runtime.ExecutionContextCreatedEvent | undefined
+          if (params?.context?.auxData?.isDefault === true) {
+            clearTimeout(timeout)
+            emitter.off('cdp:event', handler)
+            resolve()
+          }
+        }
+      }
+      const timeout = setTimeout(() => {
+        emitter.off('cdp:event', handler)
+        logger?.log(
+          pc.yellow(
+            `IMPORTANT: Runtime.enable timed out waiting for main frame executionContextCreated (sessionId: ${sessionId}). This may cause pages to not be visible immediately.`,
+          ),
+        )
+        resolve()
+      }, 3000)
+      emitter.on('cdp:event', handler)
+    })
+
+    const result = await sendToExtension({
+      extensionId,
+      method: 'forwardCDPCommand',
+      params: { sessionId, method, params, source },
+    })
+
+    await contextCreatedPromise
+
+    return result
   }
 
   const app = new Hono()
@@ -1707,6 +1796,7 @@ export async function startPlayWriterCDPRelayServer({
             })
 
             const cdpEvent: CDPEventBase = { method, sessionId, params }
+            trackRuntimeEvent({ extensionId: connectionId, event: cdpEvent })
             emitter.emit('cdp:event', { event: cdpEvent, sessionId })
 
             maybeEmitBrowserDownloadCompatEvent({ method, params, extensionId: connectionId })
@@ -1965,6 +2055,8 @@ export async function startPlayWriterCDPRelayServer({
           const successorExtension = closingExtension
             ? successorCandidates[0]
             : undefined
+
+          forgetExtensionRuntimes(connectionId)
 
           // Chrome-side screencasts end with this connection's debugger sessions
           Array.from(screencasts.entries())
