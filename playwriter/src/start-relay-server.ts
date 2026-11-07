@@ -1,6 +1,7 @@
 import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
-import { waitForRelayVersion } from './relay-client.js'
+import { installProcessGuard } from './process-guard.js'
+import { RELAY_PORT, waitForRelayVersion } from './relay-client.js'
 import { flushTelemetry, startRelayTelemetry } from './telemetry.js'
 import { LOG_CDP_FILE_PATH } from './utils.js'
 
@@ -8,22 +9,10 @@ process.title = 'playwriter-ws-server'
 
 const logger = createFileLogger()
 
-process.on('uncaughtException', async (err) => {
-  await logger.error('Uncaught Exception:', err)
-  process.exit(1)
-})
-
-process.on('unhandledRejection', async (reason) => {
-  await logger.error('Unhandled Rejection:', reason)
-  process.exit(1)
-})
-
-process.on('exit', async (code) => {
-  await logger.log(`Process exiting with code: ${code}`)
-})
+installProcessGuard({ logger })
 
 export async function startServer({
-  port = 19988,
+  port = RELAY_PORT,
   host = '127.0.0.1',
   token,
 }: { port?: number; host?: string; token?: string } = {}) {
@@ -66,4 +55,7 @@ export async function startServer({
 
   return server
 }
-startServer({ token: process.env.PLAYWRITER_TOKEN }).catch(logger.error)
+startServer({ token: process.env.PLAYWRITER_TOKEN }).catch((error) => {
+  void logger.error('Failed to start relay server:', error)
+  process.exit(1)
+})

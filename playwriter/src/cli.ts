@@ -1950,20 +1950,13 @@ cli
     // Lazy-load heavy dependencies only when serve command is used
     const { createFileLogger } = await import('./create-logger.js')
     const { startPlayWriterCDPRelayServer } = await import('./cdp-relay.js')
+    const { installProcessGuard } = await import('./process-guard.js')
 
     const logger = createFileLogger()
 
     process.title = 'playwriter-serve'
 
-    process.on('uncaughtException', async (err) => {
-      await logger.error('Uncaught Exception:', err)
-      process.exit(1)
-    })
-
-    process.on('unhandledRejection', async (reason) => {
-      await logger.error('Unhandled Rejection:', reason)
-      process.exit(1)
-    })
+    installProcessGuard({ logger })
 
     const server = await startPlayWriterCDPRelayServer({
       port: RELAY_PORT,
@@ -2322,6 +2315,7 @@ cli
 
 cli.command('logfile', 'Print the path to the relay server log file').action(() => {
   console.log(`relay: ${LOG_FILE_PATH}`)
+  console.log(`relay (previous run): ${LOG_FILE_PATH}.1`)
   console.log(`cdp: ${LOG_CDP_FILE_PATH}`)
 })
 

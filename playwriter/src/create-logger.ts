@@ -7,18 +7,33 @@ import { LOG_FILE_PATH, redactRemoteControlSecrets } from './utils.js'
 export type Logger = {
   log(...args: unknown[]): Promise<void>
   error(...args: unknown[]): Promise<void>
-  /** Flush buffered log lines to disk (call before process.exit) */
+  /** Flush buffered log lines to disk */
   flush(): Promise<void>
+  /** Flush buffered log lines synchronously. Use in fatal and exit handlers. */
+  flushSync(): void
   logFilePath: string
+}
+
+/** The log moves to `<path>.1` on start and when it grows past this size. */
+const MAX_LOG_BYTES = 20 * 1024 * 1024
+
+function rotateLogFile(filePath: string) {
+  try {
+    fs.renameSync(filePath, `${filePath}.1`)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
 }
 
 export function createFileLogger({ logFilePath }: { logFilePath?: string } = {}): Logger {
   const resolvedLogFilePath = logFilePath || LOG_FILE_PATH
-  const logDir = path.dirname(resolvedLogFilePath)
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true })
-  }
+  fs.mkdirSync(path.dirname(resolvedLogFilePath), { recursive: true })
+  // Keep the previous run's log: the CLI restarts a crashed relay, and the crash line must survive.
+  rotateLogFile(resolvedLogFilePath)
   fs.writeFileSync(resolvedLogFilePath, '')
+  let bytesWritten = 0
 
   let queue: Promise<void> = Promise.resolve()
 
@@ -28,13 +43,25 @@ export function createFileLogger({ logFilePath }: { logFilePath?: string } = {})
   let buffer: string[] = []
   let flushTimer: ReturnType<typeof setInterval> | undefined
 
-  const flushBuffer = async (): Promise<void> => {
+  /** Take the buffered lines as one chunk, rotating the file first if the chunk would pass the cap. */
+  const takeChunk = (): string | undefined => {
     if (buffer.length === 0) {
-      return
+      return undefined
     }
-    const lines = buffer
+    const chunk = buffer.join('\n') + '\n'
     buffer = []
-    await fs.promises.appendFile(resolvedLogFilePath, lines.join('\n') + '\n')
+    const chunkBytes = Buffer.byteLength(chunk)
+    if (bytesWritten > 0 && bytesWritten + chunkBytes > MAX_LOG_BYTES) {
+      rotateLogFile(resolvedLogFilePath)
+      bytesWritten = 0
+    }
+    bytesWritten += chunkBytes
+    return chunk
+  }
+
+  // Sync append: an async write in flight would be lost on process.exit, and could race with rotation.
+  const flushBuffer = async (): Promise<void> => {
+    flushSync()
   }
 
   const log = (...args: unknown[]): Promise<void> => {
@@ -64,10 +91,18 @@ export function createFileLogger({ logFilePath }: { logFilePath?: string } = {})
     await queue
   }
 
+  const flushSync = (): void => {
+    const chunk = takeChunk()
+    if (chunk) {
+      fs.appendFileSync(resolvedLogFilePath, chunk)
+    }
+  }
+
   return {
     log,
     error: log,
     flush,
+    flushSync,
     logFilePath: resolvedLogFilePath,
   }
 }

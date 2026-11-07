@@ -9,6 +9,7 @@ esm
 coverage
 *.zip
 *.log
+*.log.1
 tmp
 playwriter/src/assets/*.png
 playwriter/src/assets/framer.html

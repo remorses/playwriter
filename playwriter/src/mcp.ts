@@ -17,6 +17,7 @@ import dedent from 'string-dedent'
 import { LOG_FILE_PATH, VERSION, parseRelayHost } from './utils.js'
 import { ensureRelayServer, RELAY_PORT } from './relay-client.js'
 import { PlaywrightExecutor, CodeExecutionTimeoutError } from './executor.js'
+import { installProcessGuard } from './process-guard.js'
 import { discoverChromeInstances, resolveDirectInput, appendSessionToWsUrl } from './chrome-discovery.js'
 import crypto from 'node:crypto'
 
@@ -367,6 +368,8 @@ server.tool(
 )
 
 export async function startMcp(options: { host?: string; token?: string } = {}) {
+  installProcessGuard({ logger: mcpLogger })
+
   if (options.host) {
     process.env.PLAYWRITER_HOST = options.host
   }

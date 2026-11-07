@@ -27,6 +27,7 @@ import { Editor } from './editor.js'
 import { getStylesForLocator, formatStylesAsText, type StylesResult } from './styles.js'
 import { getReactSource, getReactComponentInfo, type ReactSourceLocation } from './react-source.js'
 import { ScopedFS } from './scoped-fs.js'
+import { SANDBOX_FILENAME, describeThrown, retainPromiseHook, runAsFaultOwner } from './process-guard.js'
 import {
   screenshotWithAccessibilityLabels,
   getAriaSnapshot,
@@ -131,10 +132,6 @@ export class CodeExecutionTimeoutError extends Error {
 }
 
 const usefulGlobals = {
-  setTimeout,
-  setInterval,
-  clearTimeout,
-  clearInterval,
   URL,
   URLSearchParams,
   fetch,
@@ -486,6 +483,9 @@ export class PlaywrightExecutor {
   private lastActivityAt = Date.now()
   private disposing = false
   private disposePromise: Promise<void> | null = null
+  /** Pending agent timers, cleared on reset and dispose. */
+  private sandboxTimers = new Set<ReturnType<typeof setTimeout>>()
+  private sandboxTimerGlobals = this.createSandboxTimerGlobals()
 
   private scopedFs: ScopedFS
   private sandboxedRequire: NodeRequire
@@ -533,6 +533,63 @@ export class PlaywrightExecutor {
         },
       },
     })
+  }
+
+  /** Host timers for agent code. A throwing callback becomes a warning instead of killing the process. */
+  private createSandboxTimerGlobals() {
+    const timers = this.sandboxTimers
+    const runCallback = ({ kind, callback, args }: { kind: string; callback: Function; args: unknown[] }) => {
+      // Tag promises the callback starts, so their rejections reach this session too.
+      const releaseHook = retainPromiseHook()
+      try {
+        callback(...args)
+      } catch (error) {
+        const message = describeThrown(error)
+        this.logger.error(`[sandbox] ${kind} callback threw:`, message)
+        this.enqueueWarning(`${kind} callback threw: ${message}`)
+      } finally {
+        releaseHook()
+      }
+    }
+    const assertFunction = (callback: unknown) => {
+      if (typeof callback !== 'function') {
+        throw new TypeError('The "callback" argument must be a function')
+      }
+    }
+    const clear = (timer: ReturnType<typeof setTimeout> | undefined) => {
+      if (timer) {
+        timers.delete(timer)
+      }
+      clearTimeout(timer)
+    }
+    return {
+      setTimeout: (callback: Function, ms?: number, ...args: unknown[]) => {
+        assertFunction(callback)
+        const timer = setTimeout(() => {
+          timers.delete(timer)
+          runCallback({ kind: 'setTimeout', callback, args })
+        }, ms)
+        timers.add(timer)
+        return timer
+      },
+      setInterval: (callback: Function, ms?: number, ...args: unknown[]) => {
+        assertFunction(callback)
+        const timer = setInterval(() => {
+          runCallback({ kind: 'setInterval', callback, args })
+        }, ms)
+        timers.add(timer)
+        return timer
+      },
+      clearTimeout: clear,
+      clearInterval: clear,
+    }
+  }
+
+  private clearSandboxTimers() {
+    for (const timer of this.sandboxTimers) {
+      clearTimeout(timer)
+    }
+    this.sandboxTimers.clear()
   }
 
   private createSandboxedRequire(originalRequire: NodeRequire): NodeRequire {
@@ -619,6 +676,7 @@ export class PlaywrightExecutor {
     this.nextOutputEventId = 0
     this.lastDeliveredOutputEventId = 0
     this.activeOutputScopes.clear()
+    this.clearSandboxTimers()
   }
 
   private clearConnectionState() {
@@ -1828,6 +1886,7 @@ export class PlaywrightExecutor {
         // Ghost Browser API - only works in Ghost Browser, mirrors chrome.ghostPublicAPI etc
         chrome: chromeGhostBrowser,
         ...usefulGlobals,
+        ...this.sandboxTimerGlobals,
         // Expose process with safety overrides:
         // - cwd() returns the session's cwd instead of the relay server's cwd
         // - exit() is blocked to prevent killing the relay server
@@ -1864,7 +1923,7 @@ export class PlaywrightExecutor {
         `Object.defineProperty(globalThis, 'page', { get() { throw new Error(${JSON.stringify(PAGE_GLOBAL_REMOVED_ERROR)}) } })`,
         vmContext,
       )
-      const sandboxEntryPath = path.join(this.sessionCwd || process.cwd(), '.playwriter-eval.js')
+      const sandboxEntryPath = path.join(this.sessionCwd || process.cwd(), SANDBOX_FILENAME)
       const autoReturnExpr = getAutoReturnExpression(code)
       const wrappedCode = autoReturnExpr !== null
         ? `(async () => { return await (${autoReturnExpr}) })()`
@@ -1886,9 +1945,12 @@ export class PlaywrightExecutor {
 
       const result = await (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined
+        const releasePromiseHook = retainPromiseHook()
         try {
           const chromium = await getChromium()
-          const runScript = () => script.runInContext(vmContext, { timeout, displayErrors: true })
+          // Promises the script creates are tagged with this executor, so a forgotten await becomes a warning here.
+          const runScript = () =>
+            runAsFaultOwner({ owner: this, run: () => script.runInContext(vmContext, { timeout, displayErrors: true }) })
           return await Promise.race([
             // TODO: patchright-core lacks runWithAbortSignal until playwriter.patch is synced. Then always call it.
             chromium.runWithAbortSignal ? chromium.runWithAbortSignal(abortController.signal, runScript) : runScript(),
@@ -1902,6 +1964,7 @@ export class PlaywrightExecutor {
             }),
           ])
         } finally {
+          releasePromiseHook()
           clearTimeout(timer)
           // Record timestamp even on error — the execution still occupied real time
           // that should not be sped up in the demo video.
