@@ -44,12 +44,10 @@ function getA11yClientCode(): string {
   return a11yClientCode
 }
 
+// Always inject: a page can keep a stale __a11y from an older playwriter version.
+// Same round trip count as checking first, and the bundle is ~8 KB.
 async function ensureA11yClient(page: Page): Promise<void> {
-  const hasA11y = await page.evaluate(() => !!(globalThis as any).__a11y)
-  if (!hasA11y) {
-    const code = getA11yClientCode()
-    await page.evaluate(code)
-  }
+  await page.evaluate(getA11yClientCode())
 }
 
 // ============================================================================

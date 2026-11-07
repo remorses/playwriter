@@ -65,10 +65,14 @@ function renderA11yLabels(labels: A11yLabel[]): number {
   // Remove existing labels
   doc.getElementById(LABELS_CONTAINER_ID)?.remove()
 
+  const viewportWidth = win.innerWidth
+  const viewportHeight = win.innerHeight
+
   // Create container
   const container = doc.createElement('div')
   container.id = LABELS_CONTAINER_ID
-  container.style.cssText = 'position:absolute;left:0;top:0;z-index:2147483647;pointer-events:none;'
+  // Fixed container: boxes come from DOM.getBoxModel, which uses viewport coordinates
+  container.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;'
 
   // Inject styles
   const style = doc.createElement('style')
@@ -88,8 +92,8 @@ function renderA11yLabels(labels: A11yLabel[]): number {
   // Create SVG for connector lines
   const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;overflow:visible;'
-  svg.setAttribute('width', `${doc.documentElement.scrollWidth}`)
-  svg.setAttribute('height', `${doc.documentElement.scrollHeight}`)
+  svg.setAttribute('width', `${viewportWidth}`)
+  svg.setAttribute('height', `${viewportHeight}`)
 
   // Arrow markers
   const defs = doc.createElementNS('http://www.w3.org/2000/svg', 'defs')
@@ -125,11 +129,6 @@ function renderA11yLabels(labels: A11yLabel[]): number {
   const LABEL_HEIGHT = 17
   const LABEL_CHAR_WIDTH = 7
 
-  const viewportLeft = win.scrollX
-  const viewportTop = win.scrollY
-  const viewportRight = viewportLeft + win.innerWidth
-  const viewportBottom = viewportTop + win.innerHeight
-
   let count = 0
   for (const { ref, role, box } of labels) {
     const rectLeft = box.x
@@ -142,7 +141,7 @@ function renderA11yLabels(labels: A11yLabel[]): number {
     }
 
     // Skip if outside viewport
-    if (rectRight < viewportLeft || rectLeft > viewportRight || rectBottom < viewportTop || rectTop > viewportBottom) {
+    if (rectRight < 0 || rectLeft > viewportWidth || rectBottom < 0 || rectTop > viewportHeight) {
       continue
     }
 
