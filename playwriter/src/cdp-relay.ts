@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { createAdaptorServer } from '@hono/node-server'
+import { createAdaptorServer, type HttpBindings } from '@hono/node-server'
 import { getConnInfo } from '@hono/node-server/conninfo'
 import { createNodeWebSocket } from '@hono/node-ws'
 import type { WSContext } from 'hono/ws'
@@ -113,6 +113,7 @@ export async function startPlayWriterCDPRelayServer({
   logger,
   cdpLogger,
   sessionsFile,
+  onDrained,
 }: {
   port?: number
   host?: string
@@ -121,8 +122,12 @@ export async function startPlayWriterCDPRelayServer({
   cdpLogger?: CdpLogger
   /** Where extension and remote sessions are saved so they survive relay restarts. Omit to keep them in memory only */
   sessionsFile?: string
+  /** Called when a `/cli/drain` request finished waiting for running executes. Daemons exit the process here. Default: close the server */
+  onDrained?: () => void
 } = {}): Promise<RelayServer> {
   const emitter = new EventEmitter()
+  // Lets a client tell this relay apart from one that replaced it on the same port.
+  const relayInstanceId = crypto.randomUUID()
   const store = relayState.createRelayStore()
   const extensionDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
 
@@ -1029,8 +1034,9 @@ export async function startPlayWriterCDPRelayServer({
     return c.text('OK')
   })
 
+  // pid, instanceId and activeExecutes were added later. Old clients only read version.
   app.get('/version', (c) => {
-    return c.json({ version: VERSION })
+    return c.json({ version: VERSION, pid: process.pid, instanceId: relayInstanceId, activeExecutes })
   })
 
   app.use('/extension/status', requireTokenWhenConfigured)
@@ -2432,8 +2438,74 @@ export async function startPlayWriterCDPRelayServer({
   })
 
   const DEFAULT_EXEC_TIMEOUT = Number(process.env.PLAYWRITER_EXEC_TIMEOUT) || 10000
+  const DEFAULT_DRAIN_TIMEOUT_MS = 30_000
+  const MAX_DRAIN_TIMEOUT_MS = 120_000
+
+  // A newer CLI drains the relay before replacing it, so upgrades do not kill other agents' running scripts.
+  let activeExecutes = 0
+  let draining: Promise<void> | null = null
+  let onExecutesIdle: (() => void) | null = null
+
+  function finishExecute(): void {
+    activeExecutes--
+    if (activeExecutes === 0) {
+      onExecutesIdle?.()
+    }
+  }
+
+  async function drain(timeoutMs: number): Promise<void> {
+    if (activeExecutes > 0) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs)
+        onExecutesIdle = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+    }
+    if (activeExecutes > 0) {
+      logger?.log(pc.yellow(`[Drain] ${activeExecutes} execute(s) still running after ${timeoutMs}ms, stopping anyway`))
+    }
+    logger?.log('[Drain] Relay drained, stopping')
+    if (onDrained) {
+      onDrained()
+    } else {
+      relayServer.close()
+    }
+  }
+
+  app.post('/cli/drain', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { instanceId?: string; timeoutMs?: number }
+    if (body.instanceId && body.instanceId !== relayInstanceId) {
+      return c.json({ error: 'Relay instance changed' }, 409)
+    }
+    if (!draining) {
+      const timeoutMs = Math.min(Math.max(Number(body.timeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS) || 0, 0), MAX_DRAIN_TIMEOUT_MS)
+      logger?.log(pc.yellow(`[Drain] Refusing new executes, waiting up to ${timeoutMs}ms for ${activeExecutes} running`))
+      draining = drain(timeoutMs)
+    }
+    // 202: the relay stops after the drain. Clients wait for the port to be released.
+    // Connection: close so the client does not reuse this socket to probe a relay that is exiting.
+    c.header('Connection', 'close')
+    return c.json({ activeExecutes }, 202)
+  })
 
   app.post('/cli/execute', async (c) => {
+    if (draining) {
+      return c.json(
+        {
+          text: 'The Playwriter relay is restarting to upgrade. Run the command again in a few seconds. The session id and its tabs are kept, `state` is cleared.',
+          images: [],
+          screenshots: [],
+          isError: true,
+        },
+        503,
+      )
+    }
+    // Counted until the response is written, so a drain never exits before the caller has its result.
+    activeExecutes++
+    const outgoing = (c.env as Partial<HttpBindings> | undefined)?.outgoing
+    outgoing?.once('close', finishExecute)
     try {
       const body: { sessionId: string | number; code: string; timeout?: number } = await c.req.json()
       const sessionId = normalizeSessionId(body.sessionId)
@@ -2461,7 +2533,8 @@ export async function startPlayWriterCDPRelayServer({
 
       let result: Awaited<ReturnType<typeof existingExecutor.execute>>
       try {
-        result = await existingExecutor.execute(code, timeout)
+        // Aborted when the CLI caller disconnects (Ctrl-C, agent bash timeout), so the session lock is released.
+        result = await existingExecutor.execute(code, { timeout, signal: c.req.raw.signal })
       } finally {
         if (cloudTracking) {
           cloudTracking.activeExecutions--
@@ -2476,6 +2549,10 @@ export async function startPlayWriterCDPRelayServer({
     } catch (error: any) {
       logger?.error('Execute endpoint error:', error)
       return c.json({ text: `Server error: ${error.message}`, images: [], screenshots: [], isError: true }, 500)
+    } finally {
+      if (!outgoing) {
+        finishExecute()
+      }
     }
   })
 
@@ -3285,42 +3362,7 @@ export async function startPlayWriterCDPRelayServer({
     }
   }, 60_000)
 
-  // Use createAdaptorServer instead of serve() so we control the listen()
-  // timing. This lets us inject WebSocket upgrade handlers before binding and
-  // await the bind to surface EADDRINUSE as a catchable error (issue #75).
-  const server = createAdaptorServer({ fetch: app.fetch, hostname: host })
-  injectWebSocket(server)
-
-  await new Promise<void>((resolve, reject) => {
-    const onListening = () => {
-      server.off('error', onError)
-      resolve()
-    }
-    const onError = (error: Error) => {
-      server.off('listening', onListening)
-      reject(error)
-    }
-    server.once('listening', onListening)
-    server.once('error', onError)
-    server.listen(port, host)
-  })
-
-  // Clean up orphaned cloud sessions from a previous relay crash.
-  // Must run AFTER successful listen — if another relay is already running,
-  // we'd fail with EADDRINUSE but only after killing its live VMs.
-  cleanupOrphanedCloudSessions()
-
-  const wsHost = `ws://${host}:${port}`
-  const cdpEndpoint = `${wsHost}/cdp`
-  const extensionEndpoint = `${wsHost}/extension`
-
-  logger?.log('CDP relay server started')
-  logger?.log('Host:', host)
-  logger?.log('Port:', port)
-  logger?.log('Extension endpoint:', extensionEndpoint)
-  logger?.log('CDP endpoint:', cdpEndpoint)
-
-  return {
+  const relayServer: RelayServer = {
     close() {
       const { extensions, playwrightClients } = store.getState()
 
@@ -3357,4 +3399,41 @@ export async function startPlayWriterCDPRelayServer({
       emitter.off(event, listener as (...args: unknown[]) => void)
     },
   }
+
+  // Use createAdaptorServer instead of serve() so we control the listen()
+  // timing. This lets us inject WebSocket upgrade handlers before binding and
+  // await the bind to surface EADDRINUSE as a catchable error (issue #75).
+  const server = createAdaptorServer({ fetch: app.fetch, hostname: host })
+  injectWebSocket(server)
+
+  await new Promise<void>((resolve, reject) => {
+    const onListening = () => {
+      server.off('error', onError)
+      resolve()
+    }
+    const onError = (error: Error) => {
+      server.off('listening', onListening)
+      reject(error)
+    }
+    server.once('listening', onListening)
+    server.once('error', onError)
+    server.listen(port, host)
+  })
+
+  // Clean up orphaned cloud sessions from a previous relay crash.
+  // Must run AFTER successful listen — if another relay is already running,
+  // we'd fail with EADDRINUSE but only after killing its live VMs.
+  cleanupOrphanedCloudSessions()
+
+  const wsHost = `ws://${host}:${port}`
+  const cdpEndpoint = `${wsHost}/cdp`
+  const extensionEndpoint = `${wsHost}/extension`
+
+  logger?.log('CDP relay server started')
+  logger?.log('Host:', host)
+  logger?.log('Port:', port)
+  logger?.log('Extension endpoint:', extensionEndpoint)
+  logger?.log('CDP endpoint:', cdpEndpoint)
+
+  return relayServer
 }

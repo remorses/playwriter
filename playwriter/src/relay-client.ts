@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pc from 'picocolors'
 import dedent from 'string-dedent'
-import { getListeningPidsForPort, killPortProcess } from './kill-port.js'
+import { getListeningPidsForPort, getProcessCommandLine, killPid } from './kill-port.js'
 import { VERSION, getCdpUrl, sleep, LOG_FILE_PATH } from './utils.js'
 import { isRemoteExtensionKey } from './relay-state.js'
 import { getChromium, type Browser } from './playwright-import.js'
@@ -47,21 +47,33 @@ export function getLocalExtensionStatuses(extensions: ExtensionStatus[]): Extens
   })
 }
 
-export async function getRelayServerVersion(port: number = RELAY_PORT): Promise<string | null> {
+/** `/version` response. Older relays only send `version`. */
+export type RelayInfo = {
+  version: string
+  pid?: number
+  /** Random per relay start. Tells a relay apart from one that replaced it on the same port */
+  instanceId?: string
+  activeExecutes?: number
+}
+
+export async function getRelayInfo(port: number = RELAY_PORT): Promise<RelayInfo | null> {
   try {
-    // 10s: a busy relay (many agents attaching tabs) can miss a 2s /version
-    // probe. null here is treated as "dead" and ensureRelayServer kills it.
+    // 10s: a busy relay (many agents attaching tabs) can miss a 2s /version probe.
     const response = await fetch(`http://127.0.0.1:${port}/version`, {
       signal: AbortSignal.timeout(10_000),
     })
     if (!response.ok) {
       return null
     }
-    const data = (await response.json()) as { version: string }
-    return data.version
+    const data = (await response.json()) as RelayInfo
+    return typeof data?.version === 'string' ? data : null
   } catch {
     return null
   }
+}
+
+export async function getRelayServerVersion(port: number = RELAY_PORT): Promise<string | null> {
+  return (await getRelayInfo(port))?.version ?? null
 }
 
 /**
@@ -69,7 +81,7 @@ export async function getRelayServerVersion(port: number = RELAY_PORT): Promise<
  * Used during startup races where a relay may have bound the port
  * but isn't serving HTTP yet (issue #75).
  */
-export async function waitForRelayVersion({
+export async function waitForRelayInfo({
   port = RELAY_PORT,
   timeoutMs = 10_000,
   intervalMs = 200,
@@ -77,16 +89,20 @@ export async function waitForRelayVersion({
   port?: number
   timeoutMs?: number
   intervalMs?: number
-} = {}): Promise<string | null> {
+} = {}): Promise<RelayInfo | null> {
   const end = Date.now() + timeoutMs
   while (Date.now() < end) {
-    const version = await getRelayServerVersion(port)
-    if (version) {
-      return version
+    const info = await getRelayInfo(port)
+    if (info) {
+      return info
     }
     await sleep(intervalMs)
   }
   return null
+}
+
+export async function waitForRelayVersion(options: { port?: number; timeoutMs?: number; intervalMs?: number } = {}) {
+  return (await waitForRelayInfo(options))?.version ?? null
 }
 
 export async function getExtensionStatus(
@@ -182,23 +198,157 @@ export async function waitForConnectedExtensions(
   return []
 }
 
-async function killRelayServer(options: { port: number; waitForFreeMs?: number }): Promise<void> {
-  const { port, waitForFreeMs = 3000 } = options
+// process.title of the relay daemon and `playwriter serve`. Windows keeps the original
+// command line, so also match the script name and `playwriter ... serve`.
+const RELAY_COMMAND_REGEX = /playwriter-ws-server|playwriter-serve|start-relay-server|playwriter\S*\s+serve\b/i
 
-  try {
-    await killPortProcess({ port })
-  } catch {
-    return
+/** Resolves true once none of `pids` listens on `port` (exited or closed the server). */
+async function waitForPidsToReleasePort({
+  port,
+  pids,
+  timeoutMs,
+}: {
+  port: number
+  pids: number[]
+  timeoutMs: number
+}): Promise<boolean> {
+  const end = Date.now() + timeoutMs
+  while (true) {
+    const listening = await getListeningPidsForPort({ port }).catch((): number[] => [])
+    if (!pids.some((pid) => listening.includes(pid))) {
+      return true
+    }
+    if (Date.now() >= end) {
+      return false
+    }
+    await sleep(250)
   }
+}
 
-  const startTime = Date.now()
-  while (Date.now() - startTime < waitForFreeMs) {
-    const pids = await getListeningPidsForPort({ port }).catch(() => [])
-    if (pids.length === 0) {
+/**
+ * Kill `pids` if they are Playwriter relays. Throws without killing anything when one is another
+ * program, so a user's server on the relay port is never killed.
+ */
+async function killRelayPids({ port, pids }: { port: number; pids: number[] }): Promise<void> {
+  const targets = pids.filter((pid) => pid !== process.pid)
+  const commands = await Promise.all(targets.map((pid) => getProcessCommandLine({ pid })))
+  const foreign = targets.flatMap((pid, i) => {
+    const command = commands[i]
+    return command && !RELAY_COMMAND_REGEX.test(command) ? [`pid ${pid}: ${command}`] : []
+  })
+  if (foreign.length > 0) {
+    throw new Error(dedent`
+      Port ${port} is used by another program, not a Playwriter relay (${foreign.join(', ')}).
+      Stop that program, then run the command again.
+    `)
+  }
+  // A null command line means the process already exited.
+  const alive = targets.filter((_, i) => commands[i] !== null)
+  await Promise.all(alive.map((pid) => killPid({ pid })))
+  const released = await waitForPidsToReleasePort({ port, pids: alive, timeoutMs: 3000 })
+  if (!released) {
+    throw new Error(`Playwriter relay on port ${port} (pid ${alive.join(', ')}) did not exit after kill`)
+  }
+}
+
+/**
+ * Ask a relay to stop: it refuses new executes, waits up to drainTimeoutMs for running ones, then exits.
+ * Returns false when the relay does not support draining (404 on old relays) or did not exit in time.
+ */
+async function drainRelay({
+  port,
+  pid,
+  instanceId,
+  drainTimeoutMs,
+  logger,
+}: {
+  port: number
+  pid: number
+  instanceId: string
+  drainTimeoutMs: number
+  logger?: { log: (...args: any[]) => void }
+}): Promise<boolean> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (process.env.PLAYWRITER_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.PLAYWRITER_TOKEN}`
+  }
+  const response = await fetch(`http://127.0.0.1:${port}/cli/drain`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ instanceId, timeoutMs: drainTimeoutMs }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null)
+  if (!response) {
+    // Probed relay is gone (or hung): the caller checks the pid again.
+    return false
+  }
+  if (response.status === 409) {
+    // Another client already replaced the relay we probed.
+    return true
+  }
+  if (!response.ok) {
+    return false
+  }
+  const { activeExecutes = 0 } = (await response.json().catch(() => ({}))) as { activeExecutes?: number }
+  if (activeExecutes > 0 && drainTimeoutMs > 0) {
+    logger?.log(
+      pc.yellow(
+        `Waiting up to ${Math.round(drainTimeoutMs / 1000)}s for ${activeExecutes} running execute(s) to finish before restarting the relay...`,
+      ),
+    )
+  }
+  return waitForPidsToReleasePort({ port, pids: [pid], timeoutMs: drainTimeoutMs + 5000 })
+}
+
+const DEFAULT_DRAIN_TIMEOUT_MS = 30_000
+
+/**
+ * Stop the relay on `port`. A relay that supports it is drained first so running executes of
+ * other agents can finish. Only Playwriter relay processes are ever killed.
+ * `relay` is the /version probe; pass null when the port holder does not answer /version.
+ */
+async function stopRelay({
+  port,
+  relay,
+  drainTimeoutMs = DEFAULT_DRAIN_TIMEOUT_MS,
+  logger,
+}: {
+  port: number
+  relay: RelayInfo | null
+  drainTimeoutMs?: number
+  logger?: { log: (...args: any[]) => void }
+}): Promise<void> {
+  const { pid, instanceId } = relay ?? {}
+  if (pid && instanceId) {
+    if (await drainRelay({ port, pid, instanceId, drainTimeoutMs, logger })) {
       return
     }
-    await sleep(100)
+    await killRelayPids({ port, pids: [pid] })
+    return
   }
+  // Old relay without pid in /version, or a port holder that does not answer /version.
+  const pids = await getListeningPidsForPort({ port }).catch(() => [])
+  await killRelayPids({ port, pids })
+}
+
+/**
+ * Stop the local relay daemon, draining it first. Used by `playwriter serve restart`.
+ * drainTimeoutMs 0 stops it right away and aborts running executes.
+ */
+export async function stopRelayServer({
+  port = RELAY_PORT,
+  drainTimeoutMs,
+  logger,
+}: {
+  port?: number
+  drainTimeoutMs?: number
+  logger?: { log: (...args: any[]) => void }
+} = {}): Promise<void> {
+  const relay = await getRelayInfo(port)
+  if (!relay && (await getListeningPidsForPort({ port }).catch(() => [])).length === 0) {
+    return
+  }
+  await stopRelay({ port, relay, drainTimeoutMs, logger })
 }
 
 /**
@@ -240,10 +390,8 @@ export function getExtensionOutdatedWarning(extensionPlaywriterVersion: string |
 
 export interface EnsureRelayServerOptions {
   logger?: { log: (...args: any[]) => void }
-  /** If true, will kill and restart server on version mismatch. Default: true */
+  /** If true, will drain and restart an older relay. Default: true */
   restartOnVersionMismatch?: boolean
-  /** Kill any running relay and start a new one, even if versions match. */
-  forceRestart?: boolean
   /** Pass additional environment variables to the relay server process */
   env?: Record<string, string>
 }
@@ -268,58 +416,30 @@ export async function ensureRelayServer(options: EnsureRelayServerOptions = {}):
 }
 
 async function ensureRelayServerImpl(options: EnsureRelayServerOptions = {}): Promise<true | undefined> {
-  const { logger, restartOnVersionMismatch = true, env: additionalEnv, forceRestart = false } = options
+  const { logger, restartOnVersionMismatch = true, env: additionalEnv } = options
 
-  if (forceRestart) {
-    logger?.log(pc.yellow('Restarting CDP relay server...'))
-    await killRelayServer({ port: RELAY_PORT })
+  let relay = await getRelayInfo(RELAY_PORT)
+  const listeningPids = relay ? [] : await getListeningPidsForPort({ port: RELAY_PORT }).catch(() => [])
+  if (!relay && listeningPids.length > 0) {
+    // A competing relay may have bound the port before /version became ready.
+    relay = await waitForRelayInfo({ port: RELAY_PORT })
   }
 
-  const serverVersion = await getRelayServerVersion(RELAY_PORT)
-
-  if (!forceRestart && serverVersion === VERSION) {
-    return
-  }
-
-  // Do not let an older client replace a newer Playwriter relay.
-  if (serverVersion !== null && compareVersions(serverVersion, VERSION) > 0) {
-    return
-  }
-
-  if (serverVersion !== null) {
-    if (restartOnVersionMismatch) {
-      logger?.log(
-        pc.yellow(`CDP relay server version mismatch (server: ${serverVersion}, client: ${VERSION}), restarting...`),
-      )
-      await killRelayServer({ port: RELAY_PORT })
-    } else {
+  if (relay) {
+    // Do not let an older client replace a newer Playwriter relay.
+    if (compareVersions(relay.version, VERSION) >= 0 || !restartOnVersionMismatch) {
       return
     }
+    logger?.log(
+      pc.yellow(`CDP relay server version mismatch (server: ${relay.version}, client: ${VERSION}), restarting...`),
+    )
+    await stopRelay({ port: RELAY_PORT, relay, logger })
+  } else if (listeningPids.length > 0) {
+    logger?.log(
+      pc.yellow(`Port ${RELAY_PORT} is in use (pid(s): ${listeningPids.join(', ')}) and does not answer /version...`),
+    )
+    await stopRelay({ port: RELAY_PORT, relay: null, logger })
   } else {
-    const listeningPids = await getListeningPidsForPort({ port: RELAY_PORT }).catch(() => [])
-    if (listeningPids.length > 0) {
-      // A competing relay may have bound the port before /version became ready.
-      const foundVersion = await waitForRelayVersion({ port: RELAY_PORT })
-      if (foundVersion) {
-        if (foundVersion === VERSION || compareVersions(foundVersion, VERSION) > 0) {
-          return
-        }
-        if (!restartOnVersionMismatch) {
-          return
-        }
-        logger?.log(
-          pc.yellow(`CDP relay server version mismatch (server: ${foundVersion}, client: ${VERSION}), restarting...`),
-        )
-      } else {
-        logger?.log(
-          pc.yellow(
-            `Port ${RELAY_PORT} is already in use (pid(s): ${listeningPids.join(', ')}). Stopping it so Playwriter can reclaim its relay port...`,
-          ),
-        )
-      }
-      await killRelayServer({ port: RELAY_PORT })
-    }
-
     logger?.log(pc.dim('CDP relay server not running, starting it...'))
   }
 

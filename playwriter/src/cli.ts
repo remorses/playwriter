@@ -20,6 +20,8 @@ import { VERSION, LOG_FILE_PATH, LOG_CDP_FILE_PATH, parseRelayHost } from './uti
 import { TAB_GROUP_ALL_COLORS, normalizeTabGroupColor } from './protocol.js'
 import {
   ensureRelayServer,
+  getRelayInfo,
+  stopRelayServer,
   RELAY_PORT,
   waitForConnectedExtensions,
   getLocalExtensionStatuses,
@@ -299,7 +301,16 @@ async function executeCode(options: {
 
     if (!response.ok) {
       const text = await response.text()
-      console.error(`Error: ${response.status} ${text}`)
+      // 503 while the relay drains for an upgrade carries a readable message in text.
+      const message = (() => {
+        try {
+          const json = JSON.parse(text) as { text?: string; error?: string }
+          return json.text || json.error || text
+        } catch {
+          return text
+        }
+      })()
+      console.error(`Error: ${response.status} ${message}`)
       process.exit(1)
     }
 
@@ -1965,6 +1976,11 @@ cli
       token,
       logger,
       sessionsFile: defaultSessionCatalogPath(RELAY_PORT),
+      onDrained: () => {
+        console.log('\nA newer Playwriter CLI replaced this relay. Shutting down...')
+        server.close()
+        process.exit(0)
+      },
     })
 
     console.log('Playwriter CDP relay server started')
@@ -2309,10 +2325,24 @@ cli
   })
 
 cli
-  .command('serve restart', 'Kill and restart the local relay daemon')
+  .command('serve restart', 'Restart the local relay daemon. Refuses while agents run executes')
   .hidden()
-  .action(async () => {
-    await ensureRelayServer({ logger: console, forceRestart: true })
+  .option('--force', 'Restart even while executes run. They are aborted')
+  .action(async (options) => {
+    const relay = await getRelayInfo()
+    if (relay?.activeExecutes && !options.force) {
+      console.error(
+        `The relay is running ${relay.activeExecutes} execute(s) for agents. Run again when they finish, or pass --force to abort them.`,
+      )
+      process.exit(1)
+    }
+    try {
+      await stopRelayServer({ logger: console, drainTimeoutMs: options.force ? 0 : undefined })
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`)
+      process.exit(1)
+    }
+    await ensureRelayServer({ logger: console })
   })
 
 cli.command('logfile', 'Print the path to the relay server log file').action(() => {

@@ -273,7 +273,7 @@ server.tool(
       }
 
       const exec = await getOrCreateExecutor()
-      const result = await exec.execute(code, timeout)
+      const result = await exec.execute(code, { timeout })
 
       // Transform executor result to MCP format
       // Append screenshot metadata to text for MCP (image is included inline as content)

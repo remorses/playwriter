@@ -1,4 +1,4 @@
-import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
+import { startPlayWriterCDPRelayServer, type RelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
 import { installProcessGuard } from './process-guard.js'
 import { defaultSessionCatalogPath } from './session-catalog.js'
@@ -17,9 +17,23 @@ export async function startServer({
   host = '127.0.0.1',
   token,
 }: { port?: number; host?: string; token?: string } = {}) {
-  let server
+  let server: RelayServer | undefined
+  const shutdown = async () => {
+    console.log('\nShutting down...')
+    server?.close()
+    await flushTelemetry()
+    process.exit(0)
+  }
   try {
-    server = await startPlayWriterCDPRelayServer({ port, host, token, logger, sessionsFile: defaultSessionCatalogPath(port) })
+    server = await startPlayWriterCDPRelayServer({
+      port,
+      host,
+      token,
+      logger,
+      sessionsFile: defaultSessionCatalogPath(port),
+      // A newer CLI drained this relay to replace it.
+      onDrained: () => void shutdown(),
+    })
   } catch (err: unknown) {
     // When two relay processes race to start (issue #75), the loser gets
     // EADDRINUSE. Check if the winner is a valid relay and exit cleanly
@@ -45,12 +59,6 @@ export async function startServer({
 
   startRelayTelemetry()
 
-  const shutdown = async () => {
-    console.log('\nShutting down...')
-    server.close()
-    await flushTelemetry()
-    process.exit(0)
-  }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 

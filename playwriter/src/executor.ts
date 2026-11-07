@@ -131,6 +131,13 @@ export class CodeExecutionTimeoutError extends Error {
   }
 }
 
+export class ExecuteCancelledError extends Error {
+  constructor() {
+    super('Code execution was cancelled because the caller disconnected: its running and later Playwright calls fail.')
+    this.name = 'ExecuteCancelledError'
+  }
+}
+
 const usefulGlobals = {
   URL,
   URLSearchParams,
@@ -1280,11 +1287,23 @@ export class PlaywrightExecutor {
     return { context }
   }
 
-  async execute(code: string, timeout = 10000): Promise<ExecuteResult> {
-    return this.runExclusive({ operation: () => this.executeInternal(code, timeout) })
+  /** `signal` aborts the script like a timeout does, for example when the HTTP caller disconnects. */
+  async execute(
+    code: string,
+    { timeout = 10000, signal }: { timeout?: number; signal?: AbortSignal } = {},
+  ): Promise<ExecuteResult> {
+    return this.runExclusive({ operation: () => this.executeInternal({ code, timeout, signal }) })
   }
 
-  private async executeInternal(code: string, timeout: number): Promise<ExecuteResult> {
+  private async executeInternal({
+    code,
+    timeout,
+    signal,
+  }: {
+    code: string
+    timeout: number
+    signal?: AbortSignal
+  }): Promise<ExecuteResult> {
     const consoleLogs: Array<{ method: string; args: any[] }> = []
     const outputScope = this.beginOutputScope()
 
@@ -1314,6 +1333,10 @@ export class PlaywrightExecutor {
     const abortController = new AbortController()
 
     try {
+      // The caller left while this execute waited for the session lock.
+      if (signal?.aborted) {
+        throw new ExecuteCancelledError()
+      }
       // Warn if cloud VM is approaching its hard timeout (deduped by minute bucket)
       if (this.cloudSession?.timeoutAt) {
         const remainingMs = this.cloudSession.timeoutAt - Date.now()
@@ -1945,6 +1968,7 @@ export class PlaywrightExecutor {
 
       const result = await (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined
+        let onCallerAbort: (() => void) | undefined
         const releasePromiseHook = retainPromiseHook()
         try {
           const chromium = await getChromium()
@@ -1955,17 +1979,26 @@ export class PlaywrightExecutor {
             // TODO: patchright-core lacks runWithAbortSignal until playwriter.patch is synced. Then always call it.
             chromium.runWithAbortSignal ? chromium.runWithAbortSignal(abortController.signal, runScript) : runScript(),
             new Promise((_, reject) => {
-              timer = setTimeout(() => {
-                // The race does not stop the script. Abort it so its running and later Playwright calls fail.
-                const error = new CodeExecutionTimeoutError(timeout)
+              // The race does not stop the script. Abort it so its running and later Playwright calls fail.
+              const stop = (error: Error) => {
                 abortController.abort(error)
                 reject(error)
+              }
+              timer = setTimeout(() => {
+                stop(new CodeExecutionTimeoutError(timeout))
               }, timeout)
+              onCallerAbort = () => {
+                stop(new ExecuteCancelledError())
+              }
+              signal?.addEventListener('abort', onCallerAbort, { once: true })
             }),
           ])
         } finally {
           releasePromiseHook()
           clearTimeout(timer)
+          if (onCallerAbort) {
+            signal?.removeEventListener('abort', onCallerAbort)
+          }
           // Record timestamp even on error — the execution still occupied real time
           // that should not be sped up in the demo video.
           // Compare against snapshot to avoid cross-session contamination if
@@ -2035,7 +2068,11 @@ export class PlaywrightExecutor {
       const errorStack = error.stack || error.message
       const isExecutionTimeout =
         error instanceof CodeExecutionTimeoutError || error?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT'
-      const isTimeoutError = isExecutionTimeout || error?.name === 'TimeoutError' || error?.name === 'AbortError'
+      const isTimeoutError =
+        isExecutionTimeout ||
+        error instanceof ExecuteCancelledError ||
+        error?.name === 'TimeoutError' ||
+        error?.name === 'AbortError'
 
       this.logger.error('Error in execute:', errorStack)
 
