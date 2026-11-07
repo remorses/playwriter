@@ -5,7 +5,32 @@ import {
   isPlaywrightChannelOwner,
   formatConsoleLogs,
   boundExecuteOutput,
+  searchSnapshot,
 } from './executor.js'
+
+describe('searchSnapshot', () => {
+  const snapshot = Array.from({ length: 40 }, (_, i) => `- button "Item ${i}"`).join('\n')
+
+  it('finds every line with a /g regex and reports the match count', () => {
+    expect(searchSnapshot({ snapshot: '- link "A"\n- link "B"\n- text: x\n- link "C"', search: /link/g }))
+      .toMatchInlineSnapshot(`
+        "3 matches
+        - link "A"
+        - link "B"
+        - text: x
+        - link "C""
+      `)
+  })
+
+  it('matches strings case-insensitively and caps shown matches', () => {
+    const out = searchSnapshot({ snapshot, search: 'BUTTON "item 1' })
+    expect(out.split('\n')[0]).toMatchInlineSnapshot(`"11 matches (showing 10). Use a more specific search to see the rest."`)
+  })
+
+  it('reports no matches', () => {
+    expect(searchSnapshot({ snapshot, search: 'checkbox' })).toBe('No matches found')
+  })
+})
 
 describe('execute output', () => {
   it('folds identical consecutive log lines', () => {

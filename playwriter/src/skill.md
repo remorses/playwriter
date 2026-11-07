@@ -726,7 +726,7 @@ await snapshot({ page: state.page, locator: state.page.locator('form') })
 await snapshot({ locator: state.page.locator('form') })
 ```
 
-- `search` - string/regex to filter results (returns first 10 matching lines)
+- `search` - string (case-insensitive) or regex to filter results (returns first 10 matching lines, with the total match count)
 - `showDiffSinceLastCall` - returns diff since last snapshot (default: `true`, but `false` when `search` is provided). Pass `false` to get full snapshot.
 
 Snapshots return full content on first call, then diffs on subsequent calls. Diff is only returned when shorter than full content. If nothing changed, returns "No changes since last snapshot" after the URL line. Use `showDiffSinceLastCall: false` to always get full content. When `search` is provided, diffing is disabled by default so the search filters the full content — pass `showDiffSinceLastCall: true` explicitly to combine both. This diffing behavior also applies to `getCleanHTML` and `getPageMarkdown`.

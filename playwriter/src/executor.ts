@@ -546,6 +546,53 @@ export function boundExecuteOutput({
   return truncatedBefore + truncatedAfter
 }
 
+const SNAPSHOT_SEARCH_MAX_MATCHES = 10
+const SNAPSHOT_SEARCH_CONTEXT_LINES = 5
+
+/** Matching snapshot lines with context. Strings match case-insensitively. */
+export function searchSnapshot({ snapshot, search }: { snapshot: string; search: string | RegExp }): string {
+  const lines = snapshot.split('\n')
+  const needle = typeof search === 'string' ? search.toLowerCase() : ''
+  const isMatch = (line: string) => {
+    if (typeof search === 'string') {
+      return line.toLowerCase().includes(needle)
+    }
+    // A /g or /y regex keeps lastIndex between test() calls and skips matches
+    search.lastIndex = 0
+    return search.test(line)
+  }
+  const matchIndices = lines.flatMap((line, i) => (isMatch(line) ? [i] : []))
+  if (matchIndices.length === 0) {
+    return 'No matches found'
+  }
+
+  const shown = matchIndices.slice(0, SNAPSHOT_SEARCH_MAX_MATCHES)
+  const includedLines = new Set<number>()
+  for (const idx of shown) {
+    const start = Math.max(0, idx - SNAPSHOT_SEARCH_CONTEXT_LINES)
+    const end = Math.min(lines.length - 1, idx + SNAPSHOT_SEARCH_CONTEXT_LINES)
+    for (let i = start; i <= end; i++) {
+      includedLines.add(i)
+    }
+  }
+
+  const total = matchIndices.length
+  const header =
+    total > shown.length
+      ? `${total} matches (showing ${shown.length}). Use a more specific search to see the rest.`
+      : `${total} ${total === 1 ? 'match' : 'matches'}`
+  const result: string[] = [header]
+  const sortedIndices = [...includedLines].sort((a, b) => a - b)
+  for (let i = 0; i < sortedIndices.length; i++) {
+    const lineIdx = sortedIndices[i]
+    if (i > 0 && sortedIndices[i - 1] !== lineIdx - 1) {
+      result.push('---')
+    }
+    result.push(lines[lineIdx])
+  }
+  return result.join('\n')
+}
+
 export class PlaywrightExecutor {
   private isConnected = false
   private browser: Browser | null = null
@@ -1529,41 +1576,7 @@ export class PlaywrightExecutor {
           )
         }
 
-        const lines = snapshotStr.split('\n')
-        const matchIndices: number[] = []
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          const isMatch = isRegExp(search) ? search.test(line) : line.includes(search)
-          if (isMatch) {
-            matchIndices.push(i)
-            if (matchIndices.length >= 10) break
-          }
-        }
-
-        if (matchIndices.length === 0) {
-          return withPageUrl('No matches found')
-        }
-
-        const CONTEXT_LINES = 5
-        const includedLines = new Set<number>()
-        for (const idx of matchIndices) {
-          const start = Math.max(0, idx - CONTEXT_LINES)
-          const end = Math.min(lines.length - 1, idx + CONTEXT_LINES)
-          for (let i = start; i <= end; i++) {
-            includedLines.add(i)
-          }
-        }
-
-        const sortedIndices = [...includedLines].sort((a, b) => a - b)
-        const result: string[] = []
-        for (let i = 0; i < sortedIndices.length; i++) {
-          const lineIdx = sortedIndices[i]
-          if (i > 0 && sortedIndices[i - 1] !== lineIdx - 1) {
-            result.push('---')
-          }
-          result.push(lines[lineIdx])
-        }
-        return withPageUrl(result.join('\n'))
+        return withPageUrl(searchSnapshot({ snapshot: snapshotStr, search }))
       }
 
       const refToLocator = (options: { ref: string; page?: Page }): string | null => {
