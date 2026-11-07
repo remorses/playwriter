@@ -383,18 +383,42 @@ function getAxRole(node: Protocol.Accessibility.AXNode): string {
   return role.toLowerCase()
 }
 
+// Chrome reports an implicit level for every listitem, so only show it where it means something
+const LEVEL_ROLES = new Set(['heading', 'treeitem'])
+
+/** Element state in Playwright aria snapshot syntax, e.g. `[checked] [level=2]`. */
+export function getAxState(node: Protocol.Accessibility.AXNode): string | undefined {
+  const props = new Map((node.properties ?? []).map((p) => [p.name, getAxValueString(p.value)]))
+  const parts: string[] = []
+  const checked = props.get('checked')
+  if (checked === 'true') parts.push('[checked]')
+  if (checked === 'mixed') parts.push('[checked=mixed]')
+  if (props.get('disabled') === 'true') parts.push('[disabled]')
+  if (props.get('expanded') === 'true') parts.push('[expanded]')
+  const level = props.get('level')
+  if (level && LEVEL_ROLES.has(getAxRole(node))) parts.push(`[level=${level}]`)
+  const pressed = props.get('pressed')
+  if (pressed === 'true') parts.push('[pressed]')
+  if (pressed === 'mixed') parts.push('[pressed=mixed]')
+  if (props.get('selected') === 'true') parts.push('[selected]')
+  return parts.length > 0 ? parts.join(' ') : undefined
+}
+
 export type SnapshotLine = {
   text: string
   baseLocator?: string
   hasChildren?: boolean
   role?: string
   name?: string
+  state?: string
   indent?: number
 }
 
 export type SnapshotNode = {
   role: string
   name: string
+  /** e.g. `[checked] [disabled]`, from getAxState */
+  state?: string
   baseLocator?: string
   ref?: string
   backendNodeId?: Protocol.DOM.BackendNodeId
@@ -406,12 +430,14 @@ export type SnapshotNode = {
 function buildSnapshotLine({
   role,
   name,
+  state,
   baseLocator,
   indent,
   hasChildren,
 }: {
   role: string
   name: string
+  state?: string
   baseLocator?: string
   indent: number
   hasChildren: boolean
@@ -422,7 +448,10 @@ function buildSnapshotLine({
     const escapedName = name.replace(/"/g, '\\"')
     text += ` "${escapedName}"`
   }
-  return { text, baseLocator, hasChildren, role, name, indent }
+  if (state) {
+    text += ` ${state}`
+  }
+  return { text, baseLocator, hasChildren, role, name, state, indent }
 }
 
 function buildTextLine(text: string, indent: number): SnapshotLine {
@@ -440,6 +469,7 @@ export function buildSnapshotLines(nodes: SnapshotNode[], indent = 0): SnapshotL
         : buildSnapshotLine({
             role: node.role,
             name: node.name,
+            state: node.state,
             baseLocator: node.baseLocator,
             indent: nodeIndent,
             hasChildren: node.children.length > 0,
@@ -484,6 +514,7 @@ export function buildRawSnapshotTree(options: {
   return {
     role,
     name,
+    state: getAxState(node),
     backendNodeId: node.backendDOMNodeId,
     ignored: node.ignored,
     children,
@@ -595,6 +626,7 @@ export function filterInteractiveSnapshotTree(options: {
   const nodeEntry: SnapshotNode = {
     role,
     name: nameToUse,
+    state: options.node.state,
     baseLocator,
     ref: ref ?? undefined,
     backendNodeId: options.node.backendNodeId,
@@ -696,6 +728,7 @@ export function filterFullSnapshotTree(options: {
   const nodeEntry: SnapshotNode = {
     role,
     name: nameToUse,
+    state: options.node.state,
     baseLocator,
     ref: ref ?? undefined,
     backendNodeId: options.node.backendNodeId,
@@ -723,6 +756,10 @@ function buildLocatorLineText({ line, locator }: { line: SnapshotLine; locator: 
   }
   if (name && !hasNameInLocator) {
     parts.push(`"${escapedName}"`)
+  }
+  // State goes before the locator so the locator can still be copied as is
+  if (line.state) {
+    parts.push(line.state)
   }
 
   const base = parts.length > 0 ? `${prefix}- ${parts.join(' ')}` : `${prefix}-`

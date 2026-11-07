@@ -135,26 +135,31 @@ describe('aria-snapshot tree filters', () => {
                         "ignored": false,
                         "name": "Docs",
                         "role": "link",
+                        "state": undefined,
                       },
                     ],
                     "ignored": false,
                     "name": "",
                     "role": "listitem",
+                    "state": undefined,
                   },
                 ],
                 "ignored": false,
                 "name": "",
                 "role": "list",
+                "state": undefined,
               },
             ],
             "ignored": false,
             "name": "",
             "role": "navigation",
+            "state": undefined,
           },
         ],
         "ignored": false,
         "name": "",
         "role": "rootwebarea",
+        "state": undefined,
       }
     `)
   })
@@ -285,11 +290,13 @@ describe('aria-snapshot tree filters', () => {
                     "name": "Home",
                     "ref": "link-Home-1",
                     "role": "link",
+                    "state": undefined,
                   },
                 ],
                 "name": "",
                 "ref": undefined,
                 "role": "navigation",
+                "state": undefined,
               },
               {
                 "backendNodeId": undefined,
@@ -304,6 +311,7 @@ describe('aria-snapshot tree filters', () => {
                 "name": "",
                 "ref": undefined,
                 "role": "labeltext",
+                "state": undefined,
               },
               {
                 "backendNodeId": 1,
@@ -312,6 +320,7 @@ describe('aria-snapshot tree filters', () => {
                 "name": "Save",
                 "ref": "button-Save-2",
                 "role": "button",
+                "state": undefined,
               },
               {
                 "backendNodeId": 3,
@@ -321,11 +330,13 @@ describe('aria-snapshot tree filters', () => {
                 "name": "Ignored Action",
                 "ref": "button-Ignored Action-3",
                 "role": "button",
+                "state": undefined,
               },
             ],
             "name": "",
             "ref": undefined,
             "role": "main",
+            "state": undefined,
           },
         ],
       }
@@ -518,11 +529,13 @@ describe('aria-snapshot tree filters', () => {
                 "name": "Card",
                 "ref": undefined,
                 "role": "generic",
+                "state": undefined,
               },
             ],
             "name": "Billing",
             "ref": undefined,
             "role": "section",
+            "state": undefined,
           },
         ],
       }
@@ -602,14 +615,101 @@ describe('aria-snapshot tree filters', () => {
                 "name": "Save",
                 "ref": "e1",
                 "role": "button",
+                "state": undefined,
               },
             ],
             "name": "",
             "ref": undefined,
             "role": "main",
+            "state": undefined,
           },
         ],
       }
+    `)
+  })
+
+  it('renders element state from AX properties', () => {
+    const prop = (name: string, type: Protocol.Accessibility.AXValueType, value: unknown) => {
+      return { name, value: { type, value } } as Protocol.Accessibility.AXProperty
+    }
+    const axNodes: Protocol.Accessibility.AXNode[] = [
+      { nodeId: '1', ignored: false, role: roleValue('main'), childIds: ['2', '3', '4', '5', '6', '7'] },
+      {
+        nodeId: '2',
+        ignored: false,
+        role: roleValue('heading'),
+        name: nameValue('Settings'),
+        properties: [prop('level', 'integer', 2)],
+      },
+      {
+        nodeId: '3',
+        ignored: false,
+        role: roleValue('checkbox'),
+        name: nameValue('Alerts'),
+        backendDOMNodeId: 3 as Protocol.DOM.BackendNodeId,
+        properties: [prop('checked', 'tristate', 'true'), prop('disabled', 'boolean', true)],
+      },
+      {
+        nodeId: '4',
+        ignored: false,
+        role: roleValue('checkbox'),
+        name: nameValue('All'),
+        backendDOMNodeId: 4 as Protocol.DOM.BackendNodeId,
+        properties: [prop('checked', 'tristate', 'mixed')],
+      },
+      {
+        nodeId: '5',
+        ignored: false,
+        role: roleValue('button'),
+        name: nameValue('Menu'),
+        backendDOMNodeId: 5 as Protocol.DOM.BackendNodeId,
+        properties: [prop('expanded', 'booleanOrUndefined', true)],
+      },
+      {
+        nodeId: '6',
+        ignored: false,
+        role: roleValue('tab'),
+        name: nameValue('Profile'),
+        backendDOMNodeId: 6 as Protocol.DOM.BackendNodeId,
+        properties: [prop('selected', 'booleanOrUndefined', true)],
+      },
+      {
+        nodeId: '7',
+        ignored: false,
+        role: roleValue('listitem'),
+        name: nameValue('Collapsed'),
+        properties: [prop('level', 'integer', 1), prop('expanded', 'booleanOrUndefined', false)],
+      },
+    ]
+    const axById = new Map(axNodes.map((node) => [node.nodeId, node]))
+    const rawTree = buildRawSnapshotTree({ nodeId: '1', axById, isNodeInScope: () => true })!
+    const domByBackendId = new Map([
+      [
+        3 as Protocol.DOM.BackendNodeId,
+        {
+          nodeId: 30 as Protocol.DOM.NodeId,
+          backendNodeId: 3 as Protocol.DOM.BackendNodeId,
+          nodeName: 'INPUT',
+          attributes: new Map([['id', 'alerts']]),
+        },
+      ],
+    ])
+    let refCounter = 0
+    const filtered = filterFullSnapshotTree({
+      node: rawTree,
+      ancestorNames: [],
+      domByBackendId,
+      createRefForNode: () => `e${++refCounter}`,
+    })
+    const result = finalizeSnapshotOutput(buildSnapshotLines(filtered.nodes), filtered.nodes, new Map())
+    expect(result.snapshot).toMatchInlineSnapshot(`
+      "- main:
+        - heading "Settings" [level=2]
+        - checkbox "Alerts" [checked] [disabled] [id="alerts"]
+        - [checked=mixed] role=checkbox[name="All"i]
+        - [expanded] role=button[name="Menu"i]
+        - [selected] role=tab[name="Profile"i]
+        - listitem "Collapsed""
     `)
   })
 })
