@@ -1497,6 +1497,8 @@ export async function showAriaRefLabels({
 }): Promise<{
   snapshot: string
   labelCount: number
+  /** Short ref (e.g. `e3`) to locator string, for the refs in this snapshot */
+  refToLocator: Map<string, string>
 }> {
   const startTime = Date.now()
   const log = logger?.info ?? logger?.error ?? console.error
@@ -1511,12 +1513,19 @@ export async function showAriaRefLabels({
 
   try {
     const snapshotStart = Date.now()
-    const { snapshot, refs } = await getAriaSnapshot({ page, locator, interactiveOnly, cdp })
+    const { snapshot, refs, getSelectorForRef } = await getAriaSnapshot({ page, locator, interactiveOnly, cdp })
     const shortRefMap = new Map(
       refs.map((entry) => {
         return [entry.ref, entry.shortRef]
       }),
     )
+    const refToLocator = new Map<string, string>()
+    for (const entry of refs) {
+      const selector = getSelectorForRef(entry.ref)
+      if (selector) {
+        refToLocator.set(entry.shortRef, selector)
+      }
+    }
     const interactiveRefs = refs.filter((ref) => Boolean(ref.backendNodeId) && INTERACTIVE_ROLES.has(ref.role))
     log(
       `[showAriaRefLabels] getAriaSnapshot: ${Date.now() - snapshotStart}ms (${refs.length} refs, ${interactiveRefs.length} interactive)`,
@@ -1563,7 +1572,7 @@ export async function showAriaRefLabels({
     log(`[showAriaRefLabels] renderA11yLabels: ${Date.now() - renderStart}ms (${labelCount} labels)`)
     log(`[showAriaRefLabels] total: ${Date.now() - startTime}ms`)
 
-    return { snapshot, labelCount }
+    return { snapshot, labelCount, refToLocator }
   } finally {
     await cdp.detach()
   }
@@ -1620,10 +1629,10 @@ export async function screenshotWithAccessibilityLabels({
   interactiveOnly?: boolean
   collector: ScreenshotResult[]
   logger?: { info?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
-}): Promise<void> {
+}): Promise<{ refToLocator: Map<string, string> }> {
   const log = logger?.info ?? logger?.error
   const showLabelsStart = Date.now()
-  const { snapshot, labelCount } = await showAriaRefLabels({ page, locator, interactiveOnly, logger })
+  const { snapshot, labelCount, refToLocator } = await showAriaRefLabels({ page, locator, interactiveOnly, logger })
   if (log) {
     log(`showAriaRefLabels: ${Date.now() - showLabelsStart}ms`)
   }
@@ -1699,6 +1708,7 @@ export async function screenshotWithAccessibilityLabels({
     snapshot,
     labelCount,
   })
+  return { refToLocator }
 }
 
 // Re-export for backward compatibility

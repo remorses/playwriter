@@ -1682,9 +1682,9 @@ export class PlaywrightExecutor {
         return result
       }
 
-      const screenshotWithAccessibilityLabelsFn = async (options: { page: Page; interactiveOnly?: boolean }) => {
-        resolveSandboxPage({ helper: 'screenshotWithAccessibilityLabels', page: options?.page })
-        return screenshotWithAccessibilityLabels({
+      const screenshotWithAccessibilityLabelsFn = async (options: { page: Page; interactiveOnly?: boolean }): Promise<void> => {
+        const targetPage = resolveSandboxPage({ helper: 'screenshotWithAccessibilityLabels', page: options?.page })
+        const { refToLocator } = await screenshotWithAccessibilityLabels({
           ...options,
           collector: screenshotCollector,
           logger: {
@@ -1696,6 +1696,8 @@ export class PlaywrightExecutor {
             },
           },
         })
+        // Labels show these refs, so refToLocator must resolve them, not an older snapshot's
+        this.lastRefToLocator.set(targetPage, refToLocator)
       }
 
       const self = this
