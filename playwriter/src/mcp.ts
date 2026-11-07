@@ -16,7 +16,7 @@ Buffer.prototype[util.inspect.custom] = function () {
 import dedent from 'string-dedent'
 import { LOG_FILE_PATH, VERSION, parseRelayHost } from './utils.js'
 import { ensureRelayServer, RELAY_PORT } from './relay-client.js'
-import { PlaywrightExecutor, CodeExecutionTimeoutError } from './executor.js'
+import { PlaywrightExecutor, CodeExecutionTimeoutError, boundExecuteOutput } from './executor.js'
 import { installProcessGuard } from './process-guard.js'
 import { discoverChromeInstances, resolveDirectInput, appendSessionToWsUrl } from './chrome-discovery.js'
 import crypto from 'node:crypto'
@@ -275,17 +275,14 @@ server.tool(
       const exec = await getOrCreateExecutor()
       const result = await exec.execute(code, { timeout })
 
-      // Transform executor result to MCP format
-      // Append screenshot metadata to text for MCP (image is included inline as content)
-      const MAX_TEXT = 10000
-      let text = result.text
-      for (const s of result.screenshots) {
-        text += `\nScreenshot saved to: ${s.path} (image included below, ${s.labelCount} labels)\n`
-        text += `Accessibility snapshot:\n${s.snapshot}\n`
-      }
-      if (text.length > MAX_TEXT) {
-        text = text.slice(0, MAX_TEXT) + '\n\n[Truncated]'
-      }
+      // result.text is already bounded by the executor. Bound only the appended
+      // screenshot snapshots here (images are included inline as content).
+      const screenshotText = result.screenshots
+        .map((s) => {
+          return `\nScreenshot saved to: ${s.path} (image included below, ${s.labelCount} labels)\nAccessibility snapshot:\n${s.snapshot}\n`
+        })
+        .join('')
+      const text = result.text + boundExecuteOutput({ before: '', after: screenshotText })
 
       const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
         { type: 'text', text },

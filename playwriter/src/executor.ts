@@ -457,6 +457,95 @@ export function isPlaywrightChannelOwner(value: any): boolean {
   )
 }
 
+export const MAX_EXECUTE_OUTPUT_LENGTH = 10_000
+// Warnings + logs get at least this share when the return value is also large
+const LOGS_MIN_SHARE = 0.6
+
+const INSPECT_OPTIONS: util.InspectOptions = {
+  depth: 4,
+  colors: false,
+  maxArrayLength: 100,
+  maxStringLength: 1000,
+  breakLength: 80,
+}
+
+export function formatValue(value: unknown): string {
+  return typeof value === 'string' ? value : util.inspect(value, INSPECT_OPTIONS)
+}
+
+/** Format captured console calls, folding identical consecutive lines into `(xN)`. */
+export function formatConsoleLogs({
+  logs,
+  title = 'Console output',
+}: {
+  logs: Array<{ method: string; args: unknown[] }>
+  title?: string
+}): string {
+  if (logs.length === 0) {
+    return ''
+  }
+  const folded: Array<{ line: string; count: number }> = []
+  for (const { method, args } of logs) {
+    const line = `[${method}] ${args.map(formatValue).join(' ')}`
+    const last = folded.at(-1)
+    if (last?.line === line) {
+      last.count++
+    } else {
+      folded.push({ line, count: 1 })
+    }
+  }
+  const lines = folded.map(({ line, count }) => (count > 1 ? `${line} (x${count})` : line))
+  return `${title}:\n${lines.join('\n')}\n\n`
+}
+
+/**
+ * Join execute output and truncate it once. `before` (warnings, logs) keeps its head
+ * and tail; `after` (return value or error) is always appended and only cut at the end.
+ */
+export function boundExecuteOutput({
+  before,
+  after,
+  maxLength = MAX_EXECUTE_OUTPUT_LENGTH,
+}: {
+  before: string
+  after: string
+  maxLength?: number
+}): string {
+  if (before.length + after.length <= maxLength) {
+    return before + after
+  }
+  const beforeBudget = Math.min(before.length, Math.max(Math.floor(maxLength * LOGS_MIN_SHARE), maxLength - after.length))
+  const afterBudget = maxLength - beforeBudget
+  const truncatedBefore = (() => {
+    if (before.length <= beforeBudget) {
+      return before
+    }
+    // Upper bound of the marker length, so head + marker + tail fits the budget
+    const keep = Math.max(0, beforeBudget - `\n... [${before.length} characters of logs omitted] ...\n`.length)
+    // Cut on line boundaries unless that drops more than half of a side
+    const half = Math.floor(keep / 2)
+    const headNewline = before.lastIndexOf('\n', half - 1)
+    const headEnd = headNewline >= half / 2 ? headNewline + 1 : half
+    const tailMin = before.length - (keep - headEnd)
+    const tailNewline = before.indexOf('\n', tailMin - 1)
+    const tailStart =
+      tailNewline !== -1 && tailNewline + 1 - tailMin <= (keep - headEnd) / 2 ? tailNewline + 1 : tailMin
+    const head = before.slice(0, headEnd)
+    const separator = head.endsWith('\n') || head === '' ? '' : '\n'
+    return `${head}${separator}... [${tailStart - headEnd} characters of logs omitted] ...\n${before.slice(tailStart)}`
+  })()
+  const truncatedAfter = (() => {
+    if (after.length <= afterBudget) {
+      return after
+    }
+    return (
+      after.slice(0, afterBudget) +
+      `\n[Truncated to ${afterBudget} of ${after.length} characters. Use snapshot({ search }), or write large data to a file and return a summary]`
+    )
+  })()
+  return truncatedBefore + truncatedAfter
+}
+
 export class PlaywrightExecutor {
   private isConnected = false
   private browser: Browser | null = null
@@ -1307,29 +1396,6 @@ export class PlaywrightExecutor {
     const consoleLogs: Array<{ method: string; args: any[] }> = []
     const outputScope = this.beginOutputScope()
 
-    const formatConsoleLogs = (logs: Array<{ method: string; args: any[] }>, prefix = 'Console output') => {
-      if (logs.length === 0) {
-        return ''
-      }
-      let text = `${prefix}:\n`
-      logs.forEach(({ method, args }) => {
-        const formattedArgs = args
-          .map((arg) => {
-            if (typeof arg === 'string') return arg
-            return util.inspect(arg, {
-              depth: 4,
-              colors: false,
-              maxArrayLength: 100,
-              maxStringLength: 1000,
-              breakLength: 80,
-            })
-          })
-          .join(' ')
-        text += `[${method}] ${formattedArgs}\n`
-      })
-      return text + '\n'
-    }
-
     const abortController = new AbortController()
 
     try {
@@ -2012,8 +2078,7 @@ export class PlaywrightExecutor {
         }
       })()
 
-      let responseText = formatConsoleLogs(consoleLogs)
-
+      let returnText = ''
       // Only show return value if user explicitly used return
       if (hasExplicitReturn) {
         const resolvedResult = isPromise(result) ? await result : result
@@ -2023,35 +2088,18 @@ export class PlaywrightExecutor {
         // return specific fields (`return response.url()`) to see values.
         // See issue #82.
         if (resolvedResult !== undefined && !isPlaywrightChannelOwner(resolvedResult)) {
-          const formatted =
-            typeof resolvedResult === 'string'
-              ? resolvedResult
-              : util.inspect(resolvedResult, {
-                  depth: 4,
-                  colors: false,
-                  maxArrayLength: 100,
-                  maxStringLength: 1000,
-                  breakLength: 80,
-                })
+          const formatted = formatValue(resolvedResult)
           if (formatted.trim()) {
-            responseText += `[return value] ${formatted}\n`
+            returnText = `[return value] ${formatted}\n`
           }
         }
       }
 
-      responseText = this.flushOutputForScope(outputScope) + responseText
-
-      if (!responseText.trim()) {
-        responseText = 'Code executed successfully (no output)'
-      }
-
-      const MAX_LENGTH = 10000
-      let finalText = responseText.trim()
-      if (finalText.length > MAX_LENGTH) {
-        finalText =
-          finalText.slice(0, MAX_LENGTH) +
-          `\n\n[Truncated to ${MAX_LENGTH} characters. Use search to find specific content]`
-      }
+      const responseText = boundExecuteOutput({
+        before: this.flushOutputForScope(outputScope) + formatConsoleLogs({ logs: consoleLogs }),
+        after: returnText,
+      })
+      const finalText = responseText.trim() || 'Code executed successfully (no output)'
 
       const images = [
         ...screenshotCollector.map((s) => ({ data: s.base64, mimeType: s.mimeType })),
@@ -2078,7 +2126,7 @@ export class PlaywrightExecutor {
 
       this.logger.error('Error in execute:', errorStack)
 
-      const logsText = formatConsoleLogs(consoleLogs, 'Console output (before error)')
+      const logsText = formatConsoleLogs({ logs: consoleLogs, title: 'Console output (before error)' })
       const outputText = this.flushOutputForScope(outputScope)
 
       // Cloud sessions: disconnection errors mean the VM expired or was destroyed.
@@ -2095,7 +2143,10 @@ export class PlaywrightExecutor {
       // timeout stacks are internal noise (Promise.race / setTimeout); only show the message
       const errorText = isTimeoutError ? error.message : errorStack
       return {
-        text: `${outputText}${logsText}\nError executing code: ${errorText}${resetHint}`,
+        text: boundExecuteOutput({
+          before: outputText + logsText,
+          after: `\nError executing code: ${errorText}${resetHint}`,
+        }),
         images: [],
         screenshots: [],
         isError: true,
