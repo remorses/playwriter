@@ -84,6 +84,23 @@ function writeSessionCounter({
     logger?.error(`Could not write session counter ${filePath}:`, error)
   }
 }
+import { PLAYWRITER_WORLD_NAME } from './cdp-session.js'
+
+const SCREENSHOT_CSS = [
+  '[data-playwriter-toolbar], [data-playwriter-overlay], #__playwriter_ghost_cursor__ { display: none !important; }',
+  '::-webkit-scrollbar { display: none !important; }',
+  '* { scrollbar-width: none !important; caret-color: transparent !important; }',
+].join('\n')
+// Run in the isolated world, where the sheet global is private. The adopted sheet leaves no node or attribute.
+const HIDE_UI_FOR_SCREENSHOT = `(() => {
+  const sheet = globalThis.__playwriterScreenshotSheet ??= new CSSStyleSheet()
+  sheet.replaceSync(${JSON.stringify(SCREENSHOT_CSS)})
+  if (!document.adoptedStyleSheets.includes(sheet)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+})()`
+const SHOW_UI_AFTER_SCREENSHOT = `(() => {
+  const sheet = globalThis.__playwriterScreenshotSheet
+  if (sheet) document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet)
+})()`
 
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
@@ -849,46 +866,33 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       case 'Page.captureScreenshot': {
-        // Hide playwriter UI, scrollbars, caret during screenshots (3 blocking round trips)
-        const screenshotSessionId = sessionId
-        const addClassExpr = `(() => {
-          const id = '__playwriter_screenshot_style__';
-          if (!document.getElementById(id)) {
-            const s = document.createElement('style');
-            s.id = id;
-            s.textContent = [
-              'html.playwriter-screenshot [data-playwriter-toolbar],',
-              'html.playwriter-screenshot [data-playwriter-overlay],',
-              'html.playwriter-screenshot #__playwriter_ghost_cursor__ { display: none !important; }',
-              'html.playwriter-screenshot { scrollbar-width: none !important; }',
-              'html.playwriter-screenshot::-webkit-scrollbar { display: none !important; }',
-              'html.playwriter-screenshot *::-webkit-scrollbar { display: none !important; }',
-              'html.playwriter-screenshot * { scrollbar-width: none !important; caret-color: transparent !important; }',
-            ].join('\\n');
-            (document.head || document.documentElement).appendChild(s);
-          }
-          document.documentElement.classList.add('playwriter-screenshot');
-        })()`
-
-        const evalCmd = (expression: string) => ({
-          extensionId: resolvedExtensionId,
-          method: 'forwardCDPCommand' as const,
-          params: { sessionId: screenshotSessionId, method: 'Runtime.evaluate', params: { expression }, source },
-        })
-
-        try {
-          // 1. add class (must complete before capture)
-          await sendToExtension(evalCmd(addClassExpr))
-          // 2. capture screenshot
-          return await sendToExtension({
+        // Hide playwriter UI, scrollbars and caret during the capture (4 blocking round trips). An adopted
+        // stylesheet set from a playwriter isolated world: page scripts see no calls, nodes or attribute changes.
+        const sendCommand = (cdpMethod: string, cdpParams?: object) => {
+          return sendToExtension({
             extensionId: resolvedExtensionId,
             method: 'forwardCDPCommand',
-            params: { sessionId: screenshotSessionId, method, params, source },
+            params: { sessionId, method: cdpMethod, params: cdpParams, source },
           })
+        }
+        const frameId = sessionId ? connectedTargets.get(sessionId)?.targetInfo.targetId : undefined
+        const world = frameId
+          ? ((await sendCommand('Page.createIsolatedWorld', { frameId, worldName: PLAYWRITER_WORLD_NAME }).catch(
+              () => undefined,
+            )) as Protocol.Page.CreateIsolatedWorldResponse | undefined)
+          : undefined
+        const evaluateInWorld = async (expression: string) => {
+          if (world?.executionContextId === undefined) {
+            return
+          }
+          await sendCommand('Runtime.evaluate', { expression, contextId: world.executionContextId })
+        }
+        try {
+          await evaluateInWorld(HIDE_UI_FOR_SCREENSHOT).catch(() => {})
+          return await sendCommand(method, params)
         } finally {
-          // 3. remove class even if adding it or capturing failed, so the page UI is not left hidden.
-          // Best effort: a cleanup error must not replace the capture result or error.
-          await sendToExtension(evalCmd(`document.documentElement.classList.remove('playwriter-screenshot')`)).catch(() => {})
+          // Also after a failed capture, so the page UI is not left hidden. A cleanup error must not replace the result.
+          await evaluateInWorld(SHOW_UI_AFTER_SCREENSHOT).catch(() => {})
         }
       }
 
@@ -983,12 +987,19 @@ export async function startPlayWriterCDPRelayServer({
       typeof params === 'object' &&
       'awaitPromise' in params &&
       params.awaitPromise === true
-    return await sendToExtension({
+    const result = await sendToExtension({
       extensionId: resolvedExtensionId,
       method: 'forwardCDPCommand',
       params: { sessionId, method, params, source },
       timeout: awaitsPromise ? timeouts.awaitPromise : timeouts.command,
     })
+    if (method === 'DOM.getContentQuads' && sessionId && resolvedExtensionId) {
+      const { quads } = result as Partial<Protocol.DOM.GetContentQuadsResponse>
+      if (quads) {
+        humanInput.rememberQuads({ extensionId: resolvedExtensionId, sessionId, quads })
+      }
+    }
+    return result
   }
 
   // Runtime.enable is per tab, not per CDP client. The extension answers each one with

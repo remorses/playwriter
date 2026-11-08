@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import type { Page, CDPSession as PlaywrightCDPSession } from '@xmorse/playwright-core'
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js'
 
@@ -71,7 +72,53 @@ export class PlaywrightCDPSessionAdapter implements ICDPSession {
  * Works through the relay because it doesn't call Target.attachToTarget.
  */
 export async function getCDPSessionForPage({ page }: { page: Page }): Promise<PlaywrightCDPSessionAdapter> {
-  const context = page.context()
-  const playwrightSession = await context.getExistingCDPSession(page)
-  return new PlaywrightCDPSessionAdapter(playwrightSession)
+  // Cached: every getExistingCDPSession call chains one more event forwarder onto the page session for good.
+  let session = cdpSessions.get(page)
+  if (!session) {
+    session = page
+      .context()
+      .getExistingCDPSession(page)
+      .then((playwrightSession) => new PlaywrightCDPSessionAdapter(playwrightSession))
+    cdpSessions.set(page, session)
+    session.catch(() => cdpSessions.delete(page))
+  }
+  return await session
+}
+
+const cdpSessions = new WeakMap<Page, Promise<PlaywrightCDPSessionAdapter>>()
+
+/** Isolated world for playwriter's own page scripts. Pages cannot see its globals or calls. */
+export const PLAYWRITER_WORLD_NAME = `playwriter_${crypto.randomUUID().replaceAll('-', '')}`
+
+/**
+ * Evaluates an expression in playwriter's isolated world of the page's main frame and returns the value.
+ * Page.createIsolatedWorld returns the same world for the same name until the document changes, so state
+ * (like the ghost cursor) lives until the next navigation. Use it instead of page.evaluate for scripts that
+ * must stay invisible to anti-bot code: the main world lets pages hook DOM APIs and read foreign call stacks.
+ */
+export async function evaluateInPlaywriterWorld<T>({
+  page,
+  expression,
+  awaitPromise = false,
+}: {
+  page: Page
+  expression: string
+  awaitPromise?: boolean
+}): Promise<T> {
+  const cdp = await getCDPSessionForPage({ page })
+  const { executionContextId } = await cdp.send('Page.createIsolatedWorld', {
+    frameId: page.mainFrame().frameId(),
+    worldName: PLAYWRITER_WORLD_NAME,
+  })
+  const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
+    expression,
+    contextId: executionContextId,
+    returnByValue: true,
+    awaitPromise,
+    silent: true,
+  })
+  if (exceptionDetails) {
+    throw new Error(exceptionDetails.exception?.description || exceptionDetails.text)
+  }
+  return result.value as T
 }

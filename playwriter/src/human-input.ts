@@ -7,7 +7,8 @@
  * For each Input.dispatchMouseEvent that moves the pointer, the relay first sends a curved, eased path from the
  * last pointer position: cubic Bezier with a sideways bow, minimum-jerk speed, ~60-120 Hz samples, tremor that
  * fades near the target, sometimes an overshoot and correction, and a duration that grows with distance
- * (Fitts' law). Clicks settle 45-130 ms before the press and hold 60-140 ms. Key
+ * (Fitts' law). Element clicks land a few px off the exact center Playwright aims at, inside the element.
+ * Clicks settle 45-130 ms before the press and hold 60-140 ms. Key
  * presses are spaced 30-110 ms apart. Wheel events glide in ~60 Hz bursts, and scrolling an element into view
  * happens in wheel flicks instead of a one-frame jump.
  *
@@ -30,6 +31,10 @@ export type PacedInput =
 
 type TabState = {
   pointer?: Point
+  /** Quads of the last DOM.getContentQuads answer: the element Playwright is about to click. */
+  quads?: number[][]
+  /** Offset for the point Playwright aims at, kept for the move, press and release on it. */
+  aim?: Point & { dx: number; dy: number }
   arrivedAt: number
   pressedAt?: number
   lastKeyAt: number
@@ -165,6 +170,34 @@ export function clampPoint(point: Point, bounds?: { width: number; height: numbe
   return { x: clamp(point.x, bounds?.width), y: clamp(point.y, bounds?.height) }
 }
 
+const MAX_AIM_OFFSET_PX = 10
+
+/**
+ * Offset from the exact center Playwright aims at, so element clicks do not all hit the same pixel. Only when
+ * `point` is the middle of a quad from the last DOM.getContentQuads (the element Playwright just measured),
+ * and only inside its inner 40%, along the quad's own edges so rotated elements work too. Other points
+ * (mouse.click(x, y), a click `position`, an element cut by the viewport edge, which Playwright clips first)
+ * get no offset.
+ */
+export function aimOffset({ point, quads }: { point: Point; quads?: number[][] }): Point {
+  for (const quad of quads ?? []) {
+    const middle = { x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4, y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4 }
+    if (Math.hypot(middle.x - point.x, middle.y - point.y) > 0.5) continue
+    // Half edges from the middle: middle + u * across + v * down stays inside for |u|, |v| <= 1
+    const across = { x: (quad[2] - quad[0]) / 2, y: (quad[3] - quad[1]) / 2 }
+    const down = { x: (quad[6] - quad[0]) / 2, y: (quad[7] - quad[1]) / 2 }
+    // Fraction of the half edge to reach, at most 40% and 10 px. noise(s) stays within ±1.5 s.
+    const fraction = (edge: Point) => {
+      const length = Math.hypot(edge.x, edge.y)
+      return length > 0 ? noise(Math.min(0.4, MAX_AIM_OFFSET_PX / length) / 1.5) : 0
+    }
+    const u = fraction(across)
+    const v = fraction(down)
+    return { x: u * across.x + v * down.x, y: u * across.y + v * down.y }
+  }
+  return { x: 0, y: 0 }
+}
+
 /** Per-frame wheel deltas for one scroll gesture: a quick start that eases out, at ~60 Hz. */
 function glide(dx: number, dy: number): Point[] {
   const distance = Math.hypot(dx, dy)
@@ -267,9 +300,20 @@ export function createHumanInput({ log }: { log?: (message: string) => void } = 
       }
       return
     }
-    // Lands on the exact requested point: the relay cannot see element bounds, and canvas apps, drag handles and
-    // mouse.click(x, y) need exact coordinates. browse adds a few px of offset here.
-    const target = { x: params.x, y: params.y }
+    // People land a few px off center, the same way for the move, press and release on one target. browse
+    // offsets every point blindly; here only element centers move, so mouse.click(x, y) and canvas apps stay exact.
+    // Every Playwright pointer action starts with a move: it consumes the measured quads, so a later raw click at
+    // the same point gets no offset. Press and release reuse the move's aim when they stay on its point.
+    if (type === 'mouseMoved' || !tab.aim || tab.aim.x !== params.x || tab.aim.y !== params.y) {
+      const offset = type === 'mouseMoved' ? aimOffset({ point: params, quads: tab.quads }) : { x: 0, y: 0 }
+      tab.aim = { x: params.x, y: params.y, dx: offset.x, dy: offset.y }
+      tab.quads = undefined
+    }
+    const target = tab.aim.dx || tab.aim.dy
+      ? { x: round1(params.x + tab.aim.dx), y: round1(params.y + tab.aim.dy) }
+      : { x: params.x, y: params.y }
+    params.x = target.x
+    params.y = target.y
     const pressOrRelease = type === 'mousePressed' || type === 'mouseReleased'
     const awayFromTarget = tab.pointer && Math.hypot(tab.pointer.x - target.x, tab.pointer.y - target.y) >= 2
     if (type === 'mouseMoved' || (pressOrRelease && awayFromTarget)) {
@@ -389,6 +433,14 @@ export function createHumanInput({ log }: { log?: (message: string) => void } = 
       })
       tab.queue = run.catch(() => undefined)
       return run
+    },
+
+    /** Records a DOM.getContentQuads answer: Playwright measures an element right before it clicks it. */
+    rememberQuads({ extensionId, sessionId, quads }: { extensionId: string; sessionId: string; quads: number[][] }) {
+      const tab = tabState({ extensionId, sessionId })
+      tab.quads = quads
+      // A new measurement starts a new action, which gets its own offset.
+      tab.aim = undefined
     },
 
     /** Drops state of one tab session, or of every tab of an extension connection. */

@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest'
-import { isBotProtectedUrl } from './human-input.js'
+import { describe, expect, it, test } from 'vitest'
+import { aimOffset, isBotProtectedUrl } from './human-input.js'
 
 test('auto human input matches bot-protected sites, their subdomains and country sites', () => {
   const urls = [
@@ -46,4 +46,27 @@ test('auto human input matches bot-protected sites, their subdomains and country
       "not a url": false,
     }
   `)
+})
+
+describe('aimOffset', () => {
+  it('stays inside a thin rotated element and skips other points', () => {
+    // 200x4 px element rotated 45 degrees, as DOM.getContentQuads reports it
+    const s = Math.SQRT1_2
+    const corners = [
+      [-100 * s + 2 * s, -100 * s - 2 * s],
+      [100 * s + 2 * s, 100 * s - 2 * s],
+      [100 * s - 2 * s, 100 * s + 2 * s],
+      [-100 * s - 2 * s, -100 * s + 2 * s],
+    ].map(([x, y]) => [x + 300, y + 300])
+    const quad = corners.flat()
+    const along = { x: s, y: s }
+    const across = { x: -s, y: s }
+    for (let i = 0; i < 2000; i++) {
+      const offset = aimOffset({ point: { x: 300, y: 300 }, quads: [quad] })
+      // Distance from the center along each element axis
+      expect(Math.abs(offset.x * along.x + offset.y * along.y)).toBeLessThanOrEqual(10)
+      expect(Math.abs(offset.x * across.x + offset.y * across.y)).toBeLessThanOrEqual(0.8 + 1e-9)
+    }
+    expect(aimOffset({ point: { x: 310, y: 300 }, quads: [quad] })).toEqual({ x: 0, y: 0 })
+  })
 })

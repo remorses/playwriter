@@ -1,12 +1,13 @@
 /**
  * Node-side ghost cursor helpers.
- * Injects the browser bundle and forwards mouse action events to the page overlay.
+ * Injects the browser bundle into playwriter's isolated world and forwards mouse action events to it.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page, MouseActionEvent } from '@xmorse/playwright-core'
+import { evaluateInPlaywriterWorld } from './cdp-session.js'
 
 export interface GhostCursorClientOptions {
   style?: 'minimal' | 'dot' | 'screenstudio'
@@ -17,12 +18,6 @@ export interface GhostCursorClientOptions {
   minDurationMs?: number
   maxDurationMs?: number
   speedPxPerMs?: number
-}
-
-interface GhostCursorBrowserApi {
-  enable: (options?: GhostCursorClientOptions) => void
-  disable: () => void
-  applyMouseAction: (event: MouseActionEvent) => void
 }
 
 let ghostCursorCode: string | null = null
@@ -38,18 +33,28 @@ function getGhostCursorCode(): string {
   return ghostCursorCode
 }
 
-async function ensureGhostCursorInjected(options: { page: Page }): Promise<void> {
-  const { page } = options
-  const hasGhostCursor = await page.evaluate(() => {
-    return Boolean((globalThis as { __playwriterGhostCursor?: unknown }).__playwriterGhostCursor)
-  })
-
-  if (hasGhostCursor) {
+/**
+ * Calls the cursor API in playwriter's isolated world, installing the bundle first when the document is new.
+ * The page cannot see the cursor's global or its DOM calls. With `install` false a missing cursor is left alone.
+ */
+async function callGhostCursor({
+  page,
+  method,
+  payload,
+  install = true,
+}: {
+  page: Page
+  method: 'enable' | 'disable' | 'applyMouseAction'
+  payload?: GhostCursorClientOptions | MouseActionEvent
+  install?: boolean
+}): Promise<void> {
+  const api = 'globalThis.__playwriterGhostCursor'
+  const invoke = `${api}.${method}(${payload === undefined ? '' : JSON.stringify(payload)})`
+  const called = await evaluateInPlaywriterWorld<boolean>({ page, expression: `${api} ? (${invoke}, true) : false` })
+  if (called || !install) {
     return
   }
-
-  const code = getGhostCursorCode()
-  await page.evaluate(code)
+  await evaluateInPlaywriterWorld({ page, expression: `${getGhostCursorCode()}\n;${invoke}` })
 }
 
 export async function enableGhostCursor(options: {
@@ -57,16 +62,7 @@ export async function enableGhostCursor(options: {
   cursorOptions?: GhostCursorClientOptions
 }): Promise<void> {
   try {
-    const { page, cursorOptions } = options
-    await ensureGhostCursorInjected({ page })
-
-    await page.evaluate(
-      ({ optionsFromNode }) => {
-        const api = (globalThis as { __playwriterGhostCursor?: GhostCursorBrowserApi }).__playwriterGhostCursor
-        api?.enable(optionsFromNode)
-      },
-      { optionsFromNode: cursorOptions },
-    )
+    await callGhostCursor({ page: options.page, method: 'enable', payload: options.cursorOptions })
   } catch {
     // Non-fatal — page may be closed or navigating.
   }
@@ -74,11 +70,7 @@ export async function enableGhostCursor(options: {
 
 export async function disableGhostCursor(options: { page: Page }): Promise<void> {
   try {
-    const { page } = options
-    await page.evaluate(() => {
-      const api = (globalThis as { __playwriterGhostCursor?: GhostCursorBrowserApi }).__playwriterGhostCursor
-      api?.disable()
-    })
+    await callGhostCursor({ page: options.page, method: 'disable', install: false })
   } catch {
     // Non-fatal — page may be closed or navigating.
   }
@@ -90,33 +82,7 @@ export async function applyGhostCursorMouseAction(options: {
 }): Promise<void> {
   // Never throw — the cursor is cosmetic and must not break the caller's action.
   try {
-    const { page, event } = options
-
-    const applied = await page.evaluate(
-      ({ serializedEvent }) => {
-        const api = (globalThis as { __playwriterGhostCursor?: GhostCursorBrowserApi }).__playwriterGhostCursor
-        if (!api) {
-          return false
-        }
-
-        api.applyMouseAction(serializedEvent)
-        return true
-      },
-      { serializedEvent: event },
-    )
-
-    if (applied) {
-      return
-    }
-
-    await ensureGhostCursorInjected({ page })
-    await page.evaluate(
-      ({ serializedEvent }) => {
-        const api = (globalThis as { __playwriterGhostCursor?: GhostCursorBrowserApi }).__playwriterGhostCursor
-        api?.applyMouseAction(serializedEvent)
-      },
-      { serializedEvent: event },
-    )
+    await callGhostCursor({ page: options.page, method: 'applyMouseAction', payload: options.event })
   } catch {
     // Swallow — page may be closed, navigating, or debugger detached.
   }

@@ -50,8 +50,6 @@ import {
   getRemoteExtensionMethodRejection,
   namespaceRemoteTabGroupKey,
 } from 'playwriter/src/remote-control'
-// Inlined at build time via vite ?raw. Source: playwriter/src/ghost-cursor-client.ts
-import ghostCursorBundleCode from '../../playwriter/dist/ghost-cursor-client.js?raw'
 // Bippy: React fiber introspection library, used for "Copy React Source Path" context menu.
 // Built by playwriter/scripts/build-client-bundles.ts, exposes globalThis.__bippy
 import bippyBundleCode from '../../playwriter/dist/bippy.js?raw'
@@ -1923,21 +1921,6 @@ async function attachTabDebugger(
       }
     }
 
-    // A reattached tab keeps its document, which already ran these scripts.
-    const runInCurrentDocument = !reusedSessionId
-
-    // Ghost cursor — survives navigations via addScriptToEvaluateOnNewDocument.
-    try {
-      await chrome.debugger.sendCommand(debuggee, 'Page.addScriptToEvaluateOnNewDocument', {
-        source: ghostCursorBundleCode,
-      })
-      if (runInCurrentDocument) {
-        await chrome.debugger.sendCommand(debuggee, 'Runtime.evaluate', { expression: ghostCursorBundleCode })
-      }
-    } catch (err) {
-      logger.debug('Could not inject ghost cursor (restricted page):', (err as Error).message)
-    }
-
     const result = (await chrome.debugger.sendCommand(
       debuggee,
       'Target.getTargetInfo',
@@ -2036,12 +2019,13 @@ function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
     })
     .catch(() => {})
 
+  // The ghost cursor runs in the relay client's isolated world; its element is plain DOM, so remove it here
   void chrome.scripting
     .executeScript({
       target: { tabId },
-      world: 'MAIN',
+      world: 'ISOLATED',
       func: () => {
-        ;(globalThis as any).__playwriterGhostCursor?.disable?.()
+        document.getElementById('__playwriter_ghost_cursor__')?.remove()
       },
     })
     .catch(() => {})

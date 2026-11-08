@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import type { Protocol } from 'devtools-protocol'
 import { Sema } from 'async-sema'
 import type { ICDPSession } from './cdp-session.js'
-import { getCDPSessionForPage } from './cdp-session.js'
+import { evaluateInPlaywriterWorld, getCDPSessionForPage } from './cdp-session.js'
 
 // Import sharp at module level - resolves to null if not available
 const sharpPromise = import('sharp')
@@ -974,6 +974,27 @@ async function resolveFrame({ frame, page }: { frame?: Frame | FrameLocator; pag
 // Main Functions
 // ============================================================================
 
+/** Resolves after the next rendered frame. Runs in the page, so it must be self-contained. */
+function waitForRenderedFrame(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const window = document.defaultView
+    if (!window) {
+      resolve()
+      return
+    }
+    if (document.visibilityState !== 'visible') {
+      document.documentElement.getBoundingClientRect()
+      resolve()
+      return
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        resolve()
+      })
+    })
+  })
+}
+
 /**
  * Get an accessibility snapshot with utilities to look up refs for elements.
  * Uses the browser accessibility tree (CDP) and maps nodes to DOM attributes.
@@ -1040,25 +1061,10 @@ export async function getAriaSnapshot({
     session.send('DOM.enable', undefined, oopifSessionId),
     session.send('Accessibility.enable', undefined, oopifSessionId),
     // Blink updates its AX cache during rendering, after framework navigation changes the DOM.
-    (resolvedFrame || page).evaluate(() => {
-      return new Promise<void>((resolve) => {
-        const window = document.defaultView
-        if (!window) {
-          resolve()
-          return
-        }
-        if (document.visibilityState !== 'visible') {
-          document.documentElement.getBoundingClientRect()
-          resolve()
-          return
-        }
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => {
-            resolve()
-          })
-        })
-      })
-    }),
+    // Isolated world on the main frame, so page scripts do not see the call.
+    resolvedFrame
+      ? resolvedFrame.evaluate(waitForRenderedFrame)
+      : evaluateInPlaywriterWorld({ page, expression: `(${waitForRenderedFrame.toString()})()`, awaitPromise: true }),
   ])
   const scopeAttr = 'data-pw-scope'
   const scopeValue = crypto.randomUUID()

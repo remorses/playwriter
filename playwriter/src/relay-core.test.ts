@@ -1124,7 +1124,7 @@ describe('Relay Core Tests', () => {
           } catch (error) {
             captureError = error.message
           }
-          const stillHidden = await target.evaluate(() => document.documentElement.classList.contains('playwriter-screenshot'))
+          const stillHidden = await target.evaluate(() => getComputedStyle(document.documentElement).scrollbarWidth === 'none')
           return { captureFailed: Boolean(captureError), stillHidden }
         `,
       })
@@ -1800,10 +1800,6 @@ describe('Relay Core Tests', () => {
       [2m      - element is not visible[22m
       [2m    - retrying click action[22m
       [2m    - waiting 20ms[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      [2m    - element is not visible[22m
-      [2m  - retrying click action[22m
-      [2m    - waiting 100ms[22m
       ",
             "type": "text",
           },
@@ -1898,13 +1894,6 @@ describe('Relay Core Tests', () => {
       [2m      - <div id="overlay">Overlay</div> intercepts pointer events[22m
       [2m    - retrying click action[22m
       [2m    - waiting 20ms[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      [2m    - element is visible, enabled and stable[22m
-      [2m    - scrolling into view if needed[22m
-      [2m    - done scrolling[22m
-      [2m    - <div id="overlay">Overlay</div> intercepts pointer events[22m
-      [2m  - retrying click action[22m
-      [2m    - waiting 100ms[22m
       ",
             "type": "text",
           },
@@ -1949,10 +1938,6 @@ describe('Relay Core Tests', () => {
       [2m      - element is not visible[22m
       [2m    - retrying click action[22m
       [2m    - waiting 20ms[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      [2m    - element is not visible[22m
-      [2m  - retrying click action[22m
-      [2m    - waiting 100ms[22m
       ",
             "type": "text",
           },

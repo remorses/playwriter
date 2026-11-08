@@ -18,6 +18,7 @@
 
 import { setTimeout as delay } from 'node:timers/promises'
 import type { Page } from '@xmorse/playwright-core'
+import { evaluateInPlaywriterWorld } from './cdp-session.js'
 
 export type ChallengeVendor =
   | 'cloudflare'
@@ -88,7 +89,7 @@ export const probeSelectors = [
   '.h-captcha',
 ]
 
-/** Runs in the page via page.evaluate, so it must be self-contained. Read-only: it never changes the DOM. */
+/** Runs in the page as a stringified function, so it must be self-contained. Read-only: it never changes the DOM. */
 export const probePageScript = (selectors: string[]) => {
   const body = document.body
   const text = body ? body.innerText ?? '' : ''
@@ -320,7 +321,10 @@ async function probePage({
     timer = setTimeout(onAbort, budget)
     signal?.addEventListener('abort', onAbort, { once: true })
   })
-  const probed = await Promise.race([page.evaluate(probePageScript, probeSelectors), stopped]).finally(() => {
+  // Isolated world, like browse with Patchright: page scripts cannot see the probe's DOM calls.
+  const expression = `(${probePageScript.toString()})(${JSON.stringify(probeSelectors)})`
+  const probe = evaluateInPlaywriterWorld<ReturnType<typeof probePageScript>>({ page, expression })
+  const probed = await Promise.race([probe, stopped]).finally(() => {
     clearTimeout(timer)
     if (onAbort) signal?.removeEventListener('abort', onAbort)
   })
