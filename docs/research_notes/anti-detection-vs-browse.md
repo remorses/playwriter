@@ -21,7 +21,7 @@ for Testing 147 with the extension, through the relay. The actions were `goto`, 
 | Challenge probe world | isolated (Patchright `evaluate`) | main world `page.evaluate`, page sees `querySelector` from a foreign stack | isolated world via `Page.createIsolatedWorld` |
 | Human mouse, wheel, keys | Bezier, min-jerk, Fitts, tremor, overshoot, wheel glide, 30-110 ms keys | same port | same |
 | Off-center clicks | every point +-3 px blind, also `mouse.click(x, y)` | exact center every time | only element centers (matched to the last `DOM.getContentQuads`), inner 40%, max 10 px; raw coordinates stay exact |
-| Human input default | on (status page toggle, env override) | opt-in env | unchanged here, another worker owns enabling |
+| Human input default | on (status page toggle, env override) | opt-in env | per-session mode (`on`, `off`, `auto` on bot-protected sites), from main 75ae4467f |
 | Ghost cursor | off by default; isolated world, closed shadow root, no id | extension injects bundle into main world of every attached tab: `window.__playwriterGhostCursor` global, main-world DOM calls | isolated world, injected on the first agent mouse action; no global. Element `#__playwriter_ghost_cursor__` still in DOM, always on |
 | Screenshot cleanup | nothing injected | main-world `<style id=__playwriter_screenshot_style__>` left in the page, `class` toggled on `<html>` | adopted stylesheet from the isolated world, removed after capture; no node, no attribute |
 | In-page UI | nothing in the DOM until a handoff card (closed shadow root, no id, top layer) | toolbar hosts `[data-playwriter-toolbar]` in every attached tab; fork sets `data-playwriter-agent` on it per action | unchanged (product decision) |
