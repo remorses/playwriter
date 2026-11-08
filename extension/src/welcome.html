@@ -178,6 +178,31 @@
         min-width: 0;
       }
 
+      .pin-check {
+        width: 1.125rem;
+        height: 1.125rem;
+        vertical-align: -0.15em;
+      }
+
+      #pin-step .pin-check,
+      #pin-step .pin-done,
+      #pin-step.done .pin-number,
+      #pin-step.done .pin-todo {
+        display: none;
+      }
+
+      #pin-step.done .pin-check {
+        display: inline;
+      }
+
+      #pin-step.done .pin-done {
+        display: block;
+      }
+
+      #pin-step.done .step-number {
+        color: var(--color-success);
+      }
+
       .copy-btn {
         display: inline-flex;
         align-items: center;
@@ -390,11 +415,17 @@ Then explain to the user Playwriter benefits and value.</p>
         <section>
           <h3>Installation</h3>
 
-          <div class="step">
-            <span class="step-number">1</span>
+          <div class="step" id="pin-step">
+            <span class="step-number">
+              <span class="pin-number">1</span>
+              <svg class="pin-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </span>
             <div class="step-content">
               <strong>Pin the extension</strong>
-              <p>Click the puzzle icon in Chrome's toolbar, then pin Playwriter so it's always visible.</p>
+              <p class="pin-todo">Click the puzzle icon in Chrome's toolbar, then pin Playwriter so it's always visible.</p>
+              <p class="pin-done">Pinned. Playwriter is in your toolbar.</p>
             </div>
           </div>
 
@@ -523,6 +554,12 @@ npx -y @playwriter/install-mcp playwriter@latest</code></pre>
           btn.innerHTML = original
         }, 1500)
       })
+
+      // getUserSettings needs Chrome 91+, onUserSettingsChanged needs Chrome 130+
+      const pinStep = document.getElementById('pin-step')
+      const renderPinned = (settings) => pinStep.classList.toggle('done', settings.isOnToolbar === true)
+      chrome.action?.onUserSettingsChanged?.addListener(renderPinned)
+      chrome.action?.getUserSettings?.().then(renderPinned, () => {})
     </script>
     <script src="prism.min.js"></script>
     <script src="prism-bash.min.js"></script>
