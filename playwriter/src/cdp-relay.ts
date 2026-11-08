@@ -36,7 +36,7 @@ import { VERSION, EXTENSION_IDS } from './utils.js'
 import { createCdpLogger, type CdpLogEntry, type CdpLogger } from './cdp-log.js'
 import { appendSessionToWsUrl } from './chrome-discovery.js'
 import * as relayState from './relay-state.js'
-import { createHumanInput, isHumanInputEnabledByEnv, isPacedInput } from './human-input.js'
+import { createHumanInput, isPacedInput, normalizeHumanInputMode, shouldHumanizeInput } from './human-input.js'
 import { WebSocket as NodeWebSocket } from 'ws'
 import { getRemoteDialRetryMs, parseRemoteControlUrl, REMOTE_DIAL_GIVE_UP_MS, type RemoteHelloMessage } from './remote-control.js'
 import type { CloudAuth } from './cloud-client.js'
@@ -122,7 +122,6 @@ export async function startPlayWriterCDPRelayServer({
   sessionsFile,
   onDrained,
   extensionTimeouts,
-  humanInput: humanInputEnabled = isHumanInputEnabledByEnv(),
 }: {
   port?: number
   host?: string
@@ -135,8 +134,6 @@ export async function startPlayWriterCDPRelayServer({
   onDrained?: () => void
   /** Timeouts for commands forwarded to the extension, in ms. Tests pass short values */
   extensionTimeouts?: Partial<typeof DEFAULT_EXTENSION_TIMEOUTS>
-  /** Human-like mouse paths, clicks, scrolling and typing for Playwright input. Default: PLAYWRITER_HUMAN_INPUT env */
-  humanInput?: boolean
 } = {}): Promise<RelayServer> {
   const timeouts = { ...DEFAULT_EXTENSION_TIMEOUTS, ...extensionTimeouts }
   const humanInput = createHumanInput({ log: (message) => logger?.log(message) })
@@ -912,7 +909,14 @@ export async function startPlayWriterCDPRelayServer({
     }
 
     const input = { method, params }
-    if (humanInputEnabled && sessionId && resolvedExtensionId && isPacedInput(input)) {
+    // Clients without a relay session (MCP, raw connectOverCDP) use 'auto' too
+    const humanInputMode = (client?.sessionId && savedSessions.get(client.sessionId)?.humanInput) || 'auto'
+    if (
+      sessionId &&
+      resolvedExtensionId &&
+      isPacedInput(input) &&
+      shouldHumanizeInput({ mode: humanInputMode, url: connectedTargets.get(sessionId)?.targetInfo.url })
+    ) {
       await humanInput
         .beforeInput({
           extensionId: resolvedExtensionId,
@@ -2752,6 +2756,8 @@ export async function startPlayWriterCDPRelayServer({
       tabGroup?: string
       /** Explicit tab group color for extension or remote-control sessions */
       tabGroupColor?: string
+      /** Human-like input mode for extension or remote-control sessions: auto (default), on, off */
+      humanInput?: string
       /** Cloud API credentials for local-to-cloud execution helpers */
       cloudAuth?: CloudAuth
       /** Cloud session tracking metadata (set by CLI when connecting to a cloud browser) */
@@ -2764,6 +2770,10 @@ export async function startPlayWriterCDPRelayServer({
         /** Block images/video/fonts to save proxy bandwidth */
         blockProxyResources?: boolean
       }
+    }
+    const humanInput = body.humanInput !== undefined ? normalizeHumanInputMode(body.humanInput) : 'auto'
+    if (!humanInput) {
+      return c.json({ error: 'humanInput must be one of: auto, on, off' }, 400)
     }
     const sessionId = allocateSessionId()
     // Resolve cwd with cross-OS awareness: if CLI runs on Windows and relay on
@@ -2887,6 +2897,7 @@ export async function startPlayWriterCDPRelayServer({
         cwd: cwd || null,
         tabGroup,
         tabGroupColor,
+        humanInput,
       }
       saveSession(session)
       const executor = createSavedSessionExecutor({ manager: await getExecutorManager(), session })
@@ -2923,6 +2934,7 @@ export async function startPlayWriterCDPRelayServer({
         warning,
         tabGroup,
         tabGroupColor,
+        humanInput,
       })
     }
 
@@ -2957,6 +2969,7 @@ export async function startPlayWriterCDPRelayServer({
       cwd: cwd || null,
       tabGroup,
       tabGroupColor,
+      humanInput,
     }
     saveSession(session)
     const executor = createSavedSessionExecutor({ manager: await getExecutorManager(), session, cloudAuth: body.cloudAuth })
@@ -2973,6 +2986,7 @@ export async function startPlayWriterCDPRelayServer({
       // Echoed so the CLI can detect relays that don't support tab groups
       tabGroup: executor.getTabGroup(),
       tabGroupColor: executor.getTabGroupColor(),
+      humanInput,
     })
   })
 
@@ -3238,6 +3252,7 @@ export async function startPlayWriterCDPRelayServer({
           cwd: null,
           tabGroup: null,
           tabGroupColor: null,
+          humanInput: 'auto',
         }
         saveSession(session)
         createSavedSessionExecutor({ manager, session })

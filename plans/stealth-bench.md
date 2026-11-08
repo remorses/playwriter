@@ -2,7 +2,7 @@
 
 Measure how often anti-bot systems block playwriter, on Browser Use's open Stealth Bench V1
 (github.com/browser-use/benchmark), next to the published cloud browser numbers. Compare
-human input off and on (`PLAYWRITER_HUMAN_INPUT`), and record time and steps per task.
+human input off and on (`session new --human-input off|on`), and record time and steps per task.
 
 Check a box only when its evidence exists (command output, results JSON path, screenshot).
 Write the evidence next to the box.

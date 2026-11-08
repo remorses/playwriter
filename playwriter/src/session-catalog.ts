@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { normalizeHumanInputMode, type HumanInputMode } from './human-input.js'
 import { normalizeTabGroupColor, type TabGroupColor } from './protocol.js'
 
 export type SavedSession = {
@@ -22,6 +23,8 @@ export type SavedSession = {
   cwd: string | null
   tabGroup: string | null
   tabGroupColor: TabGroupColor | null
+  /** Missing in files saved before human input modes existed, loaded as 'auto' */
+  humanInput: HumanInputMode
 }
 
 export type SessionCatalog = {
@@ -59,7 +62,8 @@ function isSavedSession(value: any): value is SavedSession {
       (typeof value.profile === 'object' && typeof value.profile.email === 'string' && typeof value.profile.id === 'string')) &&
     isNullableString(value.cwd) &&
     isNullableString(value.tabGroup) &&
-    (value.tabGroupColor === null || normalizeTabGroupColor(value.tabGroupColor) !== null)
+    (value.tabGroupColor === null || normalizeTabGroupColor(value.tabGroupColor) !== null) &&
+    (value.humanInput === undefined || normalizeHumanInputMode(value.humanInput) !== null)
   )
 }
 
@@ -82,7 +86,9 @@ export function loadSessionCatalog({ filePath, logger }: { filePath: string; log
     ) {
       throw new Error('unexpected shape')
     }
-    const sessions = parsed.sessions as SavedSession[]
+    const sessions = (parsed.sessions as SavedSession[]).map((session) => {
+      return { ...session, humanInput: normalizeHumanInputMode(session.humanInput) ?? 'auto' }
+    })
     const highestId = Math.max(0, ...sessions.map((session) => Number(session.id)))
     return { nextSessionNumber: Math.max(parsed.nextSessionNumber, highestId + 1), sessions }
   } catch (error) {

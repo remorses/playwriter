@@ -13,6 +13,7 @@ import { VERSION, getCdpUrl, sleep, LOG_FILE_PATH } from './utils.js'
 import { isRemoteExtensionKey } from './relay-state.js'
 import { getChromium, type Browser } from './playwright-import.js'
 import type { TabGroupColor } from './protocol.js'
+import type { HumanInputMode } from './human-input.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -549,17 +550,19 @@ export async function createRelaySession({
   browserId,
   tabGroup,
   tabGroupColor,
+  humanInput,
 }: {
   port?: number
   /** ExtensionBrowser.id. Required when more than one browser is connected. */
   browserId?: string
   tabGroup?: string
   tabGroupColor?: TabGroupColor
+  humanInput?: HumanInputMode
 } = {}): Promise<CreatedRelaySession> {
   const response = await fetch(`http://127.0.0.1:${port}/cli/session/new`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ extensionId: browserId, tabGroup, tabGroupColor, client: 'sdk' }),
+    body: JSON.stringify({ extensionId: browserId, tabGroup, tabGroupColor, humanInput, client: 'sdk' }),
   })
   const result = (await response.json()) as CreatedRelaySession & { error?: string }
   if (!response.ok) {
@@ -604,6 +607,7 @@ export async function connectViaExtension({
   selectBrowser,
   tabGroup,
   tabGroupColor,
+  humanInput,
   closeTabsOnEnd = false,
   logger,
 }: {
@@ -622,6 +626,8 @@ export async function connectViaExtension({
   selectBrowser?: SelectBrowser
   tabGroup?: string
   tabGroupColor?: TabGroupColor
+  /** Human-like mouse, scroll and typing. 'auto' (default) turns it on for sites like x.com, amazon and google */
+  humanInput?: HumanInputMode
   logger?: { log: (...args: any[]) => void }
 } = {}): Promise<PlaywriterBrowserConnection> {
   const browsers = await listBrowsers({ port, logger })
@@ -646,7 +652,7 @@ export async function connectViaExtension({
     return browsers[0]
   })()
 
-  const session = await createRelaySession({ port, browserId: selected.id, tabGroup, tabGroupColor })
+  const session = await createRelaySession({ port, browserId: selected.id, tabGroup, tabGroupColor, humanInput })
   const chromium = await getChromium()
   const browser = await chromium
     .connectOverCDP(

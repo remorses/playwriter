@@ -18,6 +18,7 @@ import { killPortProcess } from './kill-port.js'
 import { canEmitKittyGraphics, emitKittyImage } from './kitty-graphics.js'
 import { VERSION, LOG_FILE_PATH, LOG_CDP_FILE_PATH, parseRelayHost } from './utils.js'
 import { TAB_GROUP_ALL_COLORS, normalizeTabGroupColor } from './protocol.js'
+import { HUMAN_INPUT_MODES, normalizeHumanInputMode, type HumanInputMode } from './human-input.js'
 import {
   ensureRelayServer,
   getRelayInfo,
@@ -415,6 +416,7 @@ cli
   .option('--disable-proxy-bandwidth-acceleration', 'Allow loading images, video, and fonts when proxy is enabled (they are blocked by default to save proxy bandwidth)')
   .option('--tab-group <name>', 'Tab group title for this session (default "playwriter", or "remote" with --remote)')
   .option('--tab-group-color <color>', 'Tab group color: grey, blue, red, yellow, green, pink, purple, cyan, orange (default derived from the group name)')
+  .option('--human-input <mode>', 'Human-like mouse, scroll and typing: auto (on for sites like x.com, amazon, google), on, off. Default auto')
   .action(async (options) => {
     if (options.patchright) {
       process.env.PLAYWRITER_PATCHRIGHT = '1'
@@ -442,9 +444,20 @@ cli
       }
       return normalized
     })()
-    const warnTabGroupUnsupported = (mode: string) => {
-      if (tabGroup || tabGroupColor) {
-        console.error(pc.yellow(`Warning: --tab-group/--tab-group-color only apply to extension sessions, ignored for ${mode}.`))
+    const humanInput: HumanInputMode | undefined = (() => {
+      if (!options.humanInput) {
+        return undefined
+      }
+      const normalized = normalizeHumanInputMode(options.humanInput)
+      if (!normalized) {
+        console.error(`Error: --human-input must be one of: ${HUMAN_INPUT_MODES.join(', ')}`)
+        process.exit(1)
+      }
+      return normalized
+    })()
+    const warnExtensionOnlyFlags = (mode: string) => {
+      if (tabGroup || tabGroupColor || humanInput) {
+        console.error(pc.yellow(`Warning: --tab-group/--tab-group-color/--human-input only apply to extension sessions, ignored for ${mode}.`))
       }
     }
 
@@ -466,6 +479,7 @@ cli
             cwd: process.cwd(),
             tabGroup,
             tabGroupColor,
+            humanInput,
           }),
         })
         if (!response.ok) {
@@ -500,7 +514,7 @@ cli
 
     // --browser headless: launch headless Chrome via chromium.launch(), no extension
     if (options.browser === 'headless') {
-      warnTabGroupUnsupported('headless sessions')
+      warnExtensionOnlyFlags('headless sessions')
       try {
         await ensureRelayForSessionCreation(isLocal)
         const serverUrl = await getServerUrl(options.host)
@@ -547,7 +561,7 @@ cli
 
     // If --direct with explicit endpoint, resolve it (handles host:port → ws://) then skip discovery
     if (directEndpoint) {
-      warnTabGroupUnsupported('direct CDP sessions')
+      warnExtensionOnlyFlags('direct CDP sessions')
       let cdpEndpoint: string
       try {
         cdpEndpoint = await resolveDirectInput(directEndpoint)
@@ -565,7 +579,7 @@ cli
 
     // If --direct with no endpoint, discover Chrome instances
     if (options.direct === '') {
-      warnTabGroupUnsupported('direct CDP sessions')
+      warnExtensionOnlyFlags('direct CDP sessions')
       if (!isLocal) {
         console.error('Error: --direct auto-discovery only works locally.')
         console.error('For remote relay, pass an explicit endpoint reachable from the relay host:')
@@ -727,7 +741,7 @@ cli
         const response = await fetch(`${serverUrl}/cli/session/new`, {
           method: 'POST',
           headers: buildAuthHeaders({ token: options.token, json: true }),
-          body: JSON.stringify({ extensionId, cwd, cloudAuth: getRelayCloudAuth(), tabGroup, tabGroupColor }),
+          body: JSON.stringify({ extensionId, cwd, cloudAuth: getRelayCloudAuth(), tabGroup, tabGroupColor, humanInput }),
         })
         if (!response.ok) {
           const text = await response.text()
@@ -791,7 +805,7 @@ cli
       try {
         const serverUrl = await getServerUrl(options.host)
         if (selected.type === 'cloud') {
-          warnTabGroupUnsupported('cloud sessions')
+          warnExtensionOnlyFlags('cloud sessions')
           // Reuse existing running VM if selected, otherwise create new
           const result = selected.activeCloudSessionId
             ? await attachExistingCloudSession({
@@ -813,7 +827,7 @@ cli
             console.log(pc.dim(`Live view: ${result.liveUrl}`))
           }
         } else if (selected.type === 'direct') {
-          warnTabGroupUnsupported('direct CDP sessions')
+          warnExtensionOnlyFlags('direct CDP sessions')
           const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles, token: options.token })
           printSessionWarning(result)
           printSessionCreated(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
@@ -828,6 +842,7 @@ cli
               cloudAuth: getRelayCloudAuth(),
               tabGroup,
               tabGroupColor,
+              humanInput,
             }),
           })
           if (!response.ok) {

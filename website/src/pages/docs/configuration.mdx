@@ -15,7 +15,6 @@ Playwriter is configured through **CLI flags** and **environment variables**. No
 | `PLAYWRITER_TOKEN` | Auth token for remote connections | - |
 | `PLAYWRITER_DIRECT` | CDP connection mode (see below) | - |
 | `PLAYWRITER_API_KEY` | API key for cloud browsers | - |
-| `PLAYWRITER_HUMAN_INPUT` | Human-like mouse, scroll and typing (see below) | off |
 
 ### PLAYWRITER_DIRECT
 
@@ -33,16 +32,6 @@ PLAYWRITER_DIRECT=1 playwriter session new
 
 # Cloud browser provider
 PLAYWRITER_DIRECT=wss://xxx.cdp.browser-use.com playwriter session new
-```
-
-### PLAYWRITER_HUMAN_INPUT
-
-Playwright **teleports** the mouse to its target, clicks instantly and types with no gaps. Bot detection (reCAPTCHA v3, Cloudflare, DataDome) scores that. With `PLAYWRITER_HUMAN_INPUT=1` the relay sends curved mouse paths, pauses before and during clicks like a hand, scrolls in wheel flicks and spaces key presses 30-110 ms apart. Every action gets slower, so it is off by default.
-
-The relay reads it when it starts, so restart the relay with the variable set:
-
-```bash
-PLAYWRITER_HUMAN_INPUT=1 playwriter serve restart
 ```
 
 ### PLAYWRITER_HOST and PLAYWRITER_TOKEN
@@ -77,6 +66,7 @@ playwriter session new
 | `--custom-proxy <url>` | Custom proxy (host:port or user:pass@host:port) |
 | `--timeout <minutes>` | Cloud browser timeout (1-240, default 60) |
 | `--disable-proxy-bandwidth-acceleration` | Load images/video with proxy |
+| `--human-input <mode>` | Human-like mouse, scroll and typing: `auto` (default, on for sites like x.com and amazon), `on`, `off`. See [sessions](./sessions.mdx#human-like-input) |
 
 ## Browser start flags
 

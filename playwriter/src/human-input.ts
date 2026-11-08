@@ -11,8 +11,9 @@
  * presses are spaced 30-110 ms apart. Wheel events glide in ~60 Hz bursts, and scrolling an element into view
  * happens in wheel flicks instead of a one-frame jump.
  *
- * Opt-in with PLAYWRITER_HUMAN_INPUT=1 on the relay process: it makes every action slower. Old extensions work
- * because only existing CDP commands are sent.
+ * Every action gets slower, so each session picks a mode (`session new --human-input`): `auto` (default) turns
+ * it on only for pages on sites with heavy bot detection, see isBotProtectedUrl. Old extensions work because
+ * only existing CDP commands are sent.
  */
 
 import type { Protocol } from './cdp-types.js'
@@ -42,9 +43,53 @@ export function isPacedInput(command: { method: string; params?: object }): comm
   return PACED_METHODS.has(command.method) && command.params !== undefined
 }
 
-/** PLAYWRITER_HUMAN_INPUT: 1, true, on or yes turns it on. Off by default. */
-export function isHumanInputEnabledByEnv(value = process.env.PLAYWRITER_HUMAN_INPUT): boolean {
-  return /^(1|true|on|yes)$/i.test(value?.trim() || '')
+export const HUMAN_INPUT_MODES = ['auto', 'on', 'off'] as const
+export type HumanInputMode = (typeof HUMAN_INPUT_MODES)[number]
+
+export function normalizeHumanInputMode(value: string | undefined): HumanInputMode | null {
+  const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return HUMAN_INPUT_MODES.find((known) => known === mode) ?? null
+}
+
+/** Sites with heavy behavioral bot detection, matched with their subdomains. */
+const BOT_PROTECTED_DOMAINS = [
+  'x.com',
+  'twitter.com',
+  'instagram.com',
+  'facebook.com',
+  'threads.net',
+  'linkedin.com',
+  'tiktok.com',
+  'reddit.com',
+  'youtube.com',
+  'walmart.com',
+  'etsy.com',
+  'aliexpress.com',
+  'temu.com',
+  'ticketmaster.com',
+  'airbnb.com',
+  'booking.com',
+  'zillow.com',
+  'indeed.com',
+]
+/** Brands with one site per country: amazon.de, google.co.uk, ebay.com.au. */
+const BOT_PROTECTED_BRANDS = ['amazon', 'google', 'ebay', 'pinterest']
+const COUNTRY_SUFFIX = /^(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/
+
+/** True for pages where `auto` human input turns on. */
+export function isBotProtectedUrl(url: string | undefined): boolean {
+  if (!url || !URL.canParse(url)) return false
+  const hostname = new URL(url).hostname.toLowerCase().replace(/\.$/, '')
+  if (BOT_PROTECTED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return true
+  const labels = hostname.split('.')
+  return labels.some((label, index) => {
+    return BOT_PROTECTED_BRANDS.includes(label) && COUNTRY_SUFFIX.test(labels.slice(index + 1).join('.'))
+  })
+}
+
+export function shouldHumanizeInput({ mode, url }: { mode: HumanInputMode; url: string | undefined }): boolean {
+  if (mode === 'auto') return isBotProtectedUrl(url)
+  return mode === 'on'
 }
 
 const sleep = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve())

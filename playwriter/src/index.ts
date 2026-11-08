@@ -17,6 +17,7 @@ export type {
 } from './relay-client.js'
 export type { Browser, BrowserContext, Page } from './playwright-import.js'
 export type { TabGroupColor } from './protocol.js'
+export type { HumanInputMode } from './human-input.js'
 export { getCDPSessionForPage, PlaywrightCDPSessionAdapter } from './cdp-session.js'
 export type { ICDPSession } from './cdp-session.js'
 export { Editor } from './editor.js'

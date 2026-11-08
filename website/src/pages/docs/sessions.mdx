@@ -126,6 +126,28 @@ Tab groups are **cosmetic**:
 
 Only extension sessions support tab groups. Headless, direct CDP, and cloud sessions have no browser UI to group.
 
+## Human-like input
+
+Playwright **teleports** the mouse to its target, clicks instantly and types with no gaps. Bot detection (reCAPTCHA v3, Cloudflare, DataDome) scores that. With human input on, the relay sends curved mouse paths, pauses before and during clicks like a hand, scrolls in wheel flicks and spaces key presses 30-110 ms apart.
+
+Every action gets slower, so each session picks a mode:
+
+| Mode | Behavior |
+|---|---|
+| `auto` (default) | On for pages on sites with heavy bot detection: x.com, amazon, google, pinterest, ebay, instagram, linkedin, reddit, tiktok and similar. Off everywhere else |
+| `on` | On for every page |
+| `off` | Never |
+
+```bash
+# Humanize input on any site, for example one not in the auto list
+playwriter session new --tab-group shop --human-input on
+
+# Fastest input, even on x.com or amazon
+playwriter session new --tab-group scrape --human-input off
+```
+
+The Node API takes the same option: `connectViaExtension({ humanInput: 'on' })`. Human input only applies to extension and remote control sessions. MCP and other connections without a session use `auto`.
+
 ## Node API
 
 Use `connectViaExtension()` from the `playwriter` package. It starts the relay if needed, waits for the Chrome extension, creates a session, and connects over CDP.

@@ -1,7 +1,8 @@
 /**
- * Anti-bot features end to end, with the relay's human-like input on:
+ * Anti-bot features end to end:
  * - execute warns when a navigation lands on a bot challenge, and waits out one that clears by itself
- * - relay input moves the mouse along a path of trusted events and spaces key presses
+ * - a session with human input on moves the mouse along a path of trusted events and spaces key presses,
+ *   while an `auto` session on a site without bot detection (localhost) keeps Playwright's raw input
  */
 
 import { createMCPClient } from './mcp-client.js'
@@ -30,7 +31,6 @@ describe('Anti-bot', () => {
       port: TEST_PORT,
       tempDirPrefix: 'pw-anti-bot-test-',
       toggleExtension: true,
-      relayOptions: { humanInput: true },
     })
     const result = await createMCPClient({ port: TEST_PORT })
     client = result.client
@@ -100,27 +100,49 @@ describe('Anti-bot', () => {
     expect((title as any).content[0].text).toContain('Shop')
   })
 
-  it('moves the mouse along a path and spaces key presses', async () => {
-    const result = await client.callTool({
-      name: 'execute',
-      arguments: {
+  it('humanizes input per session: on adds mouse paths and key gaps, auto skips localhost', async () => {
+    const baseUrl = `http://127.0.0.1:${TEST_PORT}`
+    const post = async (route: string, body: object) => {
+      const response = await fetch(`${baseUrl}${route}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return (await response.json()) as any
+    }
+    const measureInput = async (humanInput: string) => {
+      const session = await post('/cli/session/new', { humanInput })
+      expect(session.humanInput).toBe(humanInput)
+      const result = await post('/cli/execute', {
+        sessionId: session.id,
+        timeout: 30000,
         code: js`
-          await state.page.goto('${server!.baseUrl}/input');
-          await state.page.mouse.move(20, 20);
-          await state.page.click('#go');
-          await state.page.locator('#name').pressSequentially('hello');
-          return await state.page.evaluate(() => {
+          const page = await context.newPage();
+          await page.goto('${server!.baseUrl}/input');
+          await page.mouse.move(20, 20);
+          await page.click('#go');
+          await page.locator('#name').pressSequentially('hello');
+          const measured = await page.evaluate(() => {
             const gaps = keys.slice(1).map((t, i) => t - keys[i]);
             return { moves: moves.length, keys: keys.length, minGap: Math.min(...gaps) };
           });
+          await page.close();
+          return measured;
         `,
-      },
-    })
-    const text = (result as any).content[0].text as string
-    const read = (name: string) => Number(new RegExp(`${name}: ([\\d.]+)`).exec(text)?.[1])
+      })
+      await post('/cli/session/delete', { sessionId: session.id })
+      const read = (name: string) => Number(new RegExp(`${name}: ([\\d.]+)`).exec(result.text)?.[1])
+      return { moves: read('moves'), keys: read('keys'), minGap: read('minGap') }
+    }
+
     // Playwright alone sends 1 move per mouse.move/click; the relay adds a path of samples
-    expect(read('moves')).toBeGreaterThan(10)
-    expect(read('keys')).toBe(5)
-    expect(read('minGap')).toBeGreaterThan(25)
-  })
+    const on = await measureInput('on')
+    expect(on.moves).toBeGreaterThan(10)
+    expect(on.keys).toBe(5)
+    expect(on.minGap).toBeGreaterThan(25)
+
+    const auto = await measureInput('auto')
+    expect(auto.moves).toBeLessThanOrEqual(3)
+    expect(auto.keys).toBe(5)
+  }, 60000)
 })
