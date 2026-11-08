@@ -1977,9 +1977,8 @@ cli
 
     // Lazy-load heavy dependencies only when serve command is used
     const { createFileLogger } = await import('./create-logger.js')
-    const { startPlayWriterCDPRelayServer } = await import('./cdp-relay.js')
+    const { startPlayWriterCDPRelayServer, defaultSessionCounterPath } = await import('./cdp-relay.js')
     const { installProcessGuard } = await import('./process-guard.js')
-    const { defaultSessionCatalogPath } = await import('./session-catalog.js')
 
     const logger = createFileLogger()
 
@@ -1992,7 +1991,7 @@ cli
       host: options.host,
       token,
       logger,
-      sessionsFile: defaultSessionCatalogPath(RELAY_PORT),
+      sessionCounterFile: defaultSessionCounterPath(RELAY_PORT),
       onDrained: () => {
         console.log('\nA newer Playwriter CLI replaced this relay. Shutting down...')
         server.close()

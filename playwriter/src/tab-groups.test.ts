@@ -474,7 +474,7 @@ describe('Session tab groups', () => {
     expect(cleaned.some((g) => g.title === 'agent-shared')).toBe(false)
   }, 60000)
 
-  it('keeps sessions, ids and tab ownership across a relay restart', async () => {
+  it('never reuses session ids across a relay restart', async () => {
     const createResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
       method: 'POST',
       headers: JSON_HEADERS,
@@ -484,7 +484,6 @@ describe('Session tab groups', () => {
     const before = await executeCli({
       sessionId,
       code: js`
-        state.marker = 'before restart';
         state.ownPage = await context.newPage();
         await state.ownPage.goto('about:blank');
       `,
@@ -502,14 +501,9 @@ describe('Session tab groups', () => {
     }
     testCtx!.relayServer.close()
     await waitForConnectionState(false)
-    testCtx!.relayServer = await startPlayWriterCDPRelayServer({ port: TEST_PORT, sessionsFile: testCtx!.sessionsFile })
+    testCtx!.relayServer = await startPlayWriterCDPRelayServer({ port: TEST_PORT, sessionCounterFile: testCtx!.sessionCounterFile })
     await waitForConnectionState(true)
 
-    // the saved session is listed before its executor exists again
-    const listed = (await (await fetch(`${SERVER_URL}/cli/sessions`)).json()) as { sessions: Array<{ id: string }> }
-    expect(listed.sessions.map((session) => session.id)).toContain(sessionId)
-
-    // ids are never reused after a restart
     const nextResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
       method: 'POST',
       headers: JSON_HEADERS,
@@ -518,26 +512,23 @@ describe('Session tab groups', () => {
     const { id: nextId } = (await nextResponse.json()) as { id: string }
     expect(Number(nextId)).toBeGreaterThan(Number(sessionId))
 
-    const after = await executeCli({ sessionId, code: js`return state.marker ?? 'state cleared'` })
-    expect(after.text.replace(`session ${sessionId}`, 'session N')).toMatchInlineSnapshot(`
-      "[WARNING] The Playwriter relay restarted, so session N was restored and \`state\` was cleared. The session tabs are still open: use context.pages() to find them again.
-      [return value] state cleared"
-    `)
-
-    // the stable ownership key still finds the tab created before the restart
-    const deleteResponse = await fetch(`${SERVER_URL}/cli/session/delete`, {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ sessionId, closeCreatedTabs: true }),
-    })
-    expect(await deleteResponse.json()).toEqual({ success: true })
-    const cleaned = await waitForGroups((g) => !g.some((group) => group.title === 'agent-restart'))
-    expect(cleaned.some((g) => g.title === 'agent-restart')).toBe(false)
+    // the stale id never runs in another agent's session
+    const after = await executeCli({ sessionId, code: js`return 1` })
+    expect(after.isError).toBe(true)
+    expect(after.text.replace(`Session ${sessionId}`, 'Session N')).toMatchInlineSnapshot(`"Session N ended or was lost when the relay restarted. Run 'playwriter session new' to get a new one."`)
 
     await fetch(`${SERVER_URL}/cli/session/delete`, {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ sessionId: nextId }),
+    })
+    // tabs of the lost session stay open; close them so later tests start clean
+    await serviceWorker.evaluate(async () => {
+      const groups = await chrome.tabGroups.query({ title: 'agent-restart' })
+      for (const group of groups) {
+        const tabs = await chrome.tabs.query({ groupId: group.id })
+        await chrome.tabs.remove(tabs.map((tab) => tab.id!))
+      }
     })
   }, 60000)
 })

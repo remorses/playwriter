@@ -1,7 +1,6 @@
-import { startPlayWriterCDPRelayServer, type RelayServer } from './cdp-relay.js'
+import { defaultSessionCounterPath, startPlayWriterCDPRelayServer, type RelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
 import { installProcessGuard } from './process-guard.js'
-import { defaultSessionCatalogPath } from './session-catalog.js'
 import { RELAY_PORT, waitForRelayVersion } from './relay-client.js'
 import { flushTelemetry, startRelayTelemetry } from './telemetry.js'
 import { LOG_CDP_FILE_PATH } from './utils.js'
@@ -30,7 +29,7 @@ export async function startServer({
       host,
       token,
       logger,
-      sessionsFile: defaultSessionCatalogPath(port),
+      sessionCounterFile: defaultSessionCounterPath(port),
       // A newer CLI drained this relay to replace it.
       onDrained: () => void shutdown(),
     })
