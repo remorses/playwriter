@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pc from 'picocolors'
 import dedent from 'string-dedent'
-import { getListeningPidsForPort, getProcessCommandLine, killPid } from './kill-port.js'
+import { getListeningPidsForPort, killPid } from './kill-port.js'
 import { VERSION, getCdpUrl, sleep, LOG_FILE_PATH } from './utils.js'
 import { isRemoteExtensionKey } from './relay-state.js'
 import { getChromium, type Browser } from './playwright-import.js'
@@ -199,10 +199,6 @@ export async function waitForConnectedExtensions(
   return []
 }
 
-// process.title of the relay daemon and `playwriter serve`. Windows keeps the original
-// command line, so also match the script name and `playwriter ... serve`.
-const RELAY_COMMAND_REGEX = /playwriter-ws-server|playwriter-serve|start-relay-server|playwriter\S*\s+serve\b/i
-
 /** Resolves true once none of `pids` listens on `port` (exited or closed the server). */
 async function waitForPidsToReleasePort({
   port,
@@ -226,29 +222,13 @@ async function waitForPidsToReleasePort({
   }
 }
 
-/**
- * Kill `pids` if they are Playwriter relays. Throws without killing anything when one is another
- * program, so a user's server on the relay port is never killed.
- */
+/** Kill the processes that hold the relay port and wait until they release it. */
 async function killRelayPids({ port, pids }: { port: number; pids: number[] }): Promise<void> {
   const targets = pids.filter((pid) => pid !== process.pid)
-  const commands = await Promise.all(targets.map((pid) => getProcessCommandLine({ pid })))
-  const foreign = targets.flatMap((pid, i) => {
-    const command = commands[i]
-    return command && !RELAY_COMMAND_REGEX.test(command) ? [`pid ${pid}: ${command}`] : []
-  })
-  if (foreign.length > 0) {
-    throw new Error(dedent`
-      Port ${port} is used by another program, not a Playwriter relay (${foreign.join(', ')}).
-      Stop that program, then run the command again.
-    `)
-  }
-  // A null command line means the process already exited.
-  const alive = targets.filter((_, i) => commands[i] !== null)
-  await Promise.all(alive.map((pid) => killPid({ pid })))
-  const released = await waitForPidsToReleasePort({ port, pids: alive, timeoutMs: 3000 })
+  await Promise.all(targets.map((pid) => killPid({ pid })))
+  const released = await waitForPidsToReleasePort({ port, pids: targets, timeoutMs: 3000 })
   if (!released) {
-    throw new Error(`Playwriter relay on port ${port} (pid ${alive.join(', ')}) did not exit after kill`)
+    throw new Error(`Process on relay port ${port} (pid ${targets.join(', ')}) did not exit after kill`)
   }
 }
 
@@ -582,7 +562,7 @@ export async function deleteRelaySession({
 }: {
   port?: number
   sessionId: string
-  /** From createRelaySession. The relay refuses the delete when it does not match (relay restarted, id reused) */
+  /** From createRelaySession. The relay refuses the delete when it does not match (the relay restarted) */
   ownershipKey?: string
   /** Also close the tabs this session created (and popups they opened). Other sessions' tabs stay open. */
   closeCreatedTabs?: boolean

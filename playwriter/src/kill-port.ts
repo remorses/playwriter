@@ -11,7 +11,6 @@
  */
 
 import { execFile } from 'node:child_process'
-import fs from 'node:fs'
 import os from 'node:os'
 import { promisify } from 'node:util'
 
@@ -150,31 +149,6 @@ export async function getListeningPidsForPort({ port }: { port: number }): Promi
   }
 
   return os.platform() === 'win32' ? await getPidsForPortWindows(port) : await getPidsForPortUnix(port)
-}
-
-/**
- * Command line of a running process, or null if it exited or cannot be read.
- * process.title replaces it on Linux and macOS, so a renamed node process shows its title.
- */
-export async function getProcessCommandLine({ pid }: { pid: number }): Promise<string | null> {
-  try {
-    if (os.platform() === 'win32') {
-      const { stdout } = await execFileAsync('powershell', [
-        '-NoProfile',
-        '-Command',
-        `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
-      ])
-      return stdout.trim() || null
-    }
-    if (os.platform() === 'linux') {
-      const cmdline = await fs.promises.readFile(`/proc/${pid}/cmdline`, 'utf8')
-      return cmdline.replace(/\0/g, ' ').trim() || null
-    }
-    const { stdout } = await execFileAsync('ps', ['-o', 'command=', '-p', String(pid)])
-    return stdout.trim() || null
-  } catch {
-    return null
-  }
 }
 
 /** Kill one pid. A process that already exited is ignored. */
