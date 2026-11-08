@@ -27,7 +27,7 @@ import { Editor } from './editor.js'
 import { getStylesForLocator, formatStylesAsText, type StylesResult } from './styles.js'
 import { getReactSource, getReactComponentInfo, type ReactSourceLocation } from './react-source.js'
 import { ScopedFS } from './scoped-fs.js'
-import { SANDBOX_FILENAME, describeThrown, retainPromiseHook, runAsFaultOwner } from './process-guard.js'
+import { SANDBOX_FILENAME, describeThrown, runAsFaultOwner } from './process-guard.js'
 import {
   screenshotWithAccessibilityLabels,
   getAriaSnapshot,
@@ -685,16 +685,12 @@ export class PlaywrightExecutor {
   private createSandboxTimerGlobals() {
     const timers = this.sandboxTimers
     const runCallback = ({ kind, callback, args }: { kind: string; callback: Function; args: unknown[] }) => {
-      // Tag promises the callback starts, so their rejections reach this session too.
-      const releaseHook = retainPromiseHook()
       try {
         callback(...args)
       } catch (error) {
         const message = describeThrown(error)
         this.logger.error(`[sandbox] ${kind} callback threw:`, message)
         this.enqueueWarning(`${kind} callback threw: ${message}`)
-      } finally {
-        releaseHook()
       }
     }
     const assertFunction = (callback: unknown) => {
@@ -2061,10 +2057,9 @@ export class PlaywrightExecutor {
       const result = await (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined
         let onCallerAbort: (() => void) | undefined
-        const releasePromiseHook = retainPromiseHook()
         try {
           const chromium = await getChromium()
-          // Promises the script creates are tagged with this executor, so a forgotten await becomes a warning here.
+          // Runs in this executor's async context, so a forgotten await becomes a warning in this session.
           const runScript = () =>
             runAsFaultOwner({ owner: this, run: () => script.runInContext(vmContext, { timeout, displayErrors: true }) })
           return await Promise.race([
@@ -2086,7 +2081,6 @@ export class PlaywrightExecutor {
             }),
           ])
         } finally {
-          releasePromiseHook()
           clearTimeout(timer)
           if (onCallerAbort) {
             signal?.removeEventListener('abort', onCallerAbort)

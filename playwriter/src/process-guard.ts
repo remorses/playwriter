@@ -5,14 +5,12 @@
  * - uncaughtException: ignored only when the stack comes from sandbox code or playwright-core.
  *   Anything else is a real bug in our process: log, flush, exit(1).
  *
- * While an execute call runs, a v8 promise hook tags every promise it creates (also promises
- * created inside the vm sandbox) with the running executor. A rejection of a tagged promise is
- * reported to that executor as a warning, so the agent sees it in the next execute output.
- * Inspired by anomalyco/browse execute-realm/membrane-policy.ts.
+ * Agent code runs inside AsyncLocalStorage with its executor. Node runs unhandledRejection
+ * handlers in the async context of the rejected promise (also vm sandbox promises, Node 18+),
+ * so a rejection is reported to that executor as a warning in its next execute output.
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import util from 'node:util'
-import v8 from 'node:v8'
 
 /** vm filename of agent code. Stack frames with it come from the sandbox. */
 export const SANDBOX_FILENAME = '.playwriter-eval.js'
@@ -29,38 +27,10 @@ export type GuardLogger = {
 }
 
 const ownerStore = new AsyncLocalStorage<FaultOwner>()
-const promiseOwners = new WeakMap<Promise<unknown>, FaultOwner>()
-let stopPromiseHook: (() => void) | undefined
-let promiseHookUsers = 0
 
 /** Run agent code so promises it creates, and its async continuations and timers, belong to owner. */
 export function runAsFaultOwner<T>({ owner, run }: { owner: FaultOwner; run: () => T }): T {
   return ownerStore.run(owner, run)
-}
-
-/** Install the promise hook while agent code runs. Promise hooks slow every await, so release it after. */
-export function retainPromiseHook(): () => void {
-  promiseHookUsers += 1
-  if (promiseHookUsers === 1) {
-    stopPromiseHook = v8.promiseHooks.onInit((promise, parent) => {
-      const owner = ownerStore.getStore() ?? (parent ? promiseOwners.get(parent) : undefined)
-      if (owner) {
-        promiseOwners.set(promise, owner)
-      }
-    }) as () => void
-  }
-  let released = false
-  return () => {
-    if (released) {
-      return
-    }
-    released = true
-    promiseHookUsers -= 1
-    if (promiseHookUsers === 0) {
-      stopPromiseHook?.()
-      stopPromiseHook = undefined
-    }
-  }
 }
 
 /**
@@ -114,9 +84,8 @@ export function installProcessGuard({ logger }: { logger: GuardLogger }) {
     logger.error(`[process-guard] contained ${kind} #${faultCount}${target}: ${describeThrown(error)}`)
   }
 
-  process.on('unhandledRejection', (reason, promise) => {
-    // Promises created after the hook was released still carry the owner in their async context.
-    const owner = promiseOwners.get(promise) ?? ownerStore.getStore()
+  process.on('unhandledRejection', (reason) => {
+    const owner = ownerStore.getStore()
     owner?.enqueueWarning(
       `Unhandled promise rejection in your code (missing await?): ${describeThrown(reason)}`,
     )
