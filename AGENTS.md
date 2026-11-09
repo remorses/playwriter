@@ -1,6 +1,7 @@
 this is the playwriter codebase
 
 Active plan: `plans/stealth-bench.md`. Read it before starting work.
+Decisions: `plans/decisions/`. Search them before designing or refactoring.
 
 the extension uses chrome.debugger to manage the user browser
 
