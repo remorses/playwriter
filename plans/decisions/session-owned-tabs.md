@@ -5,7 +5,7 @@
 - (agent) Shared with every session: tabs the user toggled with the extension icon, tabs of deleted sessions or of an older relay start, tabs of SDK sessions (`createRelaySession`, scripts in several processes share one tab).
 - (agent) Clients without a session (the MCP) see every tab, like before.
 - (agent) The extension sends the tab's `groupKey` as `ownerKey` on `Target.attachedToTarget`. It equals the relay's `ownershipKey(sessionId)`. Old extensions send none, so every tab stays shared with them.
-- (agent) OOPIF iframes follow the owner of their parent tab. Worker events go to everyone; clients that never attached the parent ignore them.
+- (agent) OOPIF iframes and worker sessions follow the owner of their parent tab. Existing workers replay under their parent after reconnecting.
 - Why: agents in parallel sessions stop navigating or closing each other's tabs. A Playwright session no longer sends `Runtime.enable` to a Patchright session's tabs, which broke Patchright stealth.
 - Lost: one CLI session cannot pick up a tab another live CLI session opened.
 - Open: whether a session can adopt a shared tab so others stop seeing it.

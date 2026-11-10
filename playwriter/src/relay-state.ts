@@ -37,6 +37,9 @@ export type ConnectedTarget = {
   frameIds: Set<string>
   /** Ownership key of the session that created the tab. Undefined: shared by every session. */
   ownerKey?: string
+  /** Child worker session. Never announce it as a browser root target. */
+  parentSessionId?: string
+  workerScriptLoaded?: boolean
 }
 
 export type ExtensionInfo = {
@@ -450,6 +453,7 @@ export function addTarget(
     targetInfo,
     existingFrameIds,
     ownerKey,
+    parentSessionId,
   }: {
     extensionId: string
     sessionId: string
@@ -458,6 +462,7 @@ export function addTarget(
     /** Preserve existing frameIds if target already existed (update scenario). */
     existingFrameIds?: Set<string>
     ownerKey?: string
+    parentSessionId?: string
   },
 ): RelayState {
   const ext = state.extensions.get(extensionId)
@@ -473,6 +478,7 @@ export function addTarget(
     targetInfo,
     frameIds: existingFrameIds ?? existingTarget?.frameIds ?? new Set(),
     ownerKey,
+    parentSessionId,
   })
 
   const newExtensions = new Map(state.extensions)

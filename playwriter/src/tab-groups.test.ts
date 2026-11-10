@@ -500,6 +500,9 @@ describe('Session tab groups', () => {
           state.ownPage = await context.newPage();
           await state.ownPage.goto('about:blank');
           await state.ownPage.evaluate(() => { document.title = '${name}' });
+          const workerEvent = state.ownPage.waitForEvent('worker');
+          await state.ownPage.evaluate(() => { window.worker = new Worker('data:text/javascript,self.answer=42') });
+          state.worker = await workerEvent;
           const [popup] = await Promise.all([
             state.ownPage.waitForEvent('popup'),
             state.ownPage.evaluate(() => { window.open('about:blank') }),
@@ -511,6 +514,25 @@ describe('Session tab groups', () => {
     }
     // the first session got the second session's tabs live, the second one on connect
     expect(await listPages(sessions.first)).toMatchInlineSnapshot(`"["","first","first-popup"]"`)
+    const workers = await executeCli({
+      sessionId: sessions.first,
+      code: js`
+        const page = context.pages().find((p) => p.workers().length > 0);
+        return await page.workers()[0].evaluate(() => self.answer);
+      `,
+    })
+    expect(workers.text).toBe('[return value] 42')
+    const privateSession = await executeCli({ sessionId: sessions.first, code: js`return state.ownPage.sessionId()` })
+    const privateId = privateSession.text.replace('[return value] ', '')
+    const denied = await executeCli({
+      sessionId: sessions.second,
+      code: js`
+        const cdp = await getCDPSession({ page: state.ownPage });
+        await cdp.send('Target.detachFromTarget', { sessionId: ${JSON.stringify(privateId)} });
+      `,
+    })
+    expect(denied.isError).toBe(true)
+    expect(denied.text).toContain('belongs to another Playwriter session')
     expect(await listPages(sessions.second)).toMatchInlineSnapshot(`"["","second","second-popup"]"`)
 
     const switched = await fetch(`${SERVER_URL}/cli/session/update`, {
@@ -520,6 +542,15 @@ describe('Session tab groups', () => {
     })
     expect(switched.status).toBe(200)
     expect(await listPages(sessions.first)).toMatchInlineSnapshot(`"["","first","first-popup"]"`)
+    const reconnectedWorker = await executeCli({
+      sessionId: sessions.first,
+      code: js`
+        const page = (await Promise.all(context.pages().map(async (p) => ({ page: p, title: await p.title() })))).find((p) => p.title === 'first').page;
+        const worker = page.workers()[0] ?? await page.waitForEvent('worker');
+        return await worker.evaluate(() => self.answer);
+      `,
+    })
+    expect(reconnectedWorker.text).toBe('[return value] 42')
 
     // tabs of a deleted session become shared
     await fetch(`${SERVER_URL}/cli/session/delete`, {

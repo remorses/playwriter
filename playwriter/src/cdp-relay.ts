@@ -810,9 +810,11 @@ export async function startPlayWriterCDPRelayServer({
     const visibleTargets = () => {
       return Array.from(connectedTargets.values()).filter(canSee)
     }
-    const commandTargetId = (params as { targetId?: unknown } | undefined)?.targetId
-    const commandTarget = sessionId
-      ? connectedTargets.get(sessionId)
+    const targetParams = params as { targetId?: string; sessionId?: string } | undefined
+    const commandTargetId = targetParams?.targetId
+    const commandSessionId = targetParams?.sessionId ?? sessionId
+    const commandTarget = commandSessionId
+      ? connectedTargets.get(commandSessionId)
       : typeof commandTargetId === 'string'
         ? Array.from(connectedTargets.values()).find((target) => {
             return target.targetId === commandTargetId
@@ -823,6 +825,16 @@ export async function startPlayWriterCDPRelayServer({
     }
     // CLI sessions: the relay owns focus emulation, so drop Playwright's own setting
     const focusSessionId = client?.sessionId && !sharedTabSessionIds.has(client.sessionId) ? client.sessionId : undefined
+    if (!focusSessionId && clientId && resolvedExtensionId && commandTarget && method === 'Emulation.setFocusEmulationEnabled') {
+      const key = `${resolvedExtensionId}\0${commandTarget.sessionId}`
+      const holders = persistentFocus.get(key) ?? new Set<string>()
+      if ((params as { enabled?: boolean } | undefined)?.enabled) {
+        persistentFocus.set(key, holders.add(clientId))
+      } else {
+        holders.delete(clientId)
+        if (holders.size === 0) persistentFocus.delete(key)
+      }
+    }
     if (focusSessionId && resolvedExtensionId && commandTarget?.targetInfo.type === 'page') {
       if (method === 'Emulation.setFocusEmulationEnabled') {
         return {}
@@ -1222,15 +1234,22 @@ export async function startPlayWriterCDPRelayServer({
   const executingSessions = new Map<string, number>()
   // `${extensionId}\0${tabSessionId}` -> CLI sessions whose running execute uses the tab
   const focusedTabs = new Map<string, Set<string>>()
+  // MCP/SDK clients request persistent emulation. CLI cleanup must not undo their setting.
+  const persistentFocus = new Map<string, Set<string>>()
+  const focusUpdates = new Map<string, Promise<unknown>>()
 
   async function setFocusEmulation({ extensionId, tabSessionId, enabled }: { extensionId: string; tabSessionId: string; enabled: boolean }) {
-    await sendToExtension({
+    const key = `${extensionId}\0${tabSessionId}`
+    const update = (focusUpdates.get(key) ?? Promise.resolve()).then(() => sendToExtension({
       extensionId,
       method: 'forwardCDPCommand',
-      params: { sessionId: tabSessionId, method: 'Emulation.setFocusEmulationEnabled', params: { enabled } },
-    }).catch((error) => {
+      params: { sessionId: tabSessionId, method: 'Emulation.setFocusEmulationEnabled', params: { enabled: enabled || (persistentFocus.get(key)?.size ?? 0) > 0 } },
+    })).catch((error) => {
       logger?.log(pc.yellow(`[Focus] setFocusEmulationEnabled ${enabled} failed: ${String(error)}`))
     })
+    focusUpdates.set(key, update)
+    await update
+    if (focusUpdates.get(key) === update) focusUpdates.delete(key)
   }
 
   async function focusTab({ extensionId, tabSessionId, cliSessionId }: { extensionId: string; tabSessionId: string; cliSessionId: string }) {
@@ -1748,6 +1767,32 @@ export async function startPlayWriterCDPRelayServer({
               source,
               clientId,
             })
+            if (method === 'Runtime.runIfWaitingForDebugger' && sessionId) {
+              const target = store.getState().extensions.get(extensionConn.id)?.connectedTargets.get(sessionId)
+              if (target?.workerScriptLoaded) {
+                sendToPlaywright({ clientId, source: 'server', message: { sessionId, method: 'Inspector.workerScriptLoaded', params: {} } })
+              }
+            }
+
+            // Replay existing workers when a page session reattaches, before the command response.
+            if (method === 'Target.setAutoAttach' && sessionId && params?.autoAttach) {
+              const extension = store.getState().extensions.get(extensionConn.id)
+              const client = store.getState().playwrightClients.get(clientId)
+              for (const target of extension?.connectedTargets.values() ?? []) {
+                if (target.parentSessionId !== sessionId || !client || !canClientSeeTarget({ client, target })) {
+                  continue
+                }
+                sendToPlaywright({
+                  clientId,
+                  source: 'server',
+                  message: {
+                    sessionId,
+                    method: 'Target.attachedToTarget',
+                    params: { sessionId: target.sessionId, targetInfo: target.targetInfo, waitingForDebugger: false },
+                  },
+                })
+              }
+            }
 
             if (method === 'Target.setAutoAttach' && !sessionId) {
               // Re-read state after async routeCdpCommand — targets may have changed
@@ -1883,6 +1928,10 @@ export async function startPlayWriterCDPRelayServer({
           releaseClientScreencasts(clientId)
           releaseClientRecordings(clientId)
           releaseClientRuntimes(clientId)
+          for (const [key, holders] of persistentFocus) {
+            holders.delete(clientId)
+            if (holders.size === 0) persistentFocus.delete(key)
+          }
           store.setState((s) => relayState.removePlaywrightClient(s, { clientId }))
           logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`))
         },
@@ -2161,6 +2210,18 @@ export async function startPlayWriterCDPRelayServer({
             })
 
             const cdpEvent: CDPEventBase = { method, sessionId, params }
+            if (method === 'Inspector.workerScriptLoaded' && sessionId) {
+              store.setState((s) => {
+                const ext = s.extensions.get(connectionId)
+                const target = ext?.connectedTargets.get(sessionId)
+                if (!ext || !target) return s
+                const targets = new Map(ext.connectedTargets)
+                targets.set(sessionId, { ...target, workerScriptLoaded: true })
+                const extensions = new Map(s.extensions)
+                extensions.set(connectionId, { ...ext, connectedTargets: targets })
+                return { ...s, extensions }
+              })
+            }
             trackRuntimeEvent({ extensionId: connectionId, event: cdpEvent })
             emitter.emit('cdp:event', { event: cdpEvent, sessionId })
 
@@ -2177,10 +2238,17 @@ export async function startPlayWriterCDPRelayServer({
                   ? getPageTargetForFrameId({ extensionState: currentExtState, frameId: iframeParentFrameId })?.sessionId
                   : undefined
 
-              // Dedicated workers are children of a page or OOPIF session. Forward the attach to that session,
-              // but never track them as targets: setAutoAttach and getTargets replays list root targets only.
+              // Workers inherit their parent's ownership and replay only under that parent, never as roots.
               // Patchright attaches them without Runtime.enable (globalThis objectId trick).
               if (targetParams.targetInfo.type === 'worker' && incomingSessionId) {
+                store.setState((s) => relayState.addTarget(s, {
+                  extensionId: connectionId,
+                  sessionId: targetParams.sessionId,
+                  targetId: targetParams.targetInfo.targetId,
+                  targetInfo: targetParams.targetInfo,
+                  ownerKey: currentExtState?.connectedTargets.get(incomingSessionId)?.ownerKey,
+                  parentSessionId: incomingSessionId,
+                }))
                 sendToPlaywright({
                   message: { sessionId: incomingSessionId, method, params: targetParams } as CDPEventBase,
                   source: 'extension',
@@ -2188,7 +2256,8 @@ export async function startPlayWriterCDPRelayServer({
                 })
                 // A connected client resumes the worker after attaching. Without clients, nobody would.
                 const hasClients = Array.from(store.getState().playwrightClients.values()).some((client) => {
-                  return client.extensionId === connectionId
+                  const parent = currentExtState?.connectedTargets.get(incomingSessionId)
+                  return client.extensionId === connectionId && parent !== undefined && canClientSeeTarget({ client, target: parent })
                 })
                 if (targetParams.waitingForDebugger && !hasClients) {
                   void sendToExtension({
@@ -2290,10 +2359,6 @@ export async function startPlayWriterCDPRelayServer({
               focusedTabs.delete(`${connectionId}\0${detachParams.sessionId}`)
               nativeRecordings.delete(`${connectionId}\0${detachParams.sessionId}`)
               humanInput.forget({ extensionId: connectionId, sessionId: detachParams.sessionId })
-              store.setState((s) =>
-                relayState.removeTarget(s, { extensionId: connectionId, sessionId: detachParams.sessionId }),
-              )
-
               sendToPlaywright({
                 message: {
                   sessionId,
@@ -2303,11 +2368,11 @@ export async function startPlayWriterCDPRelayServer({
                 source: 'extension',
                 extensionId: connectionId,
               })
+              store.setState((s) =>
+                relayState.removeTarget(s, { extensionId: connectionId, sessionId: detachParams.sessionId }),
+              )
             } else if (method === 'Target.targetCrashed') {
               const crashParams = params!
-              store.setState((s) =>
-                relayState.removeTargetByCrash(s, { extensionId: connectionId, targetId: crashParams.targetId }),
-              )
               logger?.log(pc.red('[Server] Target crashed, removing:'), crashParams.targetId)
 
               sendToPlaywright({
@@ -2318,6 +2383,9 @@ export async function startPlayWriterCDPRelayServer({
                 source: 'extension',
                 extensionId: connectionId,
               })
+              store.setState((s) =>
+                relayState.removeTargetByCrash(s, { extensionId: connectionId, targetId: crashParams.targetId }),
+              )
             } else if (method === 'Target.targetInfoChanged') {
               const infoParams = params!
               store.setState((s) =>
