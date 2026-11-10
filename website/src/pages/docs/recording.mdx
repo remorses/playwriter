@@ -1,17 +1,23 @@
 ---
 title: Record Browser Automation as MP4 Video
 sidebarTitle: Recording
-description: Record browser sessions as MP4 or WebM video with CDP screencast and ffmpeg. No permission click, survives page navigation, optional page audio, ghost cursor overlay, a manual clock that cuts agent latency, and demo acceleration for idle sections.
+description: Record browser sessions as up to 4K 60 fps MP4 video with Chrome's native screen recorder. No permission click, survives page navigation, tab audio, ghost cursor overlay, a manual clock that cuts agent latency, and demo acceleration for idle sections.
 icon: lucide:video
 ---
 
-Have the agent **record what it's doing** as video. Playwriter streams JPEG frames with CDP `Page.startScreencast` and pipes them to `ffmpeg`. No permission prompt, no extension click, and the **recording survives page navigation**, also cross-site.
+Have the agent **record what it's doing** as video. Playwriter uses Chrome's native recorder (CDP `Page.startScreenRecording`): Chrome encodes the video itself, out of process, at up to **4K and 60 fps**. No permission prompt, no extension click, and the **recording survives page navigation**, also cross-site.
+
+```
+Page.startScreenRecording ──> AV1 fragments ──> ffmpeg (live) ──> H.264 .mp4
+   Chrome encodes                drained every 200ms              stop takes < 1s
+```
 
 It works in every mode: extension, direct CDP (`PLAYWRITER_DIRECT`), [headless](/docs/headless), cloud browsers and remote control.
 
 ## Requirements
 
-`ffmpeg` must be installed and on `PATH`.
+- **Chrome 153 or newer.** Older Chrome fails with an "update Chrome" error.
+- **`ffmpeg`** on `PATH` for the default H.264 output. Pass `codec: 'av1'` to record without ffmpeg.
 
 ```bash
 # macOS
@@ -28,10 +34,11 @@ sudo apt install ffmpeg
 ```js
 state.video = await recording.start({
   page: state.page,
-  outputPath: '/absolute/path/to/recording.mp4',
-  frameRate: 30,
+  outputPath: 'demo.mp4', // relative paths resolve against the session cwd
 })
 ```
+
+Set the viewport **before** `recording.start()`. The output size is fixed at start; resizing the viewport later adds black bars.
 
 ## Navigate and interact
 
@@ -44,47 +51,51 @@ await state.page.goBack()
 // Still recording
 ```
 
-Static pages are fine too. The last frame is **repeated** at a constant frame rate, so the video duration matches real time.
+Chrome writes only frames that **changed**, so an idle page costs almost nothing (about 8 MB per idle hour). The video duration still matches real time.
 
 ## Stop and save
 
 ```js
 state.recordingResult = await state.video.stop()
-// => { path, duration, size, executionTimestamps }
+// => { path, duration, size, endReason, executionTimestamps }
 ```
 
-`duration` is the media duration in ms, `size` is the file size in bytes. Save the full result to `state` because `executionTimestamps` is needed for `createDemoVideo`.
+`duration` is the recorded time in ms, `size` is the file size in bytes. Save the full result to `state` because `executionTimestamps` is needed for `createDemoVideo`.
+
+Lost the handle? `await recording.stop({ page: state.page })` stops the recording of that page, `await recording.stop()` stops the only active one.
 
 ## Options
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `page` | Page | required | Page to record. Change it later with `setPage()` |
-| `outputPath` | string | required | Absolute output path. `.mp4`, `.mov`, `.mkv` or `.webm` |
+| `outputPath` | string | required | `.mp4`, `.mov`, `.mkv` or `.webm`. Relative to the session cwd |
+| `codec` | `'h264'` \| `'av1'` | `'h264'` | `'av1'` keeps Chrome's own output and needs no ffmpeg |
 | `clock` | `'real'` \| `'manual'` | `'real'` | `'manual'` records only inside `wait(ms)`; see [Manual clock](#manual-clock) |
-| `frameRate` | number | 30 | Frames per second, max 60 |
-| `audio` | boolean | false | Record page audio (see [Audio](#audio)) |
-| `maxSize` | number | 1920 | Longest output edge in pixels |
-| `quality` | number | 90 | JPEG quality of captured frames, 0-100 |
+| `frameRate` | number | 60 | Max frames per second, up to 120 |
+| `audio` | boolean | false | Record tab audio (see [Audio](#audio)) |
+| `maxSize` | number | 3840 | Longest output edge in pixels. Pass 1920 for X uploads |
 | `aspectRatio` | object \| null | `{ width: 16, height: 9 }` | Shrink viewport to this ratio; `null` to skip |
-| `maxDurationMs` | number | 15 min | Auto-stop safety limit; `0` to disable |
+| `maxDurationMs` | number | 60 min | Auto-stop if the agent forgets `stop()`; `0` to disable |
 
 ## Output format
 
-The output size is the viewport in **device pixels** (viewport × `devicePixelRatio`), with the longest edge capped by `maxSize` and both dimensions rounded to even numbers.
+The output size is the viewport in **device pixels** (viewport × `devicePixelRatio`), fit inside `maxSize` and never upscaled. A 1920×1080 viewport on a Retina display gives a 3840×2160 video.
 
-| Extension | Video | Audio |
+| Extension | `codec: 'h264'` (default) | `codec: 'av1'` |
 |---|---|---|
-| `.mp4`, `.mov`, `.mkv` | H.264 | AAC |
-| `.webm` | VP8 (realtime) | Opus |
+| `.mp4` | H.264 + AAC | AV1 + Opus |
+| `.mov` | H.264 + AAC | not supported |
+| `.mkv` | H.264 + AAC | AV1 + Opus |
+| `.webm` | not supported | AV1 + Opus (default) |
 
-H.264 uses a **hardware encoder** when ffmpeg has one (`h264_videotoolbox` on macOS, NVENC, QSV or AMF on Windows and Linux), else `libx264`. Any other extension throws.
+Chrome always encodes AV1. For H.264, ffmpeg converts the stream **while recording**, with a hardware encoder when it has one (`h264_videotoolbox` on macOS, NVENC, QSV or AMF on Windows and Linux), else `libx264`.
 
-On 120 Hz or 144 Hz displays Chrome sends more frames than needed, so the recorder asks for every Nth frame to save CPU.
+While recording, the video grows in `<name>.<id>.partial.mp4` next to the output. If the agent or relay crashes, that file still plays.
 
 ## Audio
 
-Pass `audio: true` to record **page audio**:
+Pass `audio: true` to record **tab audio**:
 
 ```js
 await recording.start({
@@ -94,13 +105,7 @@ await recording.start({
 })
 ```
 
-Playwriter injects a Web Audio tap in the page. It captures `<audio>` and `<video>` elements (also DRM media) and AudioContexts that play to the speakers, then sends the PCM to ffmpeg.
-
-Limitations:
-
-- No audio from cross-origin (out-of-process) iframes
-- An AudioContext graph wired **before** `recording.start` is missed
-- The page can detect the patched audio APIs while recording
+Chrome records everything the tab plays, cross-origin iframes included, without touching page scripts.
 
 ## Manual clock
 
@@ -126,11 +131,11 @@ agent thinks 10s                      ──> page runs, nothing written
 execute 2: wheel() → video.wait(600)  ──> 600ms of frames written
 ```
 
-Put each action and its `wait()` in the **same execute call**. An animation that starts in one call and finishes before the next call's `wait()` is not in the video. Use `video.wait(ms)` instead of `waitForTimeout()` whenever the viewer should see the time pass. `audio: true` is not supported yet with `clock: 'manual'`.
+Put each action and its `wait()` in the **same execute call**. An animation that starts in one call and finishes before the next call's `wait()` is not in the video. Use `video.wait(ms)` instead of `waitForTimeout()` whenever the viewer should see the time pass.
 
 ## Record another tab
 
-`setPage()` moves the recording to another tab. The output size stays the same; frames are scaled and padded to fit:
+`setPage()` moves the recording to another tab. The new tab gets the same viewport size, so the video keeps one frame size:
 
 ```js
 state.other = await context.newPage()
@@ -144,9 +149,10 @@ await state.video.setPage(state.other)
 state.video.isRecording  // false after stop, cancel, page close or max duration
 state.video.page         // tab being recorded
 await state.video.cancel()  // stop without saving
+console.log(state.video) // { outputPath, isRecording, elapsedSec, bytes, autoStopInSec, ... }
 ```
 
-Several pages can record **at the same time**. Each `recording.start()` returns its own handle.
+Several pages can record **at the same time**, one recording per page. Each `recording.start()` returns its own handle.
 
 ## Ghost cursor
 
@@ -192,11 +198,9 @@ import { startRecording } from 'playwriter'
 const rec = await startRecording({
   page,
   outputPath: './demo.mp4',
-  audio: false,
-  frameRate: 30,
 })
 await page.goto('https://example.com')
-const { path, duration, size } = await rec.stop()
+const { path, duration, size, endReason } = await rec.stop()
 // or: await rec.cancel()
 ```
 
@@ -204,6 +208,7 @@ const { path, duration, size } = await rec.stop()
 
 ## Limitations
 
-- **Ends with the page.** The recording is tied to the Playwright page and stops when the page closes or the session is reset.
-- **Auto-stops after 15 minutes** by default. Override with `maxDurationMs`.
+- **Ends with the page.** When the page closes, the file is saved with what was recorded and the next execute output shows a warning. A session reset stops the recording too.
+- **Auto-stops after 60 minutes** by default and saves the file. Override with `maxDurationMs`.
+- **One screencast per tab.** While a tab records, it cannot [stream](/docs/streaming) or show the remote live view, and the other way around.
 - **Viewport auto-resizes** to 16:9 (it only shrinks). Pass `aspectRatio: null` to keep the current size.

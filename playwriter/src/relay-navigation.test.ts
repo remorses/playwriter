@@ -510,8 +510,9 @@ describe('Relay Navigation Tests', () => {
     await page.close()
   }, 60000)
 
-  // Recording uses CDP screencast: no extension click, survives a cross-site
-  // navigation (new renderer process), and taps page audio.
+  // Recording uses Chrome's native Page.startScreenRecording through chrome.debugger:
+  // no extension click, survives a cross-site navigation (new renderer process),
+  // records tab audio, and the relay stops it when the client disconnects.
   it('records video and page audio across a cross-site navigation', async () => {
     const browserContext = getBrowserContext()
     const serviceWorker = await getExtensionServiceWorker(browserContext)
@@ -543,7 +544,8 @@ describe('Relay Navigation Tests', () => {
       await globalThis.toggleExtensionForActiveTab()
     })
 
-    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const orphanPath = path.join(process.cwd(), 'tmp', 'relay-navigation-orphan.mp4')
+    let browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
     try {
       const cdpPage = browser
         .contexts()[0]
@@ -555,15 +557,13 @@ describe('Relay Navigation Tests', () => {
       const recording = await ScreenRecording.start({ page: cdpPage, outputPath, audio: true, frameRate: 30 })
       await cdpPage.click('#play')
       await new Promise((r) => setTimeout(r, 1500))
-      const framesBeforeNavigation = recording.capture.stats.capturedFrames
-
       await cdpPage.goto(`http://127.0.0.1:${port}/b`)
-      await new Promise((r) => setTimeout(r, 1500))
-      const framesAfterNavigation = recording.capture.stats.capturedFrames - framesBeforeNavigation
+      await new Promise((r) => setTimeout(r, 2500))
+      // Live drain: bytes arrive while recording, not only at stop
+      expect(recording.bytes).toBeGreaterThan(0)
 
       const result = await recording.stop()
-      expect(framesAfterNavigation).toBeGreaterThan(10)
-      expect(recording.capture.stats.audioChunks).toBeGreaterThan(5)
+      expect(result.endReason).toBe('stopped')
 
       const { spawnSync } = await import('node:child_process')
       const probe = JSON.parse(
@@ -575,7 +575,10 @@ describe('Relay Navigation Tests', () => {
           "video:h264",
         ]
       `)
-      expect(Math.abs(Number(probe.format.duration) * 1000 - result.duration)).toBeLessThan(100)
+      expect(Math.abs(Number(probe.format.duration) * 1000 - result.duration)).toBeLessThan(1000)
+      // The spinning box after the navigation is in the video
+      const unique = spawnSync('ffmpeg', ['-hide_banner', '-ss', '2', '-i', result.path, '-vf', 'mpdecimate', '-fps_mode', 'vfr', '-an', '-f', 'null', '-']).stderr.toString()
+      expect(Number([...unique.matchAll(/frame=\s*(\d+)/g)].pop()?.[1])).toBeGreaterThan(20)
 
       // The tone plays during the first part and stops at the navigation
       const maxVolume = (from: number, to: number) => {
@@ -584,11 +587,32 @@ describe('Relay Navigation Tests', () => {
       }
       expect(maxVolume(0.5, 1.4)).toBeGreaterThan(-20)
       expect(maxVolume(result.duration / 1000 - 0.8, result.duration / 1000)).toBeLessThan(-60)
+
+      // A recording left running by a disconnected client blocks the tab until the relay stops it
+      await ScreenRecording.start({ page: cdpPage, outputPath: orphanPath, codec: 'av1' })
+      const { getCDPSessionForPage } = await import('./cdp-session.js')
+      const screencastError = await (await getCDPSessionForPage({ page: cdpPage }))
+        .send('Page.startScreencast', { format: 'jpeg' })
+        .then(() => 'started', (error: Error) => error.message)
+      expect(screencastError).toContain('This tab is being recorded with recording.start')
+      await browser.close()
+      browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+      const reconnectedPage = browser
+        .contexts()[0]
+        .pages()
+        .find((p) => p.url().endsWith('/b'))!
+      const next = await ScreenRecording.start({ page: reconnectedPage, outputPath: orphanPath, codec: 'av1' })
+      await next.cancel()
     } finally {
       await browser.close()
       await page.close()
       await server.close()
       fs.rmSync(outputPath, { force: true })
+      fs.rmSync(orphanPath, { force: true })
+      // The relay stopped the orphan: its partial file is left behind
+      for (const file of fs.readdirSync(path.dirname(orphanPath)).filter((name) => name.startsWith('relay-navigation-orphan.'))) {
+        fs.rmSync(path.join(path.dirname(orphanPath), file), { force: true })
+      }
     }
   }, 60000)
 

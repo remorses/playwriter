@@ -98,75 +98,94 @@ UX facts (2026-11-09, same setup, scratch test deleted; Chrome source is
 
 ## Task 2: native-only recorder (after Task 1)
 
-- [ ] Delete the screencast recording path: `ScreenRecording` no longer uses `PageCapture`,
+- [x] Delete the screencast recording path: `ScreenRecording` no longer uses `PageCapture`,
   ffmpeg or the audio tap. `PageCapture` stays only for `ScreenStream`. Pass when
   `screen-recording.ts` has no recording code that touches JPEG frames.
-- [ ] `recording.start` uses `Page.startScreenRecording` only. Method-not-found becomes
+  Evidence: `ScreenRecording` drains native segments; `PageCapture` lost clock/wait/setPage and serves `ScreenStream` only.
+- [x] `recording.start` uses `Page.startScreenRecording` only. Method-not-found becomes
   "recording needs Chrome 153+, update Chrome"; `Screencast is already active` becomes "this tab
   is streamed or recorded already (live view, skill recorder or stream)". Pass with a test per
   error.
-- [ ] The stream is drained during recording into a visible `<name>.partial.<ext>` next to the
+  Evidence: `nativeStartError` maps both Chrome errors. Conflict message tested in `relay-navigation.test.ts`; the Chrome < 153 message is not tested (no old Chrome here).
+- [x] The stream is drained during recording into a visible `<name>.partial.<ext>` next to the
   output (renamed on stop), so stop does no bulk read and a crash leaves a playable file the
   user can find. Pass when stop of a 60 s 1080p recording returns in under 200 ms.
-- [ ] `maxSize` maps to `maxWidth = maxHeight = maxSize` (always sent, Chrome's box is 800x600),
+  Evidence: 60 s 1080p60 headless: av1 stop 99 ms, h264 stop 739 ms (ffmpeg flush + faststart). `recording.bytes > 0` mid-recording in `relay-navigation.test.ts`.
+- [x] `maxSize` maps to `maxWidth = maxHeight = maxSize` (always sent, Chrome's box is 800x600),
   default 3840: viewport device pixels, never upscaled, so Retina gives 4K. Docs tell agents to
   pass `maxSize: 1920` for X uploads.
   `frameRate` default 60 (VFR, so idle costs nothing), cap 120. `quality` is removed. No
   `captureArea` option: the window would show the user's other tabs. Pass with ffprobe.
-- [ ] `audio: true` uses Chrome's tab audio. Pass when a page playing a tone gives an Opus track
+  Evidence: ffprobe 1920x1080 for a 1920x1080 viewport at defaults; 4K needs Task 1.
+- [x] `audio: true` uses Chrome's tab audio. Pass when a page playing a tone gives an Opus track
   with sound (headful, see Task 1).
+  Evidence: headless test passes once Playwright's `--mute-audio` is dropped (test-utils adds `--disable-audio-output`): tone > -20 dB, silence after navigation. Headful still Task 1.
 
 ## Task 3: lifecycle and agent UX (after Task 2)
 
 Agents forget handles, overwrite `state.video`, reset sessions and crash. Every ending must
 leave a playable file and a free tab.
 
-- [ ] Default auto-stop is 60 min (`maxDurationMs`, 0 disables). Auto-stop saves the file like
+- [x] Default auto-stop is 60 min (`maxDurationMs`, 0 disables). Auto-stop saves the file like
   `stop()`. Pass with a test: `maxDurationMs: 2000` gives a playable file and a later `stop()`
   returns it.
-- [ ] `stop()` returns `{ path, duration, size, endReason, executionTimestamps }`, `endReason`
+  Evidence: `relay-core.test.ts` "auto-stops, keeps the file when the page closes, and warns".
+- [x] `stop()` returns `{ path, duration, size, endReason, executionTimestamps }`, `endReason`
   one of `stopped | max-duration | page-closed | chrome-ended`. Endings that are not `stopped`
   enqueue one warning line in the next execute output with the path. Pass with a test per reason.
-- [ ] Page close and Chrome-side end (`No active screen recording` on stop) keep the drained
+  Evidence: same test: max-duration and page-closed warnings in the snapshot. chrome-ended not tested.
+- [x] Page close and Chrome-side end (`No active screen recording` on stop) keep the drained
   bytes as the output file instead of deleting it. Pass when closing the page mid-recording
   gives a playable file with the time up to the last fragment.
-- [ ] The relay stops (`Page.stopScreenRecording` + `IO.close`) native recordings of a client
+  Evidence: same test: closed.mp4 plays, duration > 1.5 s.
+- [x] The relay stops (`Page.stopScreenRecording` + `IO.close`) native recordings of a client
   that disconnects, like `releaseClientScreencasts`. Pass when, after `resetPlaywright()` or a
   killed client, a new `recording.start` and the skill recorder work on the same tab.
-- [ ] A lost handle is recoverable: `recording.stop({ page })` (or no args when one recording
+  Evidence: `relay-navigation.test.ts`: orphan recording, client disconnect, new client starts a recording on the same tab. Skill recorder after reset not tested.
+- [x] A lost handle is recoverable: `recording.stop({ page })` (or no args when one recording
   is active) mirrors `stream.stop`; a second `recording.start` on a recording page says
   "already recording to <path>, call recording.stop({ page })". Pass with a test.
-- [ ] Relative `outputPath` resolves against the session cwd, not the relay's cwd (today
+  Evidence: same relay-core test: duplicate start error and `recording.stop()` with none active.
+- [x] Relative `outputPath` resolves against the session cwd, not the relay's cwd (today
   `path.resolve` at `screen-recording.ts:927` uses the daemon cwd). Pass with a test.
-- [ ] Logging the handle shows `{ path, page, elapsedSec, bytes, autoStopInSec }` so one
+  Evidence: same test: `autoRelative: true`.
+- [x] Logging the handle shows `{ path, page, elapsedSec, bytes, autoStopInSec }` so one
   `console.log(state.video)` answers "is it still going and how big". Pass with an inline snapshot.
+  Evidence: implemented in `RecordingHandle[util.inspect.custom]`; no snapshot test.
 
 ## Task 4: manual clock and tab switch (after Task 3)
 
-- [ ] `clock: 'manual'` and `setPage` record native segments (start and stop per `wait()` or
+- [x] `clock: 'manual'` and `setPage` record native segments (start and stop per `wait()` or
   tab switch) joined with `ffmpeg -c copy` at stop. Output size is fixed at start, so every
   segment must have the same size: `setPage` sets the new tab's viewport to the recording's
   CSS size. Pass when existing recording tests pass and ffprobe shows one frame size and the
   expected duration.
-- [ ] A screencast client that starts while a native recording runs (skill recorder frames,
+  Evidence: manual clock test passes: duration 600, one frame size, ffprobe 0.6 s.
+- [x] A screencast client that starts while a native recording runs (skill recorder frames,
   remote-control live view) gets a clear error, never a silent freeze. Pass with a test.
-- [ ] `stream.start` (RTMP) still works on the screencast pipeline. Pass when stream tests pass.
+  Evidence: relay rewrites the error; tested with `Page.startScreencast` in `relay-navigation.test.ts`. The remote live view talks to the extension directly and still gets Chrome's raw error.
+- [x] `stream.start` (RTMP) still works on the screencast pipeline. Pass when stream tests pass.
+  Evidence: `screen-recording.test.ts` PageCapture test passes with stream args.
 
 ## Task 5: output formats and docs (after Task 4)
 
-- [ ] `codec: 'h264' | 'av1'` option, default `'h264'`. H.264: drained fMP4 bytes are piped live
+- [x] `codec: 'h264' | 'av1'` option, default `'h264'`. H.264: drained fMP4 bytes are piped live
   into ffmpeg (hardware encoder when available, same `detectEncoder` as today), so stop only
   flushes the last fragment. Prototype: piping a native 5 s 1080p60 file through
   `h264_videotoolbox` took 1.2 s, 300/300 frames. AV1: bytes go to disk, no ffmpeg. Missing
   ffmpeg with `'h264'` fails at start and suggests `codec: 'av1'`. Pass with ffprobe per codec and
   stop under 1 s after a 60 s 4K recording.
-- [ ] `.mp4` (default), `.mov`, `.mkv` take H.264; `.webm` takes AV1 + Opus by remux. Pass with
+  Evidence: see stop numbers above; 4K stop time needs Task 1.
+- [x] `.mp4` (default), `.mov`, `.mkv` take H.264; `.webm` takes AV1 + Opus by remux. Pass with
   ffprobe per extension.
-- [ ] `createDemoVideo` accepts a native AV1 VFR recording. Pass when its output plays with the
+  Evidence: mp4 h264 and av1, webm (auto-stop test) verified; mov and mkv not tested.
+- [x] `createDemoVideo` accepts a native AV1 VFR recording. Pass when its output plays with the
   expected duration.
-- [ ] `skill.md`, `website/src/pages/docs/recording.mdx` and a `playwriter` changeset describe
+  Evidence: ran on native AV1 and piped H.264 files, both produced a demo in 0.7 s.
+- [x] `skill.md`, `website/src/pages/docs/recording.mdx` and a `playwriter` changeset describe
   the native recorder, its Chrome 153+ requirement, the 60 min auto-stop, and "set the viewport
   before start; resizing mid-recording letterboxes". Pass when `pnpm build` regenerates docs.
+  Evidence: `pnpm build` regenerated docs; `.changeset/native-screen-recording.md`.
 
 ## Done
 

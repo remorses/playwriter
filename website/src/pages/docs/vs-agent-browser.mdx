@@ -122,14 +122,12 @@ logins, and extensions are all there with zero setup. The site sees a real user 
 
 ## Video recording with page audio
 
-Both tools record the same way: CDP `Page.startScreencast` frames piped into ffmpeg. Neither needs a
-permission click, and both keep recording across page navigations.
-
-The differences are in the details. Playwriter asks Chrome for **JPEG** frames instead of PNG, so
-each frame is cheaper to encode and ship. It encodes H.264 with a **hardware encoder** when ffmpeg
-has one (VideoToolbox, NVENC, QSV, AMF). On 120 Hz and 144 Hz displays it asks for every Nth frame
-to save CPU. With `audio: true` it also records **page audio** through a Web Audio tap;
-agent-browser recordings have no audio.
+agent-browser pipes CDP `Page.startScreencast` PNG frames into ffmpeg. Playwriter uses Chrome's
+**native recorder** (`Page.startScreenRecording`, Chrome 153+): Chrome encodes the video out of
+process, so recording costs about 4x less Chrome CPU and 15x less CDP traffic, runs at **60 fps up
+to 4K**, and stops instantly. Neither needs a permission click, and both keep recording across page
+navigations. With `audio: true` Playwriter also records **tab audio**; agent-browser recordings have
+no audio.
 
 ```bash
 playwriter -s 1 -e "state.video = await recording.start({ page: state.page, outputPath: './demo.mp4', frameRate: 60 })"

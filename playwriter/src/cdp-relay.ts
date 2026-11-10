@@ -697,6 +697,29 @@ export async function startPlayWriterCDPRelayServer({
     })
   }
 
+  // Native Page.startScreenRecording outlives the client that started it, and
+  // blocks every screencast on that tab. Stop the ones a disconnected client
+  // left running (executor reset or crash).
+  const nativeRecordings = new Map<string, { extensionId: string; sessionId: string; clientId: string; stream: string }>()
+
+  function releaseClientRecordings(clientId: string): void {
+    Array.from(nativeRecordings.entries())
+      .filter(([, entry]) => {
+        return entry.clientId === clientId
+      })
+      .forEach(([key, { extensionId, sessionId, stream }]) => {
+        nativeRecordings.delete(key)
+        const send = (method: string, params: object) => {
+          return sendToExtension({ extensionId, method: 'forwardCDPCommand', params: { sessionId, method, params } })
+        }
+        send('Page.stopScreenRecording', {})
+          .then(() => send('IO.close', { handle: stream }))
+          .catch((error) => {
+            logger?.log(pc.yellow(`[Server] Failed to stop native recording for ${sessionId}: ${String(error)}`))
+          })
+      })
+  }
+
   function releaseClientScreencasts(clientId: string): void {
     Array.from(screencasts.values())
       .filter((entry) => {
@@ -909,8 +932,51 @@ export async function startPlayWriterCDPRelayServer({
         } else {
           entry.clients.delete(clientId)
         }
-        await applyScreencast({ extensionId: resolvedExtensionId, sessionId, source })
+        try {
+          await applyScreencast({ extensionId: resolvedExtensionId, sessionId, source })
+        } catch (error) {
+          if (method === 'Page.startScreencast') {
+            entry.clients.delete(clientId)
+          }
+          if (method === 'Page.startScreencast' && nativeRecordings.has(key)) {
+            throw new Error(
+              'This tab is being recorded with recording.start. Screencast (live view, skill recorder frames, stream) works again after the recording stops.',
+              { cause: error },
+            )
+          }
+          throw error
+        }
         return {}
+      }
+
+      case 'Page.startScreenRecording':
+      case 'Page.stopScreenRecording': {
+        if (!sessionId || !clientId || !resolvedExtensionId) {
+          break
+        }
+        const key = `${resolvedExtensionId}\0${sessionId}`
+        const forward = () => {
+          return sendToExtension({
+            extensionId: resolvedExtensionId,
+            method: 'forwardCDPCommand',
+            params: { sessionId, method, params, source },
+          }) as Promise<{ stream?: string }>
+        }
+        if (method === 'Page.stopScreenRecording') {
+          // Also on error: "No active screen recording" means nothing is left to release
+          return await forward().finally(() => {
+            nativeRecordings.delete(key)
+          })
+        }
+        const result = await forward()
+        if (result?.stream) {
+          nativeRecordings.set(key, { extensionId: resolvedExtensionId, sessionId, clientId, stream: result.stream })
+          // The client disconnected while Chrome was starting: release now, no later onClose comes
+          if (!store.getState().playwrightClients.has(clientId)) {
+            releaseClientRecordings(clientId)
+          }
+        }
+        return result
       }
 
       case 'Runtime.enable': {
@@ -1617,6 +1683,7 @@ export async function startPlayWriterCDPRelayServer({
 
         onClose() {
           releaseClientScreencasts(clientId)
+          releaseClientRecordings(clientId)
           store.setState((s) => relayState.removePlaywrightClient(s, { clientId }))
           logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`))
         },
@@ -1990,6 +2057,7 @@ export async function startPlayWriterCDPRelayServer({
             } else if (method === 'Target.detachedFromTarget') {
               const detachParams = params!
               screencasts.delete(`${connectionId}\0${detachParams.sessionId}`)
+              nativeRecordings.delete(`${connectionId}\0${detachParams.sessionId}`)
               humanInput.forget({ extensionId: connectionId, sessionId: detachParams.sessionId })
               store.setState((s) =>
                 relayState.removeTarget(s, { extensionId: connectionId, sessionId: detachParams.sessionId }),
@@ -2166,6 +2234,13 @@ export async function startPlayWriterCDPRelayServer({
             })
             .forEach(([key]) => {
               screencasts.delete(key)
+            })
+          Array.from(nativeRecordings.entries())
+            .filter(([, entry]) => {
+              return entry.extensionId === connectionId
+            })
+            .forEach(([key]) => {
+              nativeRecordings.delete(key)
             })
 
           if (successorExtension) {

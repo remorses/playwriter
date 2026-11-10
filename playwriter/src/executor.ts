@@ -1806,7 +1806,7 @@ export class PlaywrightExecutor {
         await ghostCursorController.hide({ page: targetPage })
       }
 
-      // Screen recording and RTMP streaming via CDP screencast (screen-recording.ts)
+      // Screen recording (native Page.startScreenRecording) and RTMP streaming (screencast), see screen-recording.ts
       const captureLogger = {
         log: (...args: unknown[]) => {
           this.logger.log('[playwriter]', ...args)
@@ -1818,6 +1818,10 @@ export class PlaywrightExecutor {
       const recordingApi = createRecordingApi({
         ghostCursorController,
         logger: captureLogger,
+        cwd: self.sessionCwd,
+        onWarning: (message) => {
+          self.enqueueWarning(message)
+        },
         onStart: () => {
           self.recordingStartedAt = Date.now()
           self.executionTimestamps = []
@@ -1958,6 +1962,7 @@ export class PlaywrightExecutor {
         },
         recording: {
           start: recordingApi.start,
+          stop: recordingApi.stop,
         },
         stream: {
           start: streamApi.start,

@@ -265,7 +265,7 @@ export async function probeVideo(filePath: string): Promise<VideoInfo> {
  * Run a process with argv (no shell). Returns stdout as string.
  * Avoids shell injection by never passing through a shell interpreter.
  */
-function runCommand({
+export function runCommand({
     bin,
     args,
     signal,

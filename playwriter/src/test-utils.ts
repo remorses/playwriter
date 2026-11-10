@@ -115,7 +115,10 @@ export async function setupTestContext({
     channel: 'chromium',
     headless: !process.env.HEADFUL,
     colorScheme: 'dark',
-    args: [`--disable-extensions-except=${allExtensionPaths}`, `--load-extension=${allExtensionPaths}`],
+    // Headless Playwright adds --mute-audio, which also silences native tab recording.
+    // --disable-audio-output keeps the speakers quiet instead.
+    ignoreDefaultArgs: ['--mute-audio'],
+    args: [`--disable-extensions-except=${allExtensionPaths}`, `--load-extension=${allExtensionPaths}`, '--disable-audio-output'],
   })
 
   const serviceWorker = await getExtensionServiceWorker(browserContext)

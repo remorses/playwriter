@@ -1190,23 +1190,21 @@ Labels are color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkbo
 
 **resizeImageForAgent** - shrink an image so it consumes fewer tokens when read back into context. The resized image is automatically included in the response (visible to the LLM). `await resizeImageForAgent({ input: '/absolute/path/to/screenshot.png' })`. Also accepts `width`, `height`, `maxDimension`, `quality`, `format` (default: `'png'`), `output`. Alias: `resizeImage`.
 
-**recording.start** - record the page as a video. Returns a handle; keep it in `state` to stop it in a later call. Uses CDP screencast piped to `ffmpeg` (**must be on PATH**). No user click needed; works in every mode (extension, direct CDP, headless, cloud, remote). **Recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Auto-resizes viewport to 16:9 (only shrinks, override with `aspectRatio: null`). Auto-stops after 15 min (override with `maxDurationMs`). Output is `.mp4`/`.mov`/`.mkv` (H.264) or `.webm` (VP8). Several pages can record at once. Recording ends when the page closes or the session is reset.
-
-`audio: true` taps page `<audio>`/`<video>` and AudioContexts. It misses cross-origin iframe audio and AudioContext graphs wired before start, and the page can detect the patched audio APIs.
+**recording.start** - record the page as a video with Chrome's native recorder (**Chrome 153+**), up to 4K 60 fps. Returns a handle; keep it in `state` to stop it in a later call. No user click needed; works in every mode (extension, direct CDP, headless, cloud, remote). **Recording survives page navigation**. Auto-overlays a ghost cursor that follows mouse actions. Auto-resizes viewport to 16:9 (only shrinks, override with `aspectRatio: null`). **Set the viewport before start**: output size is fixed at start. Output is H.264 `.mp4`/`.mov`/`.mkv` (`ffmpeg` **must be on PATH**) or `codec: 'av1'` (no ffmpeg, also `.webm`). Auto-stops after 60 min and saves the file (override with `maxDurationMs`). A closed page also saves the file; the next output shows a warning. One recording per page; a recording tab cannot stream or show the live view. `audio: true` records tab audio.
 
 For demos, use interaction methods (`locator.click()`, `page.mouse.move()`) instead of `goto()` to show realistic cursor motion.
 
 ```js
 state.video = await recording.start({
   page: state.page,
-  outputPath: '/absolute/path/to/recording.mp4',
-  frameRate: 30, // default, max 60
+  outputPath: 'demo.mp4', // relative to the session cwd
+  codec: 'h264', // default. 'av1' needs no ffmpeg
+  frameRate: 60, // default, max 120
   clock: 'real', // default. 'manual' records only inside wait(ms), see below
   audio: false, // default
-  maxSize: 1920, // default, longest output edge in pixels
-  quality: 90, // default, JPEG frame quality 0-100
+  maxSize: 3840, // default, longest output edge. Pass 1920 for X uploads
   aspectRatio: { width: 16, height: 9 }, // default, set null to skip
-  maxDurationMs: 15 * 60 * 1000, // default, set 0 to disable
+  maxDurationMs: 60 * 60 * 1000, // default, set 0 to disable
 })
 
 // Recording survives navigation
@@ -1216,9 +1214,10 @@ await state.page.waitForLoadState('domcontentloaded')
 await state.video.setPage(otherPage) // record another tab from now on
 
 // Stop — save full result including executionTimestamps for createDemoVideo
-state.recordingResult = await state.video.stop() // { path, duration, size, executionTimestamps }
+state.recordingResult = await state.video.stop() // { path, duration, size, endReason, executionTimestamps }
 
-// Other: state.video.isRecording, state.video.cancel()
+// Lost the handle: await recording.stop({ page: state.page })
+// Other: state.video.isRecording, state.video.cancel(), console.log(state.video) for elapsed time and bytes
 ```
 
 **Prefer `clock: 'manual'` for demo videos.** With the default `'real'` clock every second you spend thinking is in the video. `'manual'` writes frames only inside `wait(ms)`; the page runs normally in between, so the video has no idle time:
@@ -1230,7 +1229,7 @@ await state.video.wait(800) // records the next 800ms, animation included
 await state.video.stop()
 ```
 
-Put each action and its `wait()` in the **same execute call**, or the animation is over before recording resumes. Use `wait(ms)` instead of `waitForTimeout()` when the viewer should see time pass. No `audio` yet.
+Put each action and its `wait()` in the **same execute call**, or the animation is over before recording resumes. Use `wait(ms)` instead of `waitForTimeout()` when the viewer should see time pass.
 
 **ghostCursor.show / ghostCursor.hide** - the ghost cursor overlay is always on: the extension injects it hidden on every Playwriter-attached tab, it appears on the first Playwright mouse action (click, move, wheel) and fades out after 5s idle. These methods only matter if you want to change the cursor style or temporarily hide it:
 

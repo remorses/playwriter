@@ -1800,10 +1800,6 @@ describe('Relay Core Tests', () => {
       [2m      - element is not visible[22m
       [2m    - retrying click action[22m
       [2m    - waiting 20ms[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      [2m    - element is not visible[22m
-      [2m  - retrying click action[22m
-      [2m    - waiting 100ms[22m
       ",
             "type": "text",
           },
@@ -1891,20 +1887,13 @@ describe('Relay Core Tests', () => {
       [2m  - waiting for locator('#covered-btn')[22m
       [2m    - locator resolved to <button id="covered-btn">Covered</button>[22m
       [2m  - attempting click action[22m
-      [2m    2 × waiting for element to be visible, enabled and stable[22m
-      [2m      - element is visible, enabled and stable[22m
-      [2m      - scrolling into view if needed[22m
-      [2m      - done scrolling[22m
-      [2m      - <div id="overlay">Overlay</div> intercepts pointer events[22m
-      [2m    - retrying click action[22m
-      [2m    - waiting 20ms[22m
       [2m    - waiting for element to be visible, enabled and stable[22m
       [2m    - element is visible, enabled and stable[22m
       [2m    - scrolling into view if needed[22m
       [2m    - done scrolling[22m
       [2m    - <div id="overlay">Overlay</div> intercepts pointer events[22m
       [2m  - retrying click action[22m
-      [2m    - waiting 100ms[22m
+      [2m    - waiting for element to be visible, enabled and stable[22m
       ",
             "type": "text",
           },
@@ -1945,14 +1934,10 @@ describe('Relay Core Tests', () => {
       [2m  - waiting for locator('#invisible')[22m
       [2m    - locator resolved to <button id="invisible">Invisible</button>[22m
       [2m  - attempting click action[22m
-      [2m    2 × waiting for element to be visible, enabled and stable[22m
-      [2m      - element is not visible[22m
-      [2m    - retrying click action[22m
-      [2m    - waiting 20ms[22m
       [2m    - waiting for element to be visible, enabled and stable[22m
       [2m    - element is not visible[22m
       [2m  - retrying click action[22m
-      [2m    - waiting 100ms[22m
+      [2m    - waiting for element to be visible, enabled and stable[22m
       ",
             "type": "text",
           },
@@ -2047,16 +2032,77 @@ describe('Relay Core Tests', () => {
       expect(result.isError).toBeFalsy()
       expect((result.content as Array<{ text: string }>)[0].text).toMatchInlineSnapshot(`"[return value] { duration: 600, executionTimestamps: [], isRecording: false }"`)
 
-      // 15 frames for 500ms + 3 frames for 100ms at 30 fps. The 300ms gap is cut.
+      // 500ms + 100ms of video, the 300ms gap is cut. Both tabs have one frame size.
       const { spawnSync } = await import('node:child_process')
-      const frames = spawnSync('ffprobe', [
-        '-v', 'error', '-count_frames', '-select_streams', 'v:0',
-        '-show_entries', 'stream=nb_read_frames', '-of', 'default=nw=1:nk=1', outputPath,
-      ]).stdout.toString().trim()
-      expect(frames).toBe('18')
+      const probe = spawnSync('ffprobe', [
+        '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=width,height:format=duration', '-of', 'json', outputPath,
+      ]).stdout.toString()
+      const { frames, format } = JSON.parse(probe) as { frames: Array<{ width: number; height: number }>; format: { duration: string } }
+      expect(new Set(frames.map((frame) => `${frame.width}x${frame.height}`)).size).toBe(1)
+      expect(Math.abs(Number(format.duration) - 0.6)).toBeLessThan(0.15)
     } finally {
       await server.close()
       fs.rmSync(outputPath, { force: true })
+    }
+  }, 60000)
+
+  // Agents forget stop() and close tabs. Every ending keeps a playable file and warns.
+  it('auto-stops, keeps the file when the page closes, and warns', async () => {
+    await ensureConnectedTabForExecute()
+    const dir = path.join(process.cwd(), 'tmp', 'recording-endings')
+    fs.rmSync(dir, { recursive: true, force: true })
+    try {
+      const result = await client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
+            const spin = '<div style="width:80px;height:80px;background:red;animation:s 1s linear infinite"></div><style>@keyframes s{to{transform:rotate(360deg)}}</style>'
+            state.endA = await context.newPage()
+            await state.endA.setContent(spin)
+            const auto = await recording.start({ page: state.endA, outputPath: 'tmp/recording-endings/auto.webm', maxDurationMs: 2500 })
+            const duplicate = await recording.start({ page: state.endA, outputPath: 'tmp/recording-endings/dup.mp4' }).then(() => 'started', (error) => error.message)
+            state.endB = await context.newPage()
+            await state.endB.setContent(spin)
+            const closed = await recording.start({ page: state.endB, outputPath: 'tmp/recording-endings/closed.mp4', codec: 'av1' })
+            await new Promise((r) => setTimeout(r, 3000))
+            const endB = state.endB
+            delete state.endB
+            await endB.close()
+            const autoResult = await auto.stop()
+            const closedResult = await closed.stop()
+            const endA = state.endA
+            delete state.endA
+            await endA.close()
+            return {
+              duplicate,
+              auto: autoResult.endReason,
+              autoRelative: autoResult.path.endsWith('tmp/recording-endings/auto.webm'),
+              closed: closedResult.endReason,
+              noneLeft: await recording.stop().then(() => 'stopped', (error) => error.message),
+            }
+          `,
+        },
+      })
+      expect(result.isError).toBeFalsy()
+      const text = (result.content as Array<{ text: string }>)[0].text.replaceAll(dir, '<dir>')
+      expect(text).toMatchInlineSnapshot(`
+        "[WARNING] Recording ended without stop() (max-duration). Saved <dir>/auto.webm
+        [WARNING] Recording ended without stop() (page-closed). Saved <dir>/closed.mp4
+        [return value] {
+          duplicate: 'This page is already recording to <dir>/auto.webm. Call recording.stop({ page }) first.',
+          auto: 'max-duration',
+          autoRelative: true,
+          closed: 'page-closed',
+          noneLeft: 'No active recording'
+        }"
+      `)
+      const { spawnSync } = await import('node:child_process')
+      for (const name of ['auto.webm', 'closed.mp4']) {
+        const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', path.join(dir, name)])
+        expect(Number(probe.stdout.toString())).toBeGreaterThan(1.5)
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
     }
   }, 60000)
 

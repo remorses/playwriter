@@ -9,7 +9,7 @@ prompt: |
   playwriter/src/cli.ts (stream commands), playwriter/src/skill.md.
 ---
 
-Stream a tab **live to RTMP endpoints** like X Live, Twitch, or YouTube. Playwriter captures the page with CDP `Page.startScreencast`, the same pipeline used for [recording](/docs/recording), so the **stream survives page navigation**. Each JPEG frame is piped to an `ffmpeg` process that encodes in real time and pushes to your destinations.
+Stream a tab **live to RTMP endpoints** like X Live, Twitch, or YouTube. Playwriter captures the page with CDP `Page.startScreencast`, so the **stream survives page navigation**. Each JPEG frame is piped to an `ffmpeg` process that encodes in real time and pushes to your destinations.
 
 No permission click is needed. It works in extension mode, direct CDP mode (`PLAYWRITER_DIRECT`), headless, and cloud browsers.
 
@@ -107,6 +107,9 @@ await stream.stop({ page: state.page })
 | | `recording.*` | `stream.*` |
 |---|---|---|
 | Output | video file on disk | RTMP endpoints |
-| Duration | auto-stops after 15 min | runs until stopped, survives CLI exit |
+| Capture | Chrome's native recorder | CDP screencast JPEG frames |
+| Duration | auto-stops after 60 min | runs until stopped, survives CLI exit |
 | Audio | off by default | on by default |
-| Encoding | ffmpeg, H.264 or VP8 | ffmpeg, H.264 with fixed keyframe interval |
+| Encoding | Chrome AV1, H.264 by ffmpeg | ffmpeg, H.264 with fixed keyframe interval |
+
+A tab cannot record and stream at the same time: Chrome allows one screencast per tab.
