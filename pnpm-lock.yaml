@@ -94,6 +94,8 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  patchright-playwriter/playwright/packages/playwright-core: {}
+
   playwright:
     devDependencies:
       '@actions/core':
@@ -346,8 +348,8 @@ importers:
         specifier: ^1.30.0
         version: 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
       '@playwriter/patchright-core':
-        specifier: ^1.61.0-playwriter.1
-        version: 1.61.0-playwriter.1
+        specifier: workspace:^
+        version: link:../patchright-playwriter/playwright/packages/playwright-core
       '@strada.sh/sdk':
         specifier: ^0.10.0
         version: 0.10.0(@opentelemetry/api@1.9.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(drizzle-kit@1.0.0-beta.22)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.1.11))(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.20.6)(yaml@2.9.1))
@@ -2028,11 +2030,6 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
-
-  '@playwriter/patchright-core@1.61.0-playwriter.1':
-    resolution: {integrity: sha512-YSZ2wILegTKbQhMf1ZtPfCrfSsxl9d0goHKz1G+HFydOwXfv37q/WdK1uyUvZgkDT1zJYSUSbFESn5MX4E7Zkw==}
-    engines: {node: '>=18'}
-    hasBin: true
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -9277,8 +9274,6 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
-
-  '@playwriter/patchright-core@1.61.0-playwriter.1': {}
 
   '@polka/url@1.0.0-next.29': {}
 

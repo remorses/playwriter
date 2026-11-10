@@ -114,6 +114,13 @@ LAST=$(git tag -l '@xmorse/playwright-core@*' --sort=-v:refname | head -1)
 git log --oneline "$LAST"..HEAD -- packages/playwright-core/
 ```
 
+also check the `patchright-playwriter` submodule. if its built version is not on npm, or it has commits since the last publish, bump the version and publish `@playwriter/patchright-core` first with `pnpm publish` (see the patchright section below). `playwriter` depends on it with `workspace:^`, so pnpm writes the local version into the published package:
+
+```bash
+VERSION=$(node -p "require('./patchright-playwriter/playwright/packages/playwright-core/package.json').version")
+npm view "@playwriter/patchright-core@$VERSION" version  # empty: publish it first
+```
+
 after publishing the CLI (`playwriter` npm package), always create GitHub releases for both the CLI and the extension (if extension code changed). this is a manual step of every CLI release. `pnpm release` only builds the zip for the Chrome Web Store and never creates a GitHub release, so the extension GitHub release happens here, never skip it.
 
 check for unreleased extension changes against the last extension **GitHub release**, not the last `extension@` tag (tags are created on every manifest bump):
@@ -169,7 +176,7 @@ pnpm bootstrap
 pnpm --filter playwriter build
 ```
 
-`pnpm bootstrap` generates Playwright's injected sources and builds the local `@xmorse/playwright-core` fork. the playwriter build then creates client bundles used by the extension test build.
+`pnpm bootstrap` builds `@playwriter/patchright-core` in the `patchright-playwriter` submodule (`pnpm patchright:build`: clones Playwright, applies patches, needs npm, takes a few minutes), generates Playwright's injected sources and builds the local `@xmorse/playwright-core` fork. the playwriter build then creates client bundles used by the extension test build.
 
 do not run only `pnpm playwright:build` in a fresh worktree. it does not generate the injected sources. missing setup causes errors such as `Cannot find module './lib/inprocess'`, `Cannot find module '../generated/clockSource'`, or unresolved `playwriter/dist/ghost-cursor-client.js?raw` and `playwriter/dist/bippy.js?raw` imports.
 
@@ -477,9 +484,9 @@ do this when user asks to try framer iframes.
 
 # patchright-playwriter fork (@playwriter/patchright-core)
 
-we maintain a separate repo at https://github.com/remorses/patchright-playwriter that produces `@playwriter/patchright-core`. this package combines patchright's stealth patches (undetected Playwright, bypasses Cloudflare/Datadome/etc.) with our playwriter extensions.
+we maintain https://github.com/remorses/patchright-playwriter, the `./patchright-playwriter` submodule. it produces `@playwriter/patchright-core`: patchright's patches plus our playwriter extensions. `playwriter` uses it for `--patchright` sessions and depends on it with `workspace:^`. the built package is `patchright-playwriter/playwright/packages/playwright-core` (gitignored there, made by `pnpm patchright:build`).
 
-the fork lives at `~/Documents/GitHub/patchright-playwriter/`. read its `AGENTS.md` for full build, publish, and sync instructions.
+read its `AGENTS.md` for full build, publish, and sync instructions. commit and push submodule changes there first, then commit the submodule pointer here.
 
 ## applying new playwright fork changes to patchright-playwriter
 
@@ -487,13 +494,13 @@ when we add features or fixes to our playwright fork (the `./playwright` submodu
 
 1. find the last sync date by checking the patchright-playwriter repo's `playwriter.patch` header or commit history:
 ```bash
-cd ~/Documents/GitHub/patchright-playwriter
+cd patchright-playwriter
 git log --oneline -5
 ```
 
 2. in this repo, generate a diff of new changes since that date:
 ```bash
-cd ~/Documents/GitHub/playwriter/playwright
+cd playwright
 BASE=$(git merge-base HEAD upstream/main)
 git log --oneline $BASE..HEAD -- packages/playwright-core/src/ | head -20
 # generate the full diff
@@ -502,7 +509,7 @@ git diff $BASE..HEAD -- packages/playwright-core/src/ > /tmp/playwriter-changes.
 
 3. in the patchright-playwriter repo, rebuild from scratch then apply:
 ```bash
-cd ~/Documents/GitHub/patchright-playwriter
+cd patchright-playwriter
 bash utils/rebuild_local_package.sh
 cd playwright
 git apply --reject /tmp/playwriter-changes.patch

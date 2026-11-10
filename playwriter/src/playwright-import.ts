@@ -30,9 +30,8 @@ export function getChromium({ patchright = false }: { patchright?: boolean } = {
   let chromium = chromiumByDriver.get(driver)
   if (!chromium) {
     // Lazy: Patchright is only loaded by sessions that use it.
-    // TODO: import it typed once @playwriter/patchright-core is built on the same Playwright version as
-    // @xmorse/playwright-core (published 1.61 vs fork 1.59, and 1.61 lacks runWithAbortSignal, see executor.ts).
-    // ~/Documents/GitHub/patchright-playwriter
+    // TODO: import it typed once both packages build on the same Playwright version. Patchright is 1.64
+    // (patchright-playwriter submodule), @xmorse/playwright-core is 1.59, so overloads like Browser.on differ.
     chromium = patchright
       ? import('@playwriter/patchright-core' as string).then((mod: { chromium: Chromium }) => mod.chromium)
       : import('@xmorse/playwright-core').then((mod) => mod.chromium)

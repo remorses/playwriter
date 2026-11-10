@@ -158,8 +158,8 @@ describe('Patchright and verification pages', () => {
         await page.mouse.click(360, 220);
         await page.mouse.click(100, 100);
         await page.screenshot();
-        // Patchright evaluates in an isolated world unless the third argument is false
-        const report = await page.evaluate(() => JSON.stringify(window.report()), undefined, false);
+        // Patchright evaluates in an isolated world unless the fourth argument is false
+        const report = await page.evaluate(() => JSON.stringify(window.report()), undefined, undefined, false);
         await page.close();
         return report;
       `,
@@ -177,6 +177,7 @@ describe('Patchright and verification pages', () => {
         "nodes": [
           "DIV",
           "DIV",
+          "DIV#__playwriter_ghost_cursor__",
         ],
       }
     `)
@@ -206,7 +207,7 @@ describe('Patchright and verification pages', () => {
           const measured = await page.evaluate(() => {
             const gaps = keys.slice(1).map((t, i) => t - keys[i]);
             return { moves: moves.length, keys: keys.length, minGap: Math.min(...gaps) };
-          }${patchright ? ', undefined, false' : ''});
+          }${patchright ? ', undefined, undefined, false' : ''});
           await page.close();
           return measured;
         `,
@@ -256,8 +257,8 @@ describe('Patchright and verification pages', () => {
       return {
         state: Object.keys(state),
         isolated: await page.evaluate(() => typeof window.moves),
-        main: await page.evaluate(() => typeof window.moves, undefined, false),
-        humanized: await page.evaluate(() => moves.length > 10, undefined, false),
+        main: await page.evaluate(() => typeof window.moves, undefined, undefined, false),
+        humanized: await page.evaluate(() => moves.length > 10, undefined, undefined, false),
       };
     `)).toMatchInlineSnapshot(`"[return value] { state: [], isolated: 'undefined', main: 'object', humanized: true }"`)
 

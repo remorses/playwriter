@@ -1,3 +1,6 @@
 [submodule "playwright"]
 	path = playwright
 	url = https://github.com/remorses/playwright.git
+[submodule "patchright-playwriter"]
+	path = patchright-playwriter
+	url = https://github.com/remorses/patchright-playwriter.git

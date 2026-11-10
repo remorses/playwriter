@@ -1,6 +1,9 @@
 packages:
   - ./*
   - playwright/packages/playwright-core
+  # Built by patchright-playwriter/utils/rebuild_local_package.sh (pnpm bootstrap). Its root uses npm.
+  - patchright-playwriter/playwright/packages/playwright-core
+  - '!patchright-playwriter'
 
 preferWorkspacePackages: true
 

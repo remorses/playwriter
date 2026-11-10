@@ -2091,8 +2091,7 @@ export class PlaywrightExecutor {
           const runScript = () =>
             runAsFaultOwner({ owner: this, run: () => script.runInContext(vmContext, { timeout, displayErrors: true }) })
           return await Promise.race([
-            // TODO: patchright-core lacks runWithAbortSignal until playwriter.patch is synced. Then always call it.
-            chromium.runWithAbortSignal ? chromium.runWithAbortSignal(abortController.signal, runScript) : runScript(),
+            chromium.runWithAbortSignal(abortController.signal, runScript),
             new Promise((_, reject) => {
               // The race does not stop the script. Abort it so its running and later Playwright calls fail.
               const stop = (error: Error) => {
