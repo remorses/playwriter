@@ -22,6 +22,7 @@ import { REMOTE_EXTENSION_NOT_CONNECTED_ERROR } from './remote-control.js'
 import { EXTENSION_NOT_CONNECTED_ERROR, getExtensionOutdatedWarning } from './relay-client.js'
 import { waitForPageLoad, WaitForPageLoadOptions, WaitForPageLoadResult } from './wait-for-page-load.js'
 import { ICDPSession, getCDPSessionForPage } from './cdp-session.js'
+import type { Protocol } from './cdp-types.js'
 import { Debugger } from './debugger.js'
 import { Editor } from './editor.js'
 import { getStylesForLocator, formatStylesAsText, type StylesResult } from './styles.js'
@@ -439,6 +440,17 @@ function isRegExp(value: any): value is RegExp {
   return (
     typeof value === 'object' && value !== null && typeof value.test === 'function' && typeof value.exec === 'function'
   )
+}
+
+// Console argument as text, like DevTools shows it: primitives by value, objects by description.
+function describeRemoteObject(arg: Protocol.Runtime.RemoteObject): string {
+  if (arg.unserializableValue !== undefined) {
+    return arg.unserializableValue
+  }
+  if (arg.type === 'object' || arg.type === 'function') {
+    return arg.subtype === 'null' ? 'null' : (arg.description ?? arg.type)
+  }
+  return String(arg.value)
 }
 
 function isPromise(value: any): value is Promise<unknown> {
@@ -1023,6 +1035,11 @@ export class PlaywrightExecutor {
       this.pageLogCursor.delete(page)
     })
 
+    if (this.patchright) {
+      this.setupPatchrightLogListener(page)
+      return
+    }
+
     page.on('console', (msg) => {
       try {
         const logEntry = `[${msg.type()}] ${msg.text()}`
@@ -1033,11 +1050,53 @@ export class PlaywrightExecutor {
     })
 
     page.on('pageerror', (error) => {
-      this.addBrowserLog({ page, logEntry: `[pageerror] ${error.message}` })
-      if (this.stateKeysForPage(page).length > 0) {
-        this.enqueueOutputEvent({ type: 'page-error', message: error.message })
-      }
+      this.addPageError({ page, message: error.message })
     })
+  }
+
+  // Patchright keeps Runtime off, so page.on('console') stays silent. Raw Runtime events still arrive while
+  // another client keeps Runtime on, or while getLatestLogs turns it on to make Chrome replay its buffered
+  // messages. Every replay repeats all buffered messages, so timestamps drop the ones already stored.
+  private setupPatchrightLogListener(page: Page) {
+    let lastTimestamp = 0
+    const isNew = (timestamp: number) => {
+      if (timestamp <= lastTimestamp) {
+        return false
+      }
+      lastTimestamp = timestamp
+      return true
+    }
+    getCDPSessionForPage({ page })
+      .then((cdp) => {
+        cdp.on('Runtime.consoleAPICalled', (event) => {
+          if (isNew(event.timestamp)) {
+            this.addBrowserLog({ page, logEntry: `[${event.type}] ${event.args.map(describeRemoteObject).join(' ')}` })
+          }
+        })
+        cdp.on('Runtime.exceptionThrown', ({ timestamp, exceptionDetails }) => {
+          if (isNew(timestamp)) {
+            this.addPageError({ page, message: exceptionDetails.exception?.description?.split('\n')[0] ?? exceptionDetails.text })
+          }
+        })
+      })
+      .catch((e) => {
+        this.logger.error('[Executor] Failed to listen for Patchright page logs:', e)
+      })
+  }
+
+  // Chrome replays buffered console messages and exceptions on Runtime.enable. Patchright turns Runtime
+  // on only for this read, so the page sees a debugger for a few milliseconds, not the whole session.
+  private async readPatchrightLogs(page: Page) {
+    const cdp = await getCDPSessionForPage({ page })
+    await cdp.send('Runtime.enable')
+    await cdp.send('Runtime.disable')
+  }
+
+  private addPageError(options: { page: Page; message: string }) {
+    this.addBrowserLog({ page: options.page, logEntry: `[pageerror] ${options.message}` })
+    if (this.stateKeysForPage(options.page).length > 0) {
+      this.enqueueOutputEvent({ type: 'page-error', message: options.message })
+    }
   }
 
   private addBrowserLog(options: { page: Page; logEntry: string }) {
@@ -1665,6 +1724,17 @@ export class PlaywrightExecutor {
         }
 
         const relatedPages = this.pagesRelatedToPage(filterPage)
+        if (this.patchright) {
+          await Promise.all(
+            relatedPages
+              .filter((relatedPage) => !relatedPage.isClosed())
+              .map((relatedPage) => {
+                return this.readPatchrightLogs(relatedPage).catch((e) => {
+                  this.logger.error('[Executor] Failed to read Patchright page logs:', e)
+                })
+              }),
+          )
+        }
         allLogs = relatedPages.flatMap((relatedPage) => {
           return collectLogs(relatedPage)
         })

@@ -107,8 +107,8 @@ export class Debugger {
     if (this.debuggerEnabled) {
       return
     }
+    // Debugger.disable + enable re-emits scriptParsed. Runtime is shared with Playwright, keep it on.
     await this.cdp.send('Debugger.disable')
-    await this.cdp.send('Runtime.disable')
     this.scripts.clear()
     await this.cdp.send('Debugger.enable')
     await this.cdp.send('Runtime.enable')

@@ -985,6 +985,7 @@ export async function startPlayWriterCDPRelayServer({
         const key = `${resolvedExtensionId}\0${sessionId}`
         const runtime = runtimes.get(key)
         if (runtime && clientId) {
+          runtime.holders.add(clientId)
           await runtime.enabled
           // Round trip on the same session first: Chrome answers in order, so this client's
           // earlier commands (Page.getFrameTree) are answered before the contexts arrive.
@@ -1006,7 +1007,7 @@ export async function startPlayWriterCDPRelayServer({
         }
         // Set before any event arrives, so the contexts of this enable are tracked
         const enabled = enableRuntime({ extensionId: resolvedExtensionId, sessionId, method, params, source })
-        runtimes.set(key, { enabled, contexts: new Map() })
+        runtimes.set(key, { enabled, contexts: new Map(), holders: new Set(clientId ? [clientId] : []) })
         try {
           return await enabled
         } catch (error) {
@@ -1015,6 +1016,26 @@ export async function startPlayWriterCDPRelayServer({
           }
           throw error
         }
+      }
+
+      case 'Runtime.disable': {
+        if (!sessionId || !resolvedExtensionId) {
+          break
+        }
+        const key = `${resolvedExtensionId}\0${sessionId}`
+        const runtime = runtimes.get(key)
+        if (!runtime) {
+          break
+        }
+        if (clientId) {
+          runtime.holders.delete(clientId)
+        }
+        // Another client still needs Runtime (its contexts and console events). Keep it on.
+        if (runtime.holders.size > 0) {
+          return {}
+        }
+        runtimes.delete(key)
+        break
       }
     }
 
@@ -1070,10 +1091,23 @@ export async function startPlayWriterCDPRelayServer({
   // then destroys the old ones: in-flight evaluates and handles of other clients fail.
   // So only the first enable per target session is forwarded. Later clients get the
   // contexts tracked from events, replayed to them only.
+  // holders: clients that enabled Runtime and did not disable it. Runtime.disable reaches
+  // Chrome only from the last holder (Patchright turns Runtime on only to read logs).
+  // Disconnected clients stop holding it, but Runtime stays on until someone disables it.
   const runtimes = new Map<
     string,
-    { enabled: Promise<unknown>; contexts: Map<number, Protocol.Runtime.ExecutionContextDescription> }
+    {
+      enabled: Promise<unknown>
+      contexts: Map<number, Protocol.Runtime.ExecutionContextDescription>
+      holders: Set<string>
+    }
   >()
+
+  function releaseClientRuntimes(clientId: string): void {
+    for (const runtime of runtimes.values()) {
+      runtime.holders.delete(clientId)
+    }
+  }
 
   function trackRuntimeEvent({ extensionId, event }: { extensionId: string; event: CDPEventBase }): void {
     if (event.method === 'Target.detachedFromTarget') {
@@ -1683,6 +1717,7 @@ export async function startPlayWriterCDPRelayServer({
         onClose() {
           releaseClientScreencasts(clientId)
           releaseClientRecordings(clientId)
+          releaseClientRuntimes(clientId)
           store.setState((s) => relayState.removePlaywrightClient(s, { clientId }))
           logger?.log(pc.yellow(`Playwright client disconnected: ${clientId} (${store.getState().playwrightClients.size} remaining)`))
         },
@@ -1976,6 +2011,29 @@ export async function startPlayWriterCDPRelayServer({
                 targetParams.targetInfo.type === 'iframe' && iframeParentFrameId && currentExtState
                   ? getPageTargetForFrameId({ extensionState: currentExtState, frameId: iframeParentFrameId })?.sessionId
                   : undefined
+
+              // Dedicated workers are children of a page or OOPIF session. Forward the attach to that session,
+              // but never track them as targets: setAutoAttach and getTargets replays list root targets only.
+              // Patchright attaches them without Runtime.enable (globalThis objectId trick).
+              if (targetParams.targetInfo.type === 'worker' && incomingSessionId) {
+                sendToPlaywright({
+                  message: { sessionId: incomingSessionId, method, params: targetParams } as CDPEventBase,
+                  source: 'extension',
+                  extensionId: connectionId,
+                })
+                // A connected client resumes the worker after attaching. Without clients, nobody would.
+                const hasClients = Array.from(store.getState().playwrightClients.values()).some((client) => {
+                  return client.extensionId === connectionId
+                })
+                if (targetParams.waitingForDebugger && !hasClients) {
+                  void sendToExtension({
+                    extensionId: connectionId,
+                    method: 'forwardCDPCommand',
+                    params: { sessionId: targetParams.sessionId, method: 'Runtime.runIfWaitingForDebugger', params: {}, source: 'server' },
+                  }).catch(() => {})
+                }
+                return
+              }
 
               // Filter out restricted targets (unsupported types, extension pages, chrome:// URLs, etc.)
               if (isRestrictedTarget(targetParams.targetInfo)) {

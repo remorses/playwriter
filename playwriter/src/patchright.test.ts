@@ -95,6 +95,14 @@ describe('Patchright and verification pages', () => {
             })
           </script>
         `,
+        '/logs': dedent`
+          <!doctype html>
+          <script>
+            console.log('boot', 42)
+            setTimeout(() => { throw new Error('boom') }, 0)
+            window.startWorker = () => { window.worker = new Worker(URL.createObjectURL(new Blob(['self.ready = 1'], { type: 'text/javascript' }))) }
+          </script>
+        `,
         '/input': dedent`
           <!doctype html>
           <button id="go" style="position:absolute;left:500px;top:400px;width:120px;height:40px">Go</button>
@@ -226,6 +234,53 @@ describe('Patchright and verification pages', () => {
     const playwright = await measureInput(false)
     expect(playwright.moves).toBeLessThanOrEqual(3)
     expect(playwright.keys).toBe(5)
+  }, 60000)
+
+  it('Patchright reads page logs on demand without duplicates, bindings and workers keep working', async () => {
+    const run = async (sessionId: string, code: string) => {
+      const result = await post('/cli/execute', { sessionId, timeout: 30000, code })
+      expect(result.isError).toBeFalsy()
+      return result.text as string
+    }
+    const patchright = await post('/cli/session/new', { patchright: true })
+    // Patchright never keeps Runtime on, so console messages only arrive when getLatestLogs reads them
+    expect(await run(patchright.id, js`
+      state.page = await context.newPage();
+      await state.page.exposeFunction('double', (n) => n * 2);
+      await state.page.goto('${server!.baseUrl}/logs');
+      const workerEvent = state.page.waitForEvent('worker');
+      await state.page.evaluate(() => startWorker(), undefined, undefined, false);
+      const worker = await workerEvent;
+      const first = await getLatestLogs({ page: state.page, sinceLastCall: true });
+      await state.page.evaluate(() => console.warn('later'), undefined, undefined, false);
+      return {
+        first,
+        second: await getLatestLogs({ page: state.page, sinceLastCall: true }),
+        doubled: await state.page.evaluate(() => double(21), undefined, undefined, false),
+        worker: await worker.evaluate(() => self.ready),
+      };
+    `)).toMatchInlineSnapshot(`
+      "[PAGE ERROR] Error: boom
+      [return value] {
+        first: [ '[log] boot 42', '[pageerror] Error: boom' ],
+        second: [ '[warning] later' ],
+        doubled: 42,
+        worker: 1
+      }"
+    `)
+    await post('/cli/session/delete', { sessionId: patchright.id })
+
+    const playwright = await post('/cli/session/new', {})
+    expect(await run(playwright.id, js`
+      const page = await context.newPage();
+      await page.goto('${server!.baseUrl}/logs');
+      const workerEvent = page.waitForEvent('worker');
+      await page.evaluate(() => startWorker());
+      const ready = await (await workerEvent).evaluate(() => self.ready);
+      await page.close();
+      return ready;
+    `)).toMatchInlineSnapshot(`"[return value] 1"`)
+    await post('/cli/session/delete', { sessionId: playwright.id })
   }, 60000)
 
   it('switches a session to Patchright and back mid-run, tabs stay open', async () => {
