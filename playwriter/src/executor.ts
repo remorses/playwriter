@@ -965,6 +965,18 @@ export class PlaywrightExecutor {
     }
     this.pagesWithListeners.add(page)
     this.setupPageCloseDetection(page)
+    page.on('crash', () => {
+      const keys = this.stateKeysForPage(page)
+      if (keys.length === 0) {
+        return
+      }
+      const key = `state.${keys[0]}`
+      this.enqueueWarning(
+        `Page crashed (url: ${page.url()}) for ${keys.map((key) => `state.${key}`).join(', ')}. ` +
+          `Do not reset the session or repeat the last script. Create a new tab with ${key} = await context.newPage(), ` +
+          `navigate to the intended URL, then check whether the last action completed before continuing. Other tabs and state are unchanged.`,
+      )
+    })
     this.setupPageConsoleListener(page)
     this.setupNewPageLogging(page)
     this.ghostCursorController.attachToPage({ page })
@@ -2261,6 +2273,16 @@ export class PlaywrightExecutor {
       // Give a clear actionable message instead of a generic "call reset" hint.
       const isDisconnect = error instanceof Error && isDisconnectionError(error)
       const resetHint = (() => {
+        const message = error instanceof Error ? error.message : String(error)
+        if (/\b(?:Target|Page) crashed\b/i.test(message)) {
+          return '\n\n[HINT: This tab crashed. Create a new tab with context.newPage(), replace the crashed reference in state, and navigate to the intended URL. Do not reset the session or repeat the last script: first check whether its actions completed.]'
+        }
+        if (/Target page, context or browser has been closed/i.test(message) && this.browser?.isConnected()) {
+          return '\n\n[HINT: This page reference is closed, but the browser is connected. Select an open page from context.pages() or create one with context.newPage(), then replace the closed reference in state. Do not reset the whole session.]'
+        }
+        if (/net::ERR_/i.test(message)) {
+          return '\n\n[HINT: Navigation failed. Check page.url() and the network error before retrying. Do not reset the session or replay a script that may have submitted a form or changed data.]'
+        }
         if (isTimeoutError) return ''
         if (this.cloudSession && isDisconnect) {
           return `\n\n[Cloud browser expired or disconnected. Create a new session with: playwriter session new --browser cloud]`

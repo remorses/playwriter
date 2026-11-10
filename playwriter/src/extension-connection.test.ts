@@ -849,6 +849,11 @@ describe('Extension Connection Tests', () => {
     })
     expect((storedCloseResult as any).isError).not.toBe(true)
     expect((storedCloseResult as any).content[0].text).toMatchInlineSnapshot(`"[WARNING] Page closed (url: https://example.com/close-warning-a) for state.page. Assign a new open page to state.page before reusing it, e.g. state.page = await context.newPage()."`)
+    const stale = await client.callTool({
+      name: 'execute',
+      arguments: { code: js`await state.page.evaluate(() => 1)` },
+    })
+    expect(JSON.stringify(stale)).toContain('Do not reset the whole session')
 
     const unstoredCloseResult = await client.callTool({
       name: 'execute',
@@ -867,6 +872,56 @@ describe('Extension Connection Tests', () => {
     if (!pageB.isClosed()) {
       await pageB.close()
     }
+  })
+
+  it('explains how to recover a crashed state page without resetting or replaying actions', async () => {
+    const crashed = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          state.crashed = await context.newPage();
+          const cdp = await getCDPSession({ page: state.crashed });
+          const crash = state.crashed.waitForEvent('crash');
+          void cdp.send('Page.crash').catch(() => {});
+          await crash;
+        `,
+      },
+    })
+    expect(JSON.stringify(crashed)).toContain('Do not reset the session')
+    const failed = await client.callTool({
+      name: 'execute',
+      arguments: { code: js`await state.crashed.evaluate(() => 1)` },
+    })
+    expect(JSON.stringify(failed)).toContain('Create a new tab')
+    expect(JSON.stringify(failed)).not.toContain('call reset to reconnect')
+    const recovered = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          await state.crashed.close();
+          delete state.crashed;
+          const page = await context.newPage();
+          const result = await page.evaluate(() => 42);
+          await page.close();
+          return result;
+        `,
+      },
+    })
+    expect(JSON.stringify(recovered)).toContain('[return value] 42')
+    const badNavigation = await client.callTool({
+      name: 'execute',
+      arguments: {
+        code: js`
+          state.errorPage = await context.newPage();
+          await state.errorPage.goto('http://127.0.0.1:1/');
+        `,
+      },
+    })
+    expect(JSON.stringify(badNavigation)).toContain('Check page.url() and the network error')
+    await client.callTool({
+      name: 'execute',
+      arguments: { code: js`await state.errorPage.close(); delete state.errorPage` },
+    })
   })
 
   it('should show correct url when enabling extension after navigation', async () => {
