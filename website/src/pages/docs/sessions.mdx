@@ -144,7 +144,7 @@ playwriter session update 1 --patchright false  # back to Playwright
 | | Playwright (default) | Patchright |
 |---|---|---|
 | Input | Instant, except on sites like x.com, amazon and google | Human-like on every page |
-| `page.evaluate` | Main world, sees page globals | Isolated world, sees the DOM only. Pass `false` as fourth argument for the main world |
+| `page.evaluate` | Main world, sees page globals | Main world, sees page globals. Pass `true` as fourth argument for an isolated world that pages cannot see |
 | `getLatestLogs` | All console messages | May miss console messages |
 
 The Node API takes the same option: `connectViaExtension({ patchright: true })`. It applies to extension and remote control sessions. For the MCP, start it with `playwriter --patchright`.

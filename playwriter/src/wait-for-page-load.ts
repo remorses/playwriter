@@ -1,5 +1,6 @@
 import type { Page } from '@xmorse/playwright-core'
 import { sleep } from './utils.js'
+import { evaluateIsolated } from './playwright-import.js'
 
 const FILTERED_DOMAINS = [
   'doubleclick',
@@ -65,8 +66,9 @@ export async function waitForPageLoad(options: WaitForPageLoadOptions): Promise<
   let lastPendingRequests: string[] = []
 
   const checkPageReady = async (): Promise<{ ready: boolean; readyState: string; pendingRequests: string[] }> => {
-    const result = await page.evaluate(
-      ({
+    const result = await evaluateIsolated({
+      target: page,
+      fn: ({
         filteredDomains,
         filteredExtensions,
         stuckThreshold,
@@ -125,13 +127,13 @@ export async function waitForPageLoad(options: WaitForPageLoadOptions): Promise<
           pendingRequests,
         }
       },
-      {
+      arg: {
         filteredDomains: FILTERED_DOMAINS,
         filteredExtensions: FILTERED_EXTENSIONS,
         stuckThreshold: 10000,
         slowResourceThreshold: 3000,
       },
-    )
+    })
 
     return result
   }

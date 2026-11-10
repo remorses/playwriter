@@ -42,7 +42,7 @@ world (`d3f2d1b41`). Paths: browse `cli/src/`, playwriter `playwriter/src/`.
 |------|--------|------------|
 | Stealth driver | always Patchright (no `Runtime.enable`, isolated `evaluate`, init scripts via routes) | Playwright fork by default. Patchright fork (`@playwriter/patchright-core`, 1.64.1) only with `--patchright` / `PLAYWRITER_PATCHRIGHT=1` |
 | `Runtime.enable` | never by the driver; console capture is opt-in per page (`execute/console.ts`) | enabled on every attached page. No console-serialization leak in Chrome 147 |
-| Agent `page.evaluate` | isolated world | main world (Playwright semantics) |
+| Agent `page.evaluate` | isolated world | main world in both drivers (Playwright semantics). Patchright takes `true` as fourth argument for its isolated world; `snapshot`, `getPageMarkdown`, `waitForPageLoad` use it (`evaluateIsolated`) |
 | Own page scripts (cursor, challenge probe, screenshot cleanup) | isolated world | isolated world since `d3f2d1b41`; no globals, no foreign DOM calls |
 | DOM nodes | none until a handoff card or opt-in cursor; closed shadow root, no id | toolbar hosts `[data-playwriter-toolbar]` on every attached tab; fork toggles `data-playwriter-agent` on them per action; cursor `#__playwriter_ghost_cursor__` (no shadow root) after the first mouse action |
 | Ghost cursor | off by default (status page or `OPENCODE_BROWSER_GHOST_CURSOR`) | always on |

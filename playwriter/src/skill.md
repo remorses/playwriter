@@ -64,7 +64,7 @@ playwriter session new --tab-group shop --patchright
 playwriter session update <sessionId> --patchright  # --patchright false switches back
 ```
 
-Switching reconnects: tabs stay open, `state` is cleared, so get the page again with `context.pages().find(p => p.url().includes('...'))`. With Patchright, `page.evaluate` runs in an isolated world: it sees the DOM but not page JS globals. Pass `false` as fourth argument for the main world: `page.evaluate(() => window.app, undefined, undefined, false)`. `page.on('console')` and `page.on('pageerror')` stay silent; use `getLatestLogs`, which turns on CDP Runtime for a few milliseconds to read buffered logs (pages could notice in that moment).
+Switching reconnects: tabs stay open, `state` is cleared, so get the page again with `context.pages().find(p => p.url().includes('...'))`. `page.evaluate` runs in the main world as usual. Pages can notice code that touches DOM methods or globals they hook; on bot-protected pages pass `true` as fourth argument for an isolated world that sees the DOM but not page globals: `page.evaluate(() => document.title, undefined, undefined, true)`. `page.on('console')` and `page.on('pageerror')` stay silent; use `getLatestLogs`, which turns on CDP Runtime for a few milliseconds to read buffered logs (pages could notice in that moment).
 
 Node programs and TypeScript SDKs use the `playwriter` package as a library. Do not POST `/cli/session/new` yourself. Docs: https://playwriter.dev/docs/sessions#node-api
 

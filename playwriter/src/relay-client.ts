@@ -607,7 +607,8 @@ export async function connectViaExtension({
   tabGroupColor?: TabGroupColor
   /**
    * Connect with Patchright (@playwriter/patchright-core) instead of Playwright, with human-like mouse,
-   * scroll and typing on every page. page.evaluate then runs in an isolated world.
+   * scroll and typing on every page. page.evaluate still runs in the main world; pass true as fourth
+   * argument for Patchright's isolated world.
    */
   patchright?: boolean
   logger?: { log: (...args: any[]) => void }

@@ -3,8 +3,9 @@
  * - execute warns when a navigation lands on a verification page, and waits out one that clears by itself
  * - a Patchright session moves the mouse along a path of trusted events and spaces key presses,
  *   while a Playwright session on localhost keeps Playwright's raw input
- * - a session switches to Patchright (isolated page.evaluate) and back mid-run
- * - pages see no playwriter globals, hooked DOM calls or DOM changes besides the toolbar and cursor
+ * - a session switches to Patchright and back mid-run; page.evaluate runs in the main world by default
+ * - pages see no playwriter globals, hooked DOM calls or DOM changes besides the toolbar and cursor,
+ *   also after snapshot, getPageMarkdown and waitForPageLoad
  */
 
 import { createMCPClient } from './mcp-client.js'
@@ -166,8 +167,11 @@ describe('Patchright and verification pages', () => {
         await page.mouse.click(360, 220);
         await page.mouse.click(100, 100);
         await page.screenshot();
-        // Patchright evaluates in an isolated world unless the fourth argument is false
-        const report = await page.evaluate(() => JSON.stringify(window.report()), undefined, undefined, false);
+        // Playwriter's own helpers stay in Patchright's isolated world
+        await snapshot({ page });
+        await getPageMarkdown({ page });
+        await waitForPageLoad({ page, timeout: 2000 });
+        const report = await page.evaluate(() => JSON.stringify(window.report()));
         await page.close();
         return report;
       `,
@@ -215,7 +219,7 @@ describe('Patchright and verification pages', () => {
           const measured = await page.evaluate(() => {
             const gaps = keys.slice(1).map((t, i) => t - keys[i]);
             return { moves: moves.length, keys: keys.length, minGap: Math.min(...gaps) };
-          }${patchright ? ', undefined, undefined, false' : ''});
+          });
           await page.close();
           return measured;
         `,
@@ -249,14 +253,14 @@ describe('Patchright and verification pages', () => {
       await state.page.exposeFunction('double', (n) => n * 2);
       await state.page.goto('${server!.baseUrl}/logs');
       const workerEvent = state.page.waitForEvent('worker');
-      await state.page.evaluate(() => startWorker(), undefined, undefined, false);
+      await state.page.evaluate(() => startWorker());
       const worker = await workerEvent;
       const first = await getLatestLogs({ page: state.page, sinceLastCall: true });
-      await state.page.evaluate(() => console.warn('later'), undefined, undefined, false);
+      await state.page.evaluate(() => console.warn('later'));
       return {
         first,
         second: await getLatestLogs({ page: state.page, sinceLastCall: true }),
-        doubled: await state.page.evaluate(() => double(21), undefined, undefined, false),
+        doubled: await state.page.evaluate(() => double(21)),
         worker: await worker.evaluate(() => self.ready),
       };
     `)).toMatchInlineSnapshot(`
@@ -311,11 +315,12 @@ describe('Patchright and verification pages', () => {
       await page.click('#go');
       return {
         state: Object.keys(state),
-        isolated: await page.evaluate(() => typeof window.moves),
-        main: await page.evaluate(() => typeof window.moves, undefined, undefined, false),
-        humanized: await page.evaluate(() => moves.length > 10, undefined, undefined, false),
+        // Main world by default, like Playwright. true as fourth argument picks the isolated world
+        main: await page.evaluate(() => typeof window.moves),
+        isolated: await page.evaluate(() => typeof window.moves, undefined, undefined, true),
+        humanized: await page.evaluate(() => moves.length > 10),
       };
-    `)).toMatchInlineSnapshot(`"[return value] { state: [], isolated: 'undefined', main: 'object', humanized: true }"`)
+    `)).toMatchInlineSnapshot(`"[return value] { state: [], main: 'object', isolated: 'undefined', humanized: true }"`)
 
     const off = await post('/cli/session/update', { sessionId: session.id, patchright: false })
     expect(off).toMatchInlineSnapshot(`

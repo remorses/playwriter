@@ -10,6 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@xmorse/playwright-core'
 import { createSmartDiff } from './diff-utils.js'
+import { evaluateIsolated } from './playwright-import.js'
 
 export interface PageMarkdownResult {
   /** Extracted content as plain text (HTML tags stripped) */
@@ -73,64 +74,67 @@ export async function getPageMarkdown(options: GetPageMarkdownOptions): Promise<
   const { page, search, showDiffSinceLastCall = !search } = options
 
   // Check if readability is already injected
-  const hasReadability = await page.evaluate(() => !!(globalThis as any).__readability)
+  const hasReadability = await evaluateIsolated({ target: page, fn: () => !!(globalThis as any).__readability })
 
   if (!hasReadability) {
     const code = getReadabilityCode()
-    await page.evaluate(code)
+    await evaluateIsolated({ target: page, fn: code })
   }
 
   // Extract content using Readability
-  const result = (await page.evaluate(() => {
-    const readability = (globalThis as any).__readability
-    if (!readability) {
-      throw new Error('Readability not loaded')
-    }
-
-    // Clone document to avoid modifying the original
-    const documentClone = document.cloneNode(true)
-
-    // Check if page is probably readable
-    if (!readability.isProbablyReaderable(documentClone)) {
-      return {
-        content: document.body?.innerText || '',
-        title: document.title || null,
-        author: null,
-        excerpt: null,
-        siteName: null,
-        lang: document.documentElement?.lang || null,
-        publishedTime: null,
-        wordCount: (document.body?.innerText || '').split(/\s+/).filter(Boolean).length,
-        _notReadable: true,
+  const result = (await evaluateIsolated({
+    target: page,
+    fn: () => {
+      const readability = (globalThis as any).__readability
+      if (!readability) {
+        throw new Error('Readability not loaded')
       }
-    }
 
-    const article = new readability.Readability(documentClone).parse()
+      // Clone document to avoid modifying the original
+      const documentClone = document.cloneNode(true)
 
-    if (!article) {
-      return {
-        content: document.body?.innerText || '',
-        title: document.title || null,
-        author: null,
-        excerpt: null,
-        siteName: null,
-        lang: document.documentElement?.lang || null,
-        publishedTime: null,
-        wordCount: (document.body?.innerText || '').split(/\s+/).filter(Boolean).length,
-        _notReadable: true,
+      // Check if page is probably readable
+      if (!readability.isProbablyReaderable(documentClone)) {
+        return {
+          content: document.body?.innerText || '',
+          title: document.title || null,
+          author: null,
+          excerpt: null,
+          siteName: null,
+          lang: document.documentElement?.lang || null,
+          publishedTime: null,
+          wordCount: (document.body?.innerText || '').split(/\s+/).filter(Boolean).length,
+          _notReadable: true,
+        }
       }
-    }
 
-    return {
-      content: article.textContent || '',
-      title: article.title || null,
-      author: article.byline || null,
-      excerpt: article.excerpt || null,
-      siteName: article.siteName || null,
-      lang: article.lang || null,
-      publishedTime: article.publishedTime || null,
-      wordCount: (article.textContent || '').split(/\s+/).filter(Boolean).length,
-    }
+      const article = new readability.Readability(documentClone).parse()
+
+      if (!article) {
+        return {
+          content: document.body?.innerText || '',
+          title: document.title || null,
+          author: null,
+          excerpt: null,
+          siteName: null,
+          lang: document.documentElement?.lang || null,
+          publishedTime: null,
+          wordCount: (document.body?.innerText || '').split(/\s+/).filter(Boolean).length,
+          _notReadable: true,
+        }
+      }
+
+      return {
+        content: article.textContent || '',
+        title: article.title || null,
+        author: article.byline || null,
+        excerpt: article.excerpt || null,
+        siteName: article.siteName || null,
+        lang: article.lang || null,
+        publishedTime: article.publishedTime || null,
+        wordCount: (article.textContent || '').split(/\s+/).filter(Boolean).length,
+      }
+    },
   })) as PageMarkdownResult & { _notReadable?: boolean }
 
   // Format output

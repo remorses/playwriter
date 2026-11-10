@@ -10,6 +10,7 @@ import type { Protocol } from 'devtools-protocol'
 import { Sema } from 'async-sema'
 import type { ICDPSession } from './cdp-session.js'
 import { evaluateInPlaywriterWorld, getCDPSessionForPage } from './cdp-session.js'
+import { evaluateIsolated } from './playwright-import.js'
 
 // Import sharp at module level - resolves to null if not available
 const sharpPromise = import('sharp')
@@ -47,7 +48,7 @@ function getA11yClientCode(): string {
 // Always inject: a page can keep a stale __a11y from an older playwriter version.
 // Same round trip count as checking first, and the bundle is ~8 KB.
 async function ensureA11yClient(page: Page): Promise<void> {
-  await page.evaluate(getA11yClientCode())
+  await evaluateIsolated({ target: page, fn: getA11yClientCode() })
 }
 
 // ============================================================================
@@ -618,7 +619,9 @@ export function filterInteractiveSnapshotTree(options: {
   if (includeInteractive) {
     const domInfo = options.node.backendNodeId ? options.domByBackendId.get(options.node.backendNodeId) : undefined
     const stable = domInfo ? getStableRefFromAttributes(domInfo.attributes) : null
-    const isPromoted = options.node.backendNodeId != null && (options.promotedContentEditableIds?.has(options.node.backendNodeId) ?? false)
+    const isPromoted =
+      options.node.backendNodeId != null &&
+      (options.promotedContentEditableIds?.has(options.node.backendNodeId) ?? false)
     baseLocator = buildBaseLocator({ role, name, stable, isPromotedContentEditable: isPromoted })
     ref = options.createRefForNode({ backendNodeId: options.node.backendNodeId, role, name })
   }
@@ -720,7 +723,9 @@ export function filterFullSnapshotTree(options: {
   if (includeInteractive) {
     const domInfo = options.node.backendNodeId ? options.domByBackendId.get(options.node.backendNodeId) : undefined
     const stable = domInfo ? getStableRefFromAttributes(domInfo.attributes) : null
-    const isPromoted = options.node.backendNodeId != null && (options.promotedContentEditableIds?.has(options.node.backendNodeId) ?? false)
+    const isPromoted =
+      options.node.backendNodeId != null &&
+      (options.promotedContentEditableIds?.has(options.node.backendNodeId) ?? false)
     baseLocator = buildBaseLocator({ role, name, stable, isPromotedContentEditable: isPromoted })
     ref = options.createRefForNode({ backendNodeId: options.node.backendNodeId, role, name })
   }
@@ -1063,7 +1068,7 @@ export async function getAriaSnapshot({
     // Blink updates its AX cache during rendering, after framework navigation changes the DOM.
     // Isolated world on the main frame, so page scripts do not see the call.
     resolvedFrame
-      ? resolvedFrame.evaluate(waitForRenderedFrame)
+      ? evaluateIsolated({ target: resolvedFrame, fn: waitForRenderedFrame })
       : evaluateInPlaywriterWorld({ page, expression: `(${waitForRenderedFrame.toString()})()`, awaitPromise: true }),
   ])
   const scopeAttr = 'data-pw-scope'
@@ -1073,22 +1078,19 @@ export async function getAriaSnapshot({
 
   try {
     if (scopeLocator) {
-      await scopeLocator.evaluate(
-        (element, data) => {
+      await evaluateIsolated({
+        target: scopeLocator,
+        fn: (element, data) => {
           element.setAttribute(data.attr, data.value)
         },
-        { attr: scopeAttr, value: scopeValue },
-      )
+        arg: { attr: scopeAttr, value: scopeValue },
+      })
       scopeApplied = true
     }
 
     // AX tree first: every node in it is also in the later DOM, so injected Playwriter UI is always found below
     const axParams = !oopifSessionId && frameId ? { frameId } : undefined
-    const { nodes: axNodes } = await session.send(
-      'Accessibility.getFullAXTree',
-      axParams,
-      oopifSessionId,
-    )
+    const { nodes: axNodes } = await session.send('Accessibility.getFullAXTree', axParams, oopifSessionId)
     const { nodes: domNodes } = await session.send(
       'DOM.getFlattenedDocument',
       { depth: -1, pierce: true },
@@ -1333,17 +1335,16 @@ export async function getAriaSnapshot({
       const targetHandles = await Promise.all(
         locators.map(async (loc) => {
           try {
-            return 'elementHandle' in loc
-              ? await loc.elementHandle({ timeout: 1000 })
-              : loc
+            return 'elementHandle' in loc ? await loc.elementHandle({ timeout: 1000 }) : loc
           } catch {
             return null
           }
         }),
       )
 
-      const matchingRefs = await page.evaluate(
-        ({ targets, refData }) => {
+      const matchingRefs = await evaluateIsolated({
+        target: page,
+        fn: ({ targets, refData }) => {
           return targets.map((target) => {
             if (!target) {
               return null
@@ -1384,11 +1385,11 @@ export async function getAriaSnapshot({
             return null
           })
         },
-        {
+        arg: {
           targets: targetHandles,
           refData: result.refs,
         },
-      )
+      })
 
       return matchingRefs.map((ref) => {
         if (!ref) {
@@ -1412,9 +1413,13 @@ export async function getAriaSnapshot({
     }
   } finally {
     if (scopeApplied && scopeLocator) {
-      await scopeLocator.evaluate((element, attr) => {
-        element.removeAttribute(attr)
-      }, scopeAttr)
+      await evaluateIsolated({
+        target: scopeLocator,
+        fn: (element, attr) => {
+          element.removeAttribute(attr)
+        },
+        arg: scopeAttr,
+      })
     }
     if (oopifSessionId) {
       await session.send('Target.detachFromTarget', { sessionId: oopifSessionId }).catch((e) => {
@@ -1608,8 +1613,9 @@ export async function showAriaRefLabels({
     log(`[showAriaRefLabels] getLabelBoxesForRefs: ${Date.now() - labelsStart}ms (${labels.length} boxes)`)
 
     const renderStart = Date.now()
-    const labelCount = await page.evaluate(
-      ({ entries, root, interactiveOnly: intOnly }) => {
+    const labelCount = await evaluateIsolated({
+      target: page,
+      fn: ({ entries, root, interactiveOnly: intOnly }) => {
         const a11y = (
           globalThis as {
             __a11y?: {
@@ -1630,8 +1636,8 @@ export async function showAriaRefLabels({
         }
         throw new Error('a11y client not loaded')
       },
-      { entries: shortLabels, root: rootHandle, interactiveOnly },
-    )
+      arg: { entries: shortLabels, root: rootHandle, interactiveOnly },
+    })
 
     log(`[showAriaRefLabels] renderA11yLabels: ${Date.now() - renderStart}ms (${labelCount} labels)`)
     log(`[showAriaRefLabels] total: ${Date.now() - startTime}ms`)
@@ -1646,21 +1652,24 @@ export async function showAriaRefLabels({
  * Remove all aria ref labels from the page.
  */
 export async function hideAriaRefLabels({ page }: { page: Page }): Promise<void> {
-  await page.evaluate(() => {
-    const a11y = (globalThis as any).__a11y
-    if (a11y) {
-      a11y.hideA11yLabels()
-    } else {
-      // Fallback if client not loaded
-      const doc = document
-      const win = window as any
-      const timerKey = '__playwriter_labels_timer__'
-      if (win[timerKey]) {
-        win.clearTimeout(win[timerKey])
-        win[timerKey] = null
+  await evaluateIsolated({
+    target: page,
+    fn: () => {
+      const a11y = (globalThis as any).__a11y
+      if (a11y) {
+        a11y.hideA11yLabels()
+      } else {
+        // Fallback if client not loaded
+        const doc = document
+        const win = window as any
+        const timerKey = '__playwriter_labels_timer__'
+        if (win[timerKey]) {
+          win.clearTimeout(win[timerKey])
+          win[timerKey] = null
+        }
+        doc.getElementById('__playwriter_labels__')?.remove()
       }
-      doc.getElementById('__playwriter_labels__')?.remove()
-    }
+    },
   })
 }
 
@@ -1714,8 +1723,11 @@ export async function screenshotWithAccessibilityLabels({
   const screenshotPath = path.join(tmpDir, filename)
 
   // Get viewport size to clip screenshot to visible area
-  const viewport = await page.evaluate(() => {
-    return { width: window.innerWidth, height: window.innerHeight }
+  const viewport = await evaluateIsolated({
+    target: page,
+    fn: () => {
+      return { width: window.innerWidth, height: window.innerHeight }
+    },
   })
 
   // Check if sharp is available for resizing
