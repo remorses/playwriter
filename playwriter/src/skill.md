@@ -892,15 +892,11 @@ const data = await state.page.evaluate(async (url) => {
 }, 'https://example.com/protected/resource')
 ```
 
-**Read page cookies via CDP** - use `Network.getCookies` on the page CDP session:
+**Read and set cookies** - `context.cookies(url)`, `context.addCookies()` and `route.fetch()` work. Always pass a URL to `context.cookies()`: without one it returns every cookie in the user profile. `context.clearCookies()` throws, because it would delete cookies for every site.
 
 ```js
-const cdp = await getCDPSession({ page: state.page })
-const { cookies } = await cdp.send('Network.getCookies', { urls: [state.page.url()] })
-console.log(cookies)
+const cookies = await context.cookies(state.page.url())
 ```
-
-MUST use this for page-scoped cookies in extension mode. `Storage.getCookies` is a root-session command and will fail in playwriter.
 
 **NEVER use `Network.clearBrowserCookies` or `Network.clearBrowserCache`** — these CDP commands are **profile-wide destructive operations** that wipe ALL cookies/cache across every domain in the user's Chrome profile. They will log the user out of Gmail, GitHub, and every authenticated session.
 

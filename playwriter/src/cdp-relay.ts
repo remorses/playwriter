@@ -878,6 +878,42 @@ export async function startPlayWriterCDPRelayServer({
         })
       }
 
+      // Playwright reads and writes context cookies on the browser target (context.cookies(),
+      // context.addCookies(), route.fetch()). chrome.debugger cannot reach the browser target,
+      // so run the Network equivalent on any tab: one cookie store is shared by the whole profile.
+      // Works with every extension version, it only forwards Network commands (issue #66).
+      case 'Storage.getCookies':
+      case 'Storage.setCookies': {
+        // Remote control keeps the original method, so the extension rejects it
+        if (sessionId || (conn && relayState.isRemoteExtension(conn))) {
+          break
+        }
+        const tab = Array.from(connectedTargets.values()).find((target) => {
+          return target.targetInfo.type === 'page' && !isRestrictedTarget(target.targetInfo)
+        })
+        if (!tab) {
+          throw new Error(`${method} needs an open page in this browser. Create one with context.newPage() first.`)
+        }
+        const cookieParams = params as Protocol.Storage.SetCookiesRequest | undefined
+        return await sendToExtension({
+          extensionId: resolvedExtensionId,
+          method: 'forwardCDPCommand',
+          params:
+            method === 'Storage.getCookies'
+              ? { sessionId: tab.sessionId, method: 'Network.getAllCookies', params: {}, source }
+              : { sessionId: tab.sessionId, method: 'Network.setCookies', params: { cookies: cookieParams?.cookies || [] }, source },
+        })
+      }
+
+      case 'Storage.clearCookies': {
+        if (sessionId) {
+          break
+        }
+        throw new Error(
+          'context.clearCookies() is not supported: in the user browser it deletes cookies for every site in the profile. Delete cookies by name with Network.deleteCookies on a page CDP session.',
+        )
+      }
+
       // Ghost Browser API - forward to extension for chrome.ghostPublicAPI/ghostProxies/projects
       case 'ghost-browser': {
         return await sendToExtension({

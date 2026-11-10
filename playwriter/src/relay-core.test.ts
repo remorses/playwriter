@@ -4,6 +4,7 @@ import { chromium } from '@xmorse/playwright-core'
 import { getCDPSessionForPage } from './cdp-session.js'
 import { getCdpUrl, LOG_CDP_FILE_PATH } from './utils.js'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import {
   setupTestContext,
@@ -528,16 +529,26 @@ describe('Relay Core Tests', () => {
     expect(result.content).toBeDefined()
   }, 30000)
 
-  // Repro test for https://github.com/remorses/playwriter/issues/66.
-  // Current limitation: extension-mode routing does not support root-session
-  // Storage.getCookies in playwriter. MUST use Network.getCookies via page CDP
-  // session instead (see test below), so this repro stays skipped.
-  it.skip('should reproduce page.route failure in MCP execute path (issue #66)', async () => {
-    const server = await createSimpleServer({
-      routes: {
-        '/': '<!doctype html><html><body>route issue repro</body></html>',
-        '/api/data': '{"ok":true}',
-      },
+  // Regression test for https://github.com/remorses/playwriter/issues/66.
+  // route.fetch(), context.cookies() and context.addCookies() use root-session
+  // Storage.getCookies/setCookies, which the relay runs as Network commands on a tab.
+  it('should support route.fetch and context cookies in extension mode (issue #66)', async () => {
+    const server = http.createServer((req, res) => {
+      if (req.url === '/api/data') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'fromApi=1; Path=/' })
+        res.end(JSON.stringify({ cookie: req.headers.cookie || '' }))
+        return
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('test server has no port')
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<!doctype html><html><body>route issue repro</body></html>')
+    })
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve)
     })
 
     try {
@@ -547,55 +558,50 @@ describe('Relay Core Tests', () => {
           code: js`
             const newPage = await context.newPage();
             state.issue66Page = newPage;
-            await newPage.goto('${server.baseUrl}', { waitUntil: 'domcontentloaded' });
+            await newPage.goto('${baseUrl}', { waitUntil: 'domcontentloaded' });
+            await context.addCookies([{ name: 'fromTest', value: 'abc', url: '${baseUrl}' }]);
 
-            let routeFetchError = null;
             await newPage.route('**/api/**', async (route) => {
-              try {
-                const response = await route.fetch();
-                await route.fulfill({ response });
-              } catch (error) {
-                routeFetchError = error instanceof Error ? error.message : String(error);
-                await route.abort();
-              }
+              const response = await route.fetch();
+              await route.fulfill({ response });
             });
-
-            await newPage.evaluate(async () => {
-              await fetch('/api/data').catch(() => null);
+            const body = await newPage.evaluate(async () => {
+              return await fetch('/api/data').then((r) => r.json());
             });
-
-            return { routeFetchError };
+            const cookies = await context.cookies('${baseUrl}');
+            const names = cookies.map((c) => c.name).sort();
+            const clearError = await context.clearCookies().then(() => null, (e) => e.message.split('\\n')[0]);
+            return { body, names, clearError };
           `,
         },
       })
 
-      const resultWithContent = result as { content?: unknown }
-      const content = Array.isArray(resultWithContent.content) ? resultWithContent.content : []
-      const firstContent = content[0]
-      const output =
-        typeof firstContent === 'object' && firstContent !== null && 'text' in firstContent
-          ? String((firstContent as { text?: unknown }).text ?? '')
-          : ''
-      expect(output).toContain('routeFetchError')
-      expect(output).toContain('Storage.getCookies')
-      expect(output).toContain('No tab found for method Storage.getCookies')
-    } finally {
-      try {
-        await client.callTool({
-          name: 'execute',
-          arguments: {
-            code: js`
-              if (state.issue66Page && !state.issue66Page.isClosed()) {
-                await state.issue66Page.close();
-              }
-              delete state.issue66Page;
-            `,
+      expect(result.content).toMatchInlineSnapshot(`
+        [
+          {
+            "text": "[return value] {
+          body: { cookie: 'fromTest=abc' },
+          names: [ 'fromApi', 'fromTest' ],
+          clearError: 'browserContext.clearCookies: Protocol error (Storage.clearCookies): context.clearCookies() is not supported: in the user browser it deletes cookies for every site in the profile. Delete cookies by name with Network.deleteCookies on a page CDP session.'
+        }",
+            "type": "text",
           },
-        })
-      } catch {
-        // Ignore cleanup failure if MCP disconnected due to the repro.
-      }
-      await server.close()
+        ]
+      `)
+    } finally {
+      await client.callTool({
+        name: 'execute',
+        arguments: {
+          code: js`
+            await state.issue66Page?.close();
+            delete state.issue66Page;
+          `,
+        },
+      })
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve())
+      })
     }
   }, 30000)
 
