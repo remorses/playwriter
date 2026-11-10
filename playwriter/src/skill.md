@@ -511,7 +511,7 @@ export async function saveTitle({ page, outputPath }) {
 
 **Security:** Modules loaded with `import()` run with normal Node.js permissions. Only import code you trust. Use sandboxed `require` or `importModule` when you need restricted built-ins and scoped filesystem writes.
 
-**Important:** `state` is **session-isolated** but pages are **shared** across all sessions. See "working with pages" for how to avoid interference.
+**Important:** `state` is **session-isolated**. Tabs your session opens are visible only to your session; tabs the user enabled are shared. See "working with pages".
 
 **Sandboxed `fs` write restrictions:** `require('node:fs')` is scoped. Writes (writeFileSync, mkdirSync, etc.) only succeed in:
 - The **directory where `playwriter` CLI was invoked** (the session's cwd)
@@ -831,7 +831,7 @@ state.page.locator('tr').filter({ hasText: 'John' }).locator('button').click()
 
 ## working with pages
 
-**Pages are shared, state is not.** `context.pages()` returns all browser tabs with playwriter enabled — shared across all sessions. Multiple agents see the same tabs. If another agent navigates or closes a page you're using, you'll be affected. To avoid interference, **get your own page**.
+**Your tabs are yours.** `context.pages()` returns the tabs your session opened (and their popups) plus tabs the user enabled with the extension icon. Other CLI sessions never see your tabs, but user-enabled tabs are shared, so another agent may navigate or close them. To avoid interference, **get your own page**.
 
 There is **no default `page`** in the sandbox. Reading `page` throws. Helpers that take `page` (`snapshot`, `getLatestLogs`, `waitForPageLoad`, `recording`, `ghostCursor`, `refToLocator`) need `{ page: state.page }`. `snapshot` also accepts a `locator` or `frame` from your tab.
 

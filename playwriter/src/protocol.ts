@@ -255,6 +255,9 @@ export type ExtensionEventMessage = {
       method: CDPEventFor<K>['method']
       sessionId?: string
       params?: CDPEventFor<K>['params']
+      /** Target.attachedToTarget for a tab: the ownership key of the session that created it (or opened its opener).
+       *  Missing for tabs the user toggled and from old extensions, which makes the tab shared by all sessions. */
+      ownerKey?: string
     }
   }
 }[keyof ProtocolMapping.Events]

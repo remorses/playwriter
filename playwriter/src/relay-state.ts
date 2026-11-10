@@ -35,6 +35,8 @@ export type ConnectedTarget = {
   targetId: string
   targetInfo: Protocol.Target.TargetInfo
   frameIds: Set<string>
+  /** Ownership key of the session that created the tab. Undefined: shared by every session. */
+  ownerKey?: string
 }
 
 export type ExtensionInfo = {
@@ -447,6 +449,7 @@ export function addTarget(
     targetId,
     targetInfo,
     existingFrameIds,
+    ownerKey,
   }: {
     extensionId: string
     sessionId: string
@@ -454,6 +457,7 @@ export function addTarget(
     targetInfo: Protocol.Target.TargetInfo
     /** Preserve existing frameIds if target already existed (update scenario). */
     existingFrameIds?: Set<string>
+    ownerKey?: string
   },
 ): RelayState {
   const ext = state.extensions.get(extensionId)
@@ -468,6 +472,7 @@ export function addTarget(
     targetId,
     targetInfo,
     frameIds: existingFrameIds ?? existingTarget?.frameIds ?? new Set(),
+    ownerKey,
   })
 
   const newExtensions = new Map(state.extensions)

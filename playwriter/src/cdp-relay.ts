@@ -433,15 +433,65 @@ export async function startPlayWriterCDPRelayServer({
         safeSend(client)
       }
     } else {
-      const { playwrightClients } = store.getState()
+      const { playwrightClients, extensions } = store.getState()
       for (const client of playwrightClients.values()) {
         if (extensionId && client.extensionId !== extensionId) {
+          continue
+        }
+        const connectedTargets = client.extensionId ? extensions.get(client.extensionId)?.connectedTargets : undefined
+        const target = 'method' in message && connectedTargets ? findEventTarget({ message, connectedTargets }) : undefined
+        if (target && !canClientSeeTarget({ client, target })) {
           continue
         }
         safeSend(client)
       }
     }
   }
+
+  // The tab an event belongs to: its session, or for root Target.* events the target in params.
+  // Undefined for workers, detached targets and browser events, which go to every client.
+  function findEventTarget({
+    message,
+    connectedTargets,
+  }: {
+    message: CDPEventBase
+    connectedTargets: Map<string, relayState.ConnectedTarget>
+  }): relayState.ConnectedTarget | undefined {
+    const params = message.params as { sessionId?: string; targetId?: string; targetInfo?: { targetId?: string } } | undefined
+    const sessionId = message.sessionId ?? params?.sessionId
+    if (sessionId) {
+      return connectedTargets.get(sessionId)
+    }
+    const targetId = params?.targetInfo?.targetId ?? params?.targetId
+    if (!targetId) {
+      return undefined
+    }
+    return Array.from(connectedTargets.values()).find((target) => {
+      return target.targetId === targetId
+    })
+  }
+
+  // A tab a live session created is visible only to that session's clients (plans/decisions/session-owned-tabs.md).
+  // Toggled tabs, SDK tabs, tabs of deleted sessions or an older relay, and clients without a session (MCP) see everything.
+  function canClientSeeTarget({
+    client,
+    target,
+  }: {
+    client: relayState.PlaywrightClient
+    target: relayState.ConnectedTarget
+  }): boolean {
+    if (!target.ownerKey || !client.sessionId || target.ownerKey === ownershipKey(client.sessionId)) {
+      return true
+    }
+    const prefix = `${relayInstanceId}:`
+    if (!target.ownerKey.startsWith(prefix)) {
+      return true
+    }
+    const ownerSessionId = target.ownerKey.slice(prefix.length)
+    return sharedTabSessionIds.has(ownerSessionId) || !executorManager?.getSession(ownerSessionId)
+  }
+  // SDK sessions: scripts in several processes may share one tab (skill.md), so their tabs are never private
+  const sharedTabSessionIds = new Set<string>()
 
   type ForwardCdpParams = {
     method: string
@@ -754,6 +804,23 @@ export async function startPlayWriterCDPRelayServer({
     const clientTabGroup = client?.tabGroup
     const clientSessionKey = client?.sessionId ? ownershipKey(client.sessionId) : undefined
     const clientTabGroupColor = client?.tabGroupColor
+    const canSee = (target: relayState.ConnectedTarget) => {
+      return !client || canClientSeeTarget({ client, target })
+    }
+    const visibleTargets = () => {
+      return Array.from(connectedTargets.values()).filter(canSee)
+    }
+    const commandTargetId = (params as { targetId?: unknown } | undefined)?.targetId
+    const commandTarget = sessionId
+      ? connectedTargets.get(sessionId)
+      : typeof commandTargetId === 'string'
+        ? Array.from(connectedTargets.values()).find((target) => {
+            return target.targetId === commandTargetId
+          })
+        : undefined
+    if (commandTarget && !canSee(commandTarget)) {
+      throw new Error(`Tab ${commandTarget.targetId} belongs to another Playwriter session`)
+    }
     switch (method) {
       case 'Browser.getVersion': {
         return {
@@ -808,7 +875,7 @@ export async function startPlayWriterCDPRelayServer({
           throw new Error('targetId is required for Target.attachToTarget')
         }
 
-        for (const target of connectedTargets.values()) {
+        for (const target of visibleTargets()) {
           if (target.targetId === attachParams.targetId) {
             return { sessionId: target.sessionId } satisfies Protocol.Target.AttachToTargetResponse
           }
@@ -822,7 +889,7 @@ export async function startPlayWriterCDPRelayServer({
         const targetId = infoReqParams?.targetId
 
         if (targetId) {
-          for (const target of connectedTargets.values()) {
+          for (const target of visibleTargets()) {
             if (target.targetId === targetId) {
               return { targetInfo: target.targetInfo }
             }
@@ -840,13 +907,13 @@ export async function startPlayWriterCDPRelayServer({
 
         // Playwright uses an identity-free request as a synchronization barrier
         // after Target.setAutoAttach, so it still needs any current root target.
-        const firstTarget = Array.from(connectedTargets.values())[0]
+        const firstTarget = visibleTargets()[0]
         return { targetInfo: firstTarget?.targetInfo }
       }
 
       case 'Target.getTargets': {
         return {
-          targetInfos: Array.from(connectedTargets.values())
+          targetInfos: visibleTargets()
             .filter((t) => !isRestrictedTarget(t.targetInfo))
             .map((t) => ({
               ...t.targetInfo,
@@ -1626,9 +1693,10 @@ export async function startPlayWriterCDPRelayServer({
               // Re-read state after async routeCdpCommand — targets may have changed
               const freshExt = store.getState().extensions.get(extensionConn.id)
               const freshTargets = freshExt?.connectedTargets || new Map()
+              const client = store.getState().playwrightClients.get(clientId)
               for (const target of freshTargets.values()) {
-                // Skip restricted targets (extensions, chrome:// URLs, non-page types)
-                if (isRestrictedTarget(target.targetInfo)) {
+                // Skip restricted targets (extensions, chrome:// URLs, non-page types) and other sessions' tabs
+                if (isRestrictedTarget(target.targetInfo) || (client && !canClientSeeTarget({ client, target }))) {
                   continue
                 }
                 const attachedPayload = {
@@ -1663,9 +1731,10 @@ export async function startPlayWriterCDPRelayServer({
             if (method === 'Target.setDiscoverTargets' && params?.discover) {
               const freshExt2 = store.getState().extensions.get(extensionConn.id)
               const freshTargets2 = freshExt2?.connectedTargets || new Map()
+              const client = store.getState().playwrightClients.get(clientId)
               for (const target of freshTargets2.values()) {
-                // Skip restricted targets (extensions, chrome:// URLs, non-page types)
-                if (isRestrictedTarget(target.targetInfo)) {
+                // Skip restricted targets (extensions, chrome:// URLs, non-page types) and other sessions' tabs
+                if (isRestrictedTarget(target.targetInfo) || (client && !canClientSeeTarget({ client, target }))) {
                   continue
                 }
                 const targetCreatedPayload = {
@@ -2008,7 +2077,7 @@ export async function startPlayWriterCDPRelayServer({
               return
             }
 
-            const { method, params, sessionId } = extensionEvent.params
+            const { method, params, sessionId, ownerKey } = extensionEvent.params
 
             // Drop high-frequency noise events before logging or forwarding.
             // Old extensions may still send these; the relay filters them here.
@@ -2110,6 +2179,13 @@ export async function startPlayWriterCDPRelayServer({
               // Check if we already sent this target to clients (e.g., from Target.setAutoAttach response)
               const alreadyConnected = currentExtState?.connectedTargets.has(targetParams.sessionId) ?? false
 
+              // Tabs carry their creator's key from the extension. Iframes belong to their parent tab.
+              const parentSessionId = iframeOwnerSessionId ?? incomingSessionId
+              const targetOwnerKey =
+                targetParams.targetInfo.type === 'iframe' && parentSessionId
+                  ? currentExtState?.connectedTargets.get(parentSessionId)?.ownerKey
+                  : ownerKey
+
               // State transition: add/update target
               store.setState((s) =>
                 relayState.addTarget(s, {
@@ -2117,6 +2193,7 @@ export async function startPlayWriterCDPRelayServer({
                   sessionId: targetParams.sessionId,
                   targetId: targetParams.targetInfo.targetId,
                   targetInfo: targetParams.targetInfo,
+                  ownerKey: targetOwnerKey,
                 }),
               )
 
@@ -2878,6 +2955,8 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/session/new', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
+      /** 'sdk' from createRelaySession(): scripts share tabs between processes, so their tabs stay visible */
+      client?: string
       extensionId?: string | null
       cwd?: string
       /** Direct CDP WebSocket URL — bypasses extension, connects straight to Chrome */
@@ -2911,6 +2990,9 @@ export async function startPlayWriterCDPRelayServer({
     }
     const patchright = body.patchright === true
     const sessionId = allocateSessionId()
+    if (body.client === 'sdk') {
+      sharedTabSessionIds.add(sessionId)
+    }
     // Resolve cwd with cross-OS awareness: if CLI runs on Windows and relay on
     // Linux (WSL), translate the Windows path to /mnt/<drive>/... so the sandbox
     // can actually reach it. See issue #107.

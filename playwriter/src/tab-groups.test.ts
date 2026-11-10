@@ -474,6 +474,77 @@ describe('Session tab groups', () => {
     expect(cleaned.some((g) => g.title === 'agent-shared')).toBe(false)
   }, 60000)
 
+  it('a session sees only its own tabs and popups plus toggled tabs, also after reconnecting', async () => {
+    const newSession = async () => {
+      const response = await fetch(`${SERVER_URL}/cli/session/new`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ tabGroup: 'agent-own' }),
+      })
+      return ((await response.json()) as { id: string }).id
+    }
+    const sessions = { first: await newSession(), second: await newSession() }
+    const listPages = async (sessionId: string) => {
+      const result = await executeCli({
+        sessionId,
+        code: js`return JSON.stringify((await Promise.all(context.pages().map((p) => p.title()))).sort())`,
+      })
+      expect(result.isError).toBeFalsy()
+      return result.text.replace(`[return value] `, '')
+    }
+
+    for (const [name, sessionId] of Object.entries(sessions)) {
+      const result = await executeCli({
+        sessionId,
+        code: js`
+          state.ownPage = await context.newPage();
+          await state.ownPage.goto('about:blank');
+          await state.ownPage.evaluate(() => { document.title = '${name}' });
+          const [popup] = await Promise.all([
+            state.ownPage.waitForEvent('popup'),
+            state.ownPage.evaluate(() => { window.open('about:blank') }),
+          ]);
+          await popup.evaluate(() => { document.title = '${name}-popup' });
+        `,
+      })
+      expect(result.isError, result.text).toBeFalsy()
+    }
+    // the first session got the second session's tabs live, the second one on connect
+    expect(await listPages(sessions.first)).toMatchInlineSnapshot(`"["","first","first-popup"]"`)
+    expect(await listPages(sessions.second)).toMatchInlineSnapshot(`"["","second","second-popup"]"`)
+
+    const switched = await fetch(`${SERVER_URL}/cli/session/update`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId: sessions.first, patchright: true }),
+    })
+    expect(switched.status).toBe(200)
+    expect(await listPages(sessions.first)).toMatchInlineSnapshot(`"["","first","first-popup"]"`)
+
+    // tabs of a deleted session become shared
+    await fetch(`${SERVER_URL}/cli/session/delete`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId: sessions.second }),
+    })
+    const third = await newSession()
+    expect(await listPages(third)).toMatchInlineSnapshot(`"["","second","second-popup"]"`)
+    await executeCli({
+      sessionId: third,
+      code: js`
+        for (const page of context.pages()) if ((await page.title()).startsWith('second')) await page.close();
+      `,
+    })
+
+    for (const sessionId of [sessions.first, third]) {
+      await fetch(`${SERVER_URL}/cli/session/delete`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ sessionId, closeCreatedTabs: true }),
+      })
+    }
+  }, 90000)
+
   it('never reuses session ids across a relay restart', async () => {
     const createResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
       method: 'POST',

@@ -1971,6 +1971,7 @@ async function attachTabDebugger(
             targetInfo: { ...targetInfo, attached: true },
             waitingForDebugger: false,
           },
+          ownerKey: store.getState().tabs.get(tabId)?.groupKey,
         },
       })
     }
@@ -2418,6 +2419,7 @@ async function announceConnectedTabs({
             targetInfo: { ...result.targetInfo, attached: true },
             waitingForDebugger: false,
           },
+          ownerKey: tab.groupKey,
         },
       })
     } catch (error) {
