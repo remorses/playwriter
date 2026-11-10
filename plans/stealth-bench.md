@@ -1,5 +1,3 @@
-Status: paused 2026-11-10, nothing started. Replaced as active plan by plans/session-tabs.md.
-
 # Stealth Bench for playwriter plan
 
 Measure how often anti-bot systems block playwriter, on Browser Use's open Stealth Bench V1
