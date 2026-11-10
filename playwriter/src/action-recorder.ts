@@ -71,25 +71,24 @@ interface RecorderLogger {
   error: (...args: unknown[]) => void
 }
 
-interface ActionInContext {
-  action: {
-    name: string
-    selector?: string
-    text?: string
-    key?: string
-    options?: string[]
-    files?: string[]
-    button?: string
-    modifiers?: number
-    clickCount?: number
-    url?: string
-  }
-  frame?: { pageAlias?: string; framePath?: string[] }
+interface RecorderAction {
+  name: string
+  /** Full selector: frames are `internal:control=enter-frame` parts, also listed in framePath */
+  selector?: string
+  text?: string
+  key?: string
+  options?: string[]
+  files?: string[]
+  button?: string
+  modifiers?: number
+  clickCount?: number
+  url?: string
 }
 
-interface SignalInContext {
-  signal: { name: string; url?: string }
-  frame?: { pageAlias?: string }
+/** Added by our Playwright fork: page alias used in `code`, frames of the action selector */
+interface RecorderFrame {
+  pageAlias?: string
+  framePath: string[]
 }
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
@@ -103,18 +102,17 @@ type ExtraActionFields = {
   modifiers?: number
 }
 
-declare module '@xmorse/playwright-core' {
-  interface BrowserContext {
-    _enableRecorder(
-      params: { language: string; mode: string; recorderMode: string },
-      sink: {
-        actionAdded?: (page: Page, actionInContext: ActionInContext, code: string) => void
-        actionUpdated?: (page: Page, actionInContext: ActionInContext, code: string) => void
-        signalAdded?: (page: Page, signalInContext: SignalInContext) => void
-      },
-    ): Promise<void>
-    _disableRecorder(): Promise<void>
-  }
+/** Internal Playwright recording API (BrowserContext._startRecording, one recording per connection). */
+export type RecordingBrowserContext = BrowserContext & {
+  _startRecording(
+    params: { language?: string },
+    sink: {
+      actionAdded?: (page: Page, action: RecorderAction, code: string, frame?: RecorderFrame) => void
+      actionUpdated?: (page: Page, action: RecorderAction, code: string, frame?: RecorderFrame) => void
+      signalAdded?: (page: Page, signal: { name: string; url?: string }, code: string, frame?: RecorderFrame) => void
+    },
+  ): Promise<void>
+  _stopRecording(): Promise<void>
 }
 
 export interface RecordedEvent {
@@ -481,7 +479,7 @@ export class ActionRecorder {
   /** Called once when the recording stops (manual stop or context close) */
   onDidStop: (() => void) | null = null
 
-  private context: BrowserContext
+  private context: RecordingBrowserContext
   private logger: RecorderLogger
   private state: 'starting' | 'recording' | 'stopping' | 'stopped' = 'starting'
   private maxDurationMs: number
@@ -513,7 +511,8 @@ export class ActionRecorder {
   >()
 
   constructor(options: ActionRecorderOptions) {
-    this.context = options.context
+    // Playwright's recording methods are internal, not in the public BrowserContext type
+    this.context = options.context as RecordingBrowserContext
     this.sessionId = options.sessionId
     this.recordingId = options.recordingId
     this.logger = options.logger
@@ -780,29 +779,29 @@ export class ActionRecorder {
     return { eventCount: this.eventCount, filePath: this.filePath }
   }
 
-  // _enableRecorder can hang forever if a frame never gets a main world
+  // _startRecording can hang forever if a frame never gets a main world
   // (empty target, OOPIF). Race start against a timeout and against stop().
   private async enableRecorder() {
-    const enable = this.context._enableRecorder(
-      { language: 'javascript', mode: 'recording', recorderMode: 'api' },
+    const enable = this.context._startRecording(
+      { language: 'javascript' },
       {
-        actionAdded: (page, actionInContext, code) => {
-          this.onRecorderAction({ page, actionInContext, code, isUpdate: false })
+        actionAdded: (page, action, code, frame) => {
+          this.onRecorderAction({ page, action, frame, code, isUpdate: false })
         },
-        actionUpdated: (page, actionInContext, code) => {
-          this.onRecorderAction({ page, actionInContext, code, isUpdate: true })
+        actionUpdated: (page, action, code, frame) => {
+          this.onRecorderAction({ page, action, frame, code, isUpdate: true })
         },
-        signalAdded: (page, signalInContext) => {
+        signalAdded: (page, signal, _code, frame) => {
           if (this.state !== 'recording') {
             return
           }
-          const signalUrl = signalInContext.signal.url ? sanitizeRecordedUrl(signalInContext.signal.url) : null
+          const signalUrl = signal.url ? sanitizeRecordedUrl(signal.url) : null
           this.writeEvent({
             type: 'signal',
-            signal: signalInContext.signal.name,
+            signal: signal.name,
             url: signalUrl?.value,
             urlRedacted: signalUrl?.redacted || undefined,
-            pageAlias: signalInContext.frame?.pageAlias,
+            pageAlias: frame?.pageAlias,
             pageUrl: safePageUrl(page),
           })
         },
@@ -877,7 +876,7 @@ export class ActionRecorder {
   }
 
   private async disableRecorder() {
-    const disable = this.context._disableRecorder().catch((error) => {
+    const disable = this.context._stopRecording().catch((error) => {
       this.logger.error('[record] failed to disable recorder:', error)
     })
     if (this.disableTimeoutMs <= 0) {
@@ -1013,12 +1012,14 @@ export class ActionRecorder {
 
   private onRecorderAction({
     page,
-    actionInContext,
+    action,
+    frame,
     code,
     isUpdate,
   }: {
     page: Page
-    actionInContext: ActionInContext
+    action: RecorderAction
+    frame: RecorderFrame | undefined
     code: string
     isUpdate: boolean
   }) {
@@ -1026,25 +1027,23 @@ export class ActionRecorder {
       return
     }
     const rawCodeText = sanitizeLocatorText(code.trim())
-    const selector = actionInContext.action.selector
-      ? sanitizeLocatorText(actionInContext.action.selector)
-      : undefined
-    const actionName = actionInContext.action.name
-    const clickCount = typeof actionInContext.action.clickCount === 'number' ? actionInContext.action.clickCount : undefined
-    const pageAlias = actionInContext.frame?.pageAlias
-    const framePath = actionInContext.frame?.framePath?.length ? actionInContext.frame.framePath : undefined
+    const selector = action.selector ? sanitizeLocatorText(action.selector) : undefined
+    const actionName = action.name
+    const clickCount = typeof action.clickCount === 'number' ? action.clickCount : undefined
+    const pageAlias = frame?.pageAlias
+    const framePath = frame?.framePath.length ? frame.framePath : undefined
     const redactText = actionName === 'fill'
-    const actionUrl = actionInContext.action.url ? sanitizeRecordedUrl(actionInContext.action.url) : null
+    const actionUrl = action.url ? sanitizeRecordedUrl(action.url) : null
     const codeText = (() => {
       if (redactText) {
         return redactFillCode(rawCodeText)
       }
-      if (actionUrl?.redacted && actionInContext.action.url) {
-        return rawCodeText.replace(actionInContext.action.url, actionUrl.value)
+      if (actionUrl?.redacted && action.url) {
+        return rawCodeText.replace(action.url, actionUrl.value)
       }
       return rawCodeText
     })()
-    const extras = extraActionFields({ action: actionInContext.action, redactText })
+    const extras = extraActionFields({ action, redactText })
     // actionUpdated = same fill / dblclick. Only edit if it is the same action.
     if (isUpdate) {
       const last = this.lastAction()
@@ -1457,7 +1456,7 @@ function extraActionFields({
   action,
   redactText,
 }: {
-  action: ActionInContext['action']
+  action: RecorderAction
   redactText: boolean
 }): ExtraActionFields {
   const fields: ExtraActionFields = {}

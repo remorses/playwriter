@@ -30,10 +30,10 @@ export function getChromium({ patchright = false }: { patchright?: boolean } = {
   let chromium = chromiumByDriver.get(driver)
   if (!chromium) {
     // Lazy: Patchright is only loaded by sessions that use it.
-    // TODO: import it typed once both packages build on the same Playwright version. Patchright is 1.64
-    // (patchright-playwriter submodule), @xmorse/playwright-core is 1.59, so overloads like Browser.on differ.
+    // Both packages ship the same types.d.ts (Playwright 1.64.1), but TS cannot relate the generic
+    // conditional types (Unboxed<Arg>) of two separate declaration copies, so the cast stays.
     chromium = patchright
-      ? import('@playwriter/patchright-core' as string).then((mod: { chromium: Chromium }) => mod.chromium)
+      ? import('@playwriter/patchright-core').then((mod) => mod.chromium as unknown as Chromium)
       : import('@xmorse/playwright-core').then((mod) => mod.chromium)
     chromiumByDriver.set(driver, chromium)
   }

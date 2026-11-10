@@ -10,7 +10,7 @@
     "reload": "pnpm --filter playwriter build && tsx playwriter/src/cli.ts serve restart && pnpm --filter mcp-extension reload",
     "release:check-cli-version": "tsx scripts/check-extension-cli-version.ts",
     "release": "pnpm release:check-cli-version && pnpm --filter playwriter build && rm -f playwriter-*.zip && cd extension && PRODUCTION=true PLAYWRITER_EXTENSION_DIST=dist-release pnpm build && cd dist-release && zip -r ../../playwriter-$(node -p \"require('../manifest.json').version\").zip . && cd ../.. && realpath playwriter-$(node -p \"require('./extension/manifest.json').version\").zip | pbcopy && open 'https://chrome.google.com/webstore/devconsole/a379d569-9533-44e4-9749-0368f6dbf878/jfeammnjpkecdekppnclgkkffahnhfhe/edit/package'",
-    "bootstrap": "git submodule update --init && pnpm patchright:build && pnpm install && node playwright/utils/generate_injected.js && node playwright/packages/playwright-core/build.mjs",
+    "bootstrap": "git submodule update --init && pnpm patchright:build && pnpm install && node playwright/packages/playwright-core/build.mjs",
     "patchright:build": "cd patchright-playwriter && bash utils/rebuild_local_package.sh",
     "playwright:build": "node playwright/packages/playwright-core/build.mjs"
   },

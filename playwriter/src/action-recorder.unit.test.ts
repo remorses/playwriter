@@ -22,8 +22,8 @@ function createFakeContext(options: {
   disable?: () => Promise<void>
 }): BrowserContext {
   return {
-    _enableRecorder: options.enable ?? (async () => {}),
-    _disableRecorder: options.disable ?? (async () => {}),
+    _startRecording: options.enable ?? (async () => {}),
+    _stopRecording: options.disable ?? (async () => {}),
     pages: () => [],
     on: () => {},
     off: () => {},
@@ -64,7 +64,7 @@ describe('isTelemetryUrl', () => {
 })
 
 describe('ActionRecordingManager start lifecycle', () => {
-  test('start times out a hung _enableRecorder and leaves no active recording', async () => {
+  test('start times out a hung _startRecording and leaves no active recording', async () => {
     await withTempRecordings(async () => {
       const manager = new ActionRecordingManager({
         logger: { log: () => {}, error: () => {} },

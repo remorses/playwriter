@@ -178,7 +178,7 @@ pnpm --filter playwriter build
 
 `pnpm bootstrap` builds `@playwriter/patchright-core` in the `patchright-playwriter` submodule (`pnpm patchright:build`: clones Playwright, applies patches, needs npm, takes a few minutes), generates Playwright's injected sources and builds the local `@xmorse/playwright-core` fork. the playwriter build then creates client bundles used by the extension test build.
 
-do not run only `pnpm playwright:build` in a fresh worktree. it does not generate the injected sources. missing setup causes errors such as `Cannot find module './lib/inprocess'`, `Cannot find module '../generated/clockSource'`, or unresolved `playwriter/dist/ghost-cursor-client.js?raw` and `playwriter/dist/bippy.js?raw` imports.
+do not run only `pnpm playwright:build` in a fresh worktree. it needs `pnpm install` and the patchright build first. missing setup causes errors such as `Cannot find module 'esbuild'`, or unresolved `playwriter/dist/ghost-cursor-client.js?raw` and `playwriter/dist/bippy.js?raw` imports.
 
 ```bash
 pnpm test              # run all tests (takes ~90 seconds)
@@ -332,7 +332,7 @@ if you add runtime code (a new method, property, or type) to the fork without up
 1. **implement the runtime code**
    - client side: `playwright/packages/playwright-core/src/client/*.ts`
    - server side (if needed): `playwright/packages/playwright-core/src/server/*.ts`
-   - protocol (if it crosses the channel): `playwright/packages/protocol/src/channels.d.ts` + dispatchers
+   - protocol (if it crosses the channel): `playwright/packages/protocol/spec/*.yml` + dispatchers, then `node playwright/utils/generate_channels.js` (regenerates channels.d.ts and validator.ts)
 
 2. **add a doc entry in the markdown** — this is what the type generator reads
    - methods: `playwright/docs/src/api/class-page.md`, `class-browsercontext.md`, `class-locator.md`, etc.
@@ -381,7 +381,7 @@ if you add runtime code (a new method, property, or type) to the fork without up
 
 5. **rebuild playwright-core**
    ```bash
-   pnpm playwright:build  # 0.1s
+   pnpm playwright:build  # ~0.5s
    ```
 
 6. **add a changeset** for `@xmorse/playwright-core` describing the public API or behavior change
@@ -412,48 +412,36 @@ this does:
 
 1. `git submodule update --init` - init the playwright submodule
 2. `pnpm install` - install deps and link workspace packages
-3. `node playwright/utils/generate_injected.js` - generate browser scripts to `src/generated/`
-4. `node playwright/packages/playwright-core/build.mjs` - transpile (0.1s)
+3. `node playwright/packages/playwright-core/build.mjs` - generate injected scripts and bundle lib/ (~0.5s)
 
 ### rebuilding after changes
 
 after modifying playwright-core source:
 
 ```bash
-pnpm playwright:build  # 0.1s
+pnpm playwright:build  # ~0.5s
 ```
 
 ### how the simplified build works
 
-upstream playwright bundles all dependencies into single files (zero runtime deps). we skip this by using direct dependencies instead:
+the fork is upstream Playwright **1.64.1** (the same version `patchright-playwriter` builds), so both packages ship the same `types.d.ts`.
 
-**1. dependencies in package.json** - ws, debug, pngjs, commander, etc. are regular deps
+upstream builds the whole monorepo with `utils/build/build.js`. `playwright/packages/playwright-core/build.mjs` runs only the playwright-core part of it:
 
-**2. rewritten bundle files** - `playwright/packages/playwright-core/src/utilsBundle.ts`, `zipBundle.ts`, `mcpBundle.ts` import directly:
-
-```ts
-// before (bundled)
-export const ws = require('./utilsBundleImpl').ws
-
-// after (direct)
-import wsLibrary from 'ws'
-export const ws = wsLibrary
+```
+utils/generate_injected.js     → src/generated/*Source.ts (injected scripts)
+src/bootstrap.ts, entry/*, …   → lib/*.js (per file)
+src/utilsBundle.ts             → lib/utilsBundle.js   (all npm deps bundled)
+src/coreBundle.ts              → lib/coreBundle.js    (everything else, npm imports go through utilsBundle)
 ```
 
-**3. simple build script** (`playwright/packages/playwright-core/build.mjs`) - just esbuild transpile + copy vendored files:
+npm deps are `devDependencies` of `@xmorse/playwright-core` (versions from upstream root package.json), bundled like upstream, so the published package has no runtime deps. bare imports resolve from `playwright/packages/playwright-core/node_modules`.
 
-```bash
-# transpile src/**/*.ts → lib/**/*.js (0.1s)
-# copy third_party/lockfile.js, third_party/extract-zip.js
-```
-
-**4. generated files** - `playwright/packages/playwright-core/src/generated/*.ts` are browser scripts created by `playwright/utils/generate_injected.js`. these only need regenerating if upstream changes injected scripts.
-
-|              | upstream    | ours           |
-| ------------ | ----------- | -------------- |
-| build time   | ~30s        | 0.1s           |
-| dependencies | 0 (bundled) | ~20 (external) |
-| trace-viewer | built       | skipped        |
+|              | upstream | ours    |
+| ------------ | -------- | ------- |
+| build time   | minutes  | ~0.5s   |
+| dependencies | 0        | 0       |
+| trace-viewer | built    | skipped |
 
 ### key source files
 

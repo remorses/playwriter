@@ -9,7 +9,7 @@ import path from 'node:path'
 import { chromium } from '@xmorse/playwright-core'
 import { getCdpUrl } from './utils.js'
 import { getCDPSessionForPage } from './cdp-session.js'
-import { parseRecording, projectThinEvent, sanitizeRecordedBody, sanitizeRecordedUrl } from './action-recorder.js'
+import { parseRecording, projectThinEvent, sanitizeRecordedBody, sanitizeRecordedUrl, type RecordingBrowserContext } from './action-recorder.js'
 import {
   setupTestContext,
   cleanupTestContext,
@@ -286,13 +286,13 @@ describe('action recording', () => {
     const actionCodes = events.filter((e) => e.type === 'action').map((e) => e.code)
     expect(actionCodes).toMatchInlineSnapshot(`
       [
-        "await page1.getByRole('button', { name: 'Submit order' }).click();",
-        "await page1.getByRole('textbox', { name: 'Email address' }).click();",
-        "await page1.getByRole('textbox', { name: 'Email address' }).fill('[redacted]');",
-        "await page1.getByRole('textbox', { name: 'Password' }).click();",
-        "await page1.getByRole('textbox', { name: 'Password' }).fill('[redacted]');",
-        "await page1.getByRole('button', { name: 'Attachment' }).setInputFiles('recorder-test-attachment.txt');",
-        "await page1.getByRole('button', { name: 'Done!' }).click();",
+        "await page.getByRole('button', { name: 'Submit order' }).click();",
+        "await page.getByRole('textbox', { name: 'Email address' }).click();",
+        "await page.getByRole('textbox', { name: 'Email address' }).fill('[redacted]');",
+        "await page.getByRole('textbox', { name: 'Password' }).click();",
+        "await page.getByRole('textbox', { name: 'Password' }).fill('[redacted]');",
+        "await page.getByRole('button', { name: 'Attachment' }).setInputFiles('recorder-test-attachment.txt');",
+        "await page.getByRole('button', { name: 'Done!' }).click();",
       ]
     `)
 
@@ -377,7 +377,7 @@ describe('action recording', () => {
     // exactly one action: duplicate listeners in the fork would produce doubles
     expect(actions2.map((e) => e.code)).toMatchInlineSnapshot(`
       [
-        "await page1.getByRole('button', { name: 'Done!' }).click();",
+        "await page.getByRole('button', { name: 'Done!' }).click();",
       ]
     `)
 
@@ -412,7 +412,7 @@ describe('action recording', () => {
     const events3 = parseRecording(fs.readFileSync(stop3.filePath, 'utf-8'))
     const fills3 = events3.filter((e) => e.type === 'action' && e.action === 'fill')
     expect(fills3.map((e) => e.code)).toEqual([
-      "await page1.getByRole('textbox', { name: 'Search' }).fill('[redacted]');",
+      "await page.getByRole('textbox', { name: 'Search' }).fill('[redacted]');",
     ])
     expect(fills3[0].text).toBe('[redacted]')
 
@@ -451,11 +451,7 @@ describe('action recording', () => {
     const extraBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
     const extraContext = extraBrowser.contexts()[0]
     expect(extraContext).toBeDefined()
-    await extraContext._enableRecorder({
-      language: 'javascript',
-      mode: 'recording',
-      recorderMode: 'api',
-    }, {
+    await (extraContext as RecordingBrowserContext)._startRecording({ language: 'javascript' }, {
       actionAdded: () => {},
       actionUpdated: () => {},
     })
@@ -639,20 +635,20 @@ describe('action recording', () => {
       })
     expect(timeline).toMatchInlineSnapshot(`
       [
-        "action click await page1.getByRole('button', { name: 'Open popup' }).click(); alias=page1",
+        "action click await page.getByRole('button', { name: 'Open popup' }).click(); alias=page",
         "page-opened BASE/popup-target",
-        "signal popup alias=page1",
-        "action click await page2.getByRole('button', { name: 'Inside popup' }).click(); alias=page2",
-        "action click await page1.getByRole('link', { name: 'Modifier link' }).click({ modifiers: ['ControlOrMeta'] }); alias=page1",
+        "signal popup alias=page",
+        "action click await page1.getByRole('button', { name: 'Inside popup' }).click(); alias=page1",
+        "action click await page.getByRole('link', { name: 'Modifier link' }).click({ modifiers: ['ControlOrMeta'] }); alias=page",
         "page-opened BASE/mod-target",
-        "action openPage const page3 = await context.newPage(); await page3.goto('BASE/mod-target'); alias=page3",
-        "action click await page3.getByRole('button', { name: 'Inside modifier tab' }).click(); alias=page3",
-        "action click await page1.getByRole('link', { name: 'Middle link' }).click({ button: 'middle' }); alias=page1",
+        "action openPage const page2 = await context.newPage(); await page2.goto('BASE/mod-target'); alias=page2",
+        "action click await page2.getByRole('button', { name: 'Inside modifier tab' }).click(); alias=page2",
+        "action click await page.getByRole('link', { name: 'Middle link' }).click({ button: 'middle' }); alias=page",
         "page-opened BASE/middle-target",
-        "action openPage const page4 = await context.newPage(); await page4.goto('BASE/middle-target'); alias=page4",
-        "action click await page1.getByRole('link', { name: 'Blank link' }).click(); alias=page1",
+        "action openPage const page3 = await context.newPage(); await page3.goto('BASE/middle-target'); alias=page3",
+        "action click await page.getByRole('link', { name: 'Blank link' }).click(); alias=page",
         "page-opened BASE/blank-target",
-        "signal popup alias=page1",
+        "signal popup alias=page",
       ]
     `)
 
