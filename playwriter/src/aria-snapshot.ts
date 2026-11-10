@@ -1082,6 +1082,13 @@ export async function getAriaSnapshot({
       scopeApplied = true
     }
 
+    // AX tree first: every node in it is also in the later DOM, so injected Playwriter UI is always found below
+    const axParams = !oopifSessionId && frameId ? { frameId } : undefined
+    const { nodes: axNodes } = await session.send(
+      'Accessibility.getFullAXTree',
+      axParams,
+      oopifSessionId,
+    )
     const { nodes: domNodes } = await session.send(
       'DOM.getFlattenedDocument',
       { depth: -1, pierce: true },
@@ -1102,17 +1109,28 @@ export async function getAriaSnapshot({
     }
 
     const allowedBackendIds = scopeRootNodeId ? buildBackendIdSet(scopeRootNodeId, childrenByParent, domById) : null
-
-    const axParams = !oopifSessionId && frameId ? { frameId } : undefined
-    const { nodes: axNodes } = await session.send(
-      'Accessibility.getFullAXTree',
-      axParams,
-      oopifSessionId,
+    // Playwriter's own toolbar, overlays and cursor are injected async, so they must never reach the snapshot
+    const playwriterUiBackendIds = new Set(
+      [...domById.values()]
+        .filter(({ attributes }) => {
+          return (
+            attributes.has('data-playwriter-toolbar') ||
+            attributes.has('data-playwriter-overlay') ||
+            attributes.get('id') === '__playwriter_ghost_cursor__'
+          )
+        })
+        .flatMap(({ nodeId }) => {
+          return [...buildBackendIdSet(nodeId, childrenByParent, domById)]
+        }),
     )
 
     const axById = new Map<Protocol.Accessibility.AXNodeId, Protocol.Accessibility.AXNode>()
     for (const node of axNodes) {
       axById.set(node.nodeId, node)
+      // Also drops AX children with no DOM node, like CSS generated text
+      if (node.backendDOMNodeId && playwriterUiBackendIds.has(node.backendDOMNodeId)) {
+        node.childIds = []
+      }
     }
 
     // Index AX nodes by backendDOMNodeId for O(1) lookups during promotion
@@ -1215,6 +1233,9 @@ export async function getAriaSnapshot({
     }
 
     const isNodeInScope = (node: Protocol.Accessibility.AXNode): boolean => {
+      if (node.backendDOMNodeId && playwriterUiBackendIds.has(node.backendDOMNodeId)) {
+        return false
+      }
       if (!allowedBackendIds) {
         return true
       }

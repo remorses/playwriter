@@ -333,6 +333,23 @@ describe('aria-snapshot', () => {
     }
   }, 30000)
 
+  // The toolbar is injected async after load, so snapshots used to flip between runs
+  it('never includes the Playwriter toolbar', async () => {
+    const htmlServer = await createHtmlServer({ htmlByPath: { '/': '<!doctype html><button>Save</button>' } })
+    try {
+      await page.goto(htmlServer.baseUrl, { waitUntil: 'domcontentloaded' })
+      await page.locator('[data-playwriter-toolbar]').first().waitFor({ state: 'attached' })
+      const [full, interactive] = await Promise.all([
+        getAriaSnapshot({ page }),
+        getAriaSnapshot({ page, interactiveOnly: true }),
+      ])
+      expect(full.snapshot).toMatchInlineSnapshot(`"  - role=button[name="Save"i]"`)
+      expect(interactive.snapshot).toMatchInlineSnapshot(`"  - role=button[name="Save"i]"`)
+    } finally {
+      await htmlServer.close()
+    }
+  }, 30000)
+
   it('scopes snapshot to cross-origin iframe locator', async () => {
     const iframeServer = await createHtmlServer({
       htmlByPath: {
