@@ -3,7 +3,7 @@
  * Ported from anomalyco/browse (cli/src/execute/human-input.ts).
  *
  * Playwright teleports the mouse: one mouseMoved straight to the exact center of the target, then press and
- * release a few ms apart. Behavioral bot detection (reCAPTCHA v3, Cloudflare, DataDome, HUMAN) scores that.
+ * release a few ms apart. Real users move along a path and pause.
  * For each Input.dispatchMouseEvent that moves the pointer, the relay first sends a curved, eased path from the
  * last pointer position: cubic Bezier with a sideways bow, minimum-jerk speed, ~60-120 Hz samples, tremor that
  * fades near the target, sometimes an overshoot and correction, and a duration that grows with distance
@@ -12,9 +12,9 @@
  * presses are spaced 30-110 ms apart. Wheel events glide in ~60 Hz bursts, and scrolling an element into view
  * happens in wheel flicks instead of a one-frame jump.
  *
- * Every action gets slower, so each session picks a mode (`session new --human-input`): `auto` (default) turns
- * it on only for pages on sites with heavy bot detection, see isBotProtectedUrl. Old extensions work because
- * only existing CDP commands are sent.
+ * Every action gets slower, so it is on for Patchright connections (`session new --patchright`, the /cdp URL
+ * has ?patchright=1) and for pages on the sites in isHumanizedSite. Old extensions work because only existing
+ * CDP commands are sent.
  */
 
 import type { Protocol } from './cdp-types.js'
@@ -48,16 +48,8 @@ export function isPacedInput(command: { method: string; params?: object }): comm
   return PACED_METHODS.has(command.method) && command.params !== undefined
 }
 
-export const HUMAN_INPUT_MODES = ['auto', 'on', 'off'] as const
-export type HumanInputMode = (typeof HUMAN_INPUT_MODES)[number]
-
-export function normalizeHumanInputMode(value: string | undefined): HumanInputMode | null {
-  const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return HUMAN_INPUT_MODES.find((known) => known === mode) ?? null
-}
-
-/** Sites with heavy behavioral bot detection, matched with their subdomains. */
-const BOT_PROTECTED_DOMAINS = [
+/** Sites where input is always humanized, matched with their subdomains. */
+const HUMANIZED_DOMAINS = [
   'x.com',
   'twitter.com',
   'instagram.com',
@@ -78,23 +70,22 @@ const BOT_PROTECTED_DOMAINS = [
   'indeed.com',
 ]
 /** Brands with one site per country: amazon.de, google.co.uk, ebay.com.au. */
-const BOT_PROTECTED_BRANDS = ['amazon', 'google', 'ebay', 'pinterest']
+const HUMANIZED_BRANDS = ['amazon', 'google', 'ebay', 'pinterest']
 const COUNTRY_SUFFIX = /^(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/
 
-/** True for pages where `auto` human input turns on. */
-export function isBotProtectedUrl(url: string | undefined): boolean {
+/** True for pages where input is humanized also without Patchright. */
+export function isHumanizedSite(url: string | undefined): boolean {
   if (!url || !URL.canParse(url)) return false
   const hostname = new URL(url).hostname.toLowerCase().replace(/\.$/, '')
-  if (BOT_PROTECTED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return true
+  if (HUMANIZED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return true
   const labels = hostname.split('.')
   return labels.some((label, index) => {
-    return BOT_PROTECTED_BRANDS.includes(label) && COUNTRY_SUFFIX.test(labels.slice(index + 1).join('.'))
+    return HUMANIZED_BRANDS.includes(label) && COUNTRY_SUFFIX.test(labels.slice(index + 1).join('.'))
   })
 }
 
-export function shouldHumanizeInput({ mode, url }: { mode: HumanInputMode; url: string | undefined }): boolean {
-  if (mode === 'auto') return isBotProtectedUrl(url)
-  return mode === 'on'
+export function shouldHumanizeInput({ patchright, url }: { patchright: boolean; url: string | undefined }): boolean {
+  return patchright || isHumanizedSite(url)
 }
 
 const sleep = (ms: number) => (ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve())

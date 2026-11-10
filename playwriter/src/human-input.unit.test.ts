@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from 'vitest'
-import { aimOffset, isBotProtectedUrl } from './human-input.js'
+import { aimOffset, isHumanizedSite } from './human-input.js'
 
-test('auto human input matches bot-protected sites, their subdomains and country sites', () => {
+test('input is humanized on listed sites, their subdomains and country sites', () => {
   const urls = [
     'https://x.com/home',
     'https://mobile.twitter.com/',
@@ -23,7 +23,7 @@ test('auto human input matches bot-protected sites, their subdomains and country
     'about:blank',
     'not a url',
   ]
-  expect(Object.fromEntries(urls.map((url) => [url, isBotProtectedUrl(url)]))).toMatchInlineSnapshot(`
+  expect(Object.fromEntries(urls.map((url) => [url, isHumanizedSite(url)]))).toMatchInlineSnapshot(`
     {
       "about:blank": false,
       "http://127.0.0.1:3000/": false,

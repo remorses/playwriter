@@ -55,6 +55,17 @@ playwriter session new --tab-group scrape --tab-group-color grey
 
 Colors: `grey, blue, red, yellow, green, pink, purple, cyan, orange`; otherwise color is derived from the name. Chrome can collapse or move groups. Dragging a tab between Playwriter groups keeps it connected; dragging it out disconnects it. Local and remote-control extension sessions only.
 
+### Patchright
+
+**Always** use `--patchright` for production websites where the user is logged in with their own account (email, social, shopping, admin dashboards). **Never** for localhost, dev servers or tunnels. It connects with Patchright and moves the mouse and types like a person. Switch an existing session mid-task, even after pages loaded:
+
+```bash
+playwriter session new --tab-group shop --patchright
+playwriter session update <sessionId> --patchright  # --patchright false switches back
+```
+
+Switching reconnects: tabs stay open, `state` is cleared, so get the page again with `context.pages().find(p => p.url().includes('...'))`. With Patchright, `page.evaluate` runs in an isolated world: it sees the DOM but not page JS globals. Pass `false` as third argument for the main world: `page.evaluate(() => window.app, undefined, false)`. `getLatestLogs` may miss console messages.
+
 Node programs and TypeScript SDKs use the `playwriter` package as a library. Do not POST `/cli/session/new` yourself. Docs: https://playwriter.dev/docs/sessions#node-api
 
 ```ts
@@ -517,7 +528,7 @@ Writing to any other path (e.g. `~/Downloads`, `~/Desktop`) throws `EPERM: opera
 - **No bringToFront**: never call unless user asks - it's disruptive and unnecessary, you can interact with background pages
 - **Click before keyboard input in extension mode.** Call `click()` on the target field immediately before `fill()` or `keyboard` methods. CDP sends keyboard input to the browser's OS-focused surface, so DOM focus and `bringToFront()` can still leave text in Chrome's omnibox.
 - **Check state after actions**: always verify page state after clicking/submitting (see next section)
-- **Bot challenges**: when a navigation lands on a captcha, bot check or block page, execute prints a `[WARNING]` and already waited for checks that clear by themselves. Never reload, retry in a loop or solve captchas yourself; ask the user to solve it in the tab, or stop on a block. Input is humanized (curved mouse paths, typing gaps) on sites like x.com, amazon and google by default; for another protected site, use `session new --human-input on`.
+- **Verification pages**: when a navigation lands on a verification or block page, execute prints a `[WARNING]` and already waited for checks that clear by themselves. Never reload or retry in a loop; ask the user to complete it in the tab, or stop on a block.
 - **Clean up only your listeners**: remove listeners you added by event name or handler reference. Never call `removeAllListeners()` because it also removes Playwriter's page error and console listeners.
 - **Tracked page errors are automatic**: uncaught errors from pages assigned directly to `state` keys appear in the current or next execute output as `[PAGE ERROR]`. Errors from pages tracked by other sessions are excluded.
 - **Always print page logs after every action**: call `getLatestLogs({ page: state.page, sinceLastCall: true })` after every goto, click, or submit to catch console errors and warnings. Do not manually collect `page.on('console')` events; manual listeners miss logs emitted before the listener is attached. The first `sinceLastCall` call returns all buffered logs including startup and hydration errors. `getLatestLogs` needs `page`. `snapshot` needs `page`, or a `locator`/`frame` from your tab.

@@ -36,12 +36,11 @@ import { VERSION, EXTENSION_IDS } from './utils.js'
 import { createCdpLogger, type CdpLogEntry, type CdpLogger } from './cdp-log.js'
 import { appendSessionToWsUrl } from './chrome-discovery.js'
 import * as relayState from './relay-state.js'
-import { createHumanInput, isPacedInput, normalizeHumanInputMode, shouldHumanizeInput } from './human-input.js'
+import { createHumanInput, isPacedInput, shouldHumanizeInput } from './human-input.js'
 import { WebSocket as NodeWebSocket } from 'ws'
 import { getRemoteDialRetryMs, parseRemoteControlUrl, REMOTE_DIAL_GIVE_UP_MS, type RemoteHelloMessage } from './remote-control.js'
 import type { CloudAuth } from './cloud-client.js'
 import { recordExecute, trackEvent, type SessionKind } from './telemetry.js'
-import type { HumanInputMode } from './human-input.js'
 import type { ExecutorManager } from './executor.js'
 
 /** Session id counter of the relay daemon. One file per port, so relays on other ports never share it. */
@@ -1020,13 +1019,11 @@ export async function startPlayWriterCDPRelayServer({
     }
 
     const input = { method, params }
-    // Clients without a relay session (MCP, raw connectOverCDP) use 'auto' too
-    const humanInputMode = (client?.sessionId && sessionHumanInput.get(client.sessionId)) || 'auto'
     if (
       sessionId &&
       resolvedExtensionId &&
       isPacedInput(input) &&
-      shouldHumanizeInput({ mode: humanInputMode, url: connectedTargets.get(sessionId)?.targetInfo.url })
+      shouldHumanizeInput({ patchright: client?.patchright ?? false, url: connectedTargets.get(sessionId)?.targetInfo.url })
     ) {
       await humanInput
         .beforeInput({
@@ -1449,6 +1446,7 @@ export async function startPlayWriterCDPRelayServer({
       const clientTabGroup = normalizeTabGroupTitle(url.searchParams.get('tabGroup')) || undefined
       const clientTabGroupColor = normalizeTabGroupColor(url.searchParams.get('tabGroupColor')) || undefined
       const clientKind = url.searchParams.get('client')
+      const clientPatchright = url.searchParams.get('patchright') === '1'
       // When extensionId is explicit, resolve directly. Otherwise use fallback which
       // handles single-extension and uniquely-active-extension cases (#52).
       const resolvedExtension = requestedExtensionId
@@ -1487,6 +1485,7 @@ export async function startPlayWriterCDPRelayServer({
               sessionId: clientSessionId,
               tabGroup: clientTabGroup,
               tabGroupColor: clientTabGroupColor,
+              patchright: clientPatchright,
             })
           })
           const extensionConnection = getExtensionConnection(clientExtensionId)
@@ -2507,8 +2506,6 @@ export async function startPlayWriterCDPRelayServer({
   /** Tab ownership key the extension stores as groupKey. Includes the relay start, so it never matches tabs of an older relay. */
   const ownershipKey = (sessionId: string) => `${relayInstanceId}:${sessionId}`
 
-  /** Human input mode of extension and remote sessions. Other clients use 'auto'. */
-  const sessionHumanInput = new Map<string, HumanInputMode>()
 
   // Lazy-load ExecutorManager to avoid circular imports and only when needed
   let executorManager: ExecutorManager | null = null
@@ -2803,8 +2800,8 @@ export async function startPlayWriterCDPRelayServer({
       tabGroup?: string
       /** Explicit tab group color for extension or remote-control sessions */
       tabGroupColor?: string
-      /** Human-like input mode for extension or remote-control sessions: auto (default), on, off */
-      humanInput?: string
+      /** Connect with Patchright and humanize input on every page (extension or remote-control sessions) */
+      patchright?: boolean
       /** Cloud API credentials for local-to-cloud execution helpers */
       cloudAuth?: CloudAuth
       /** Cloud session tracking metadata (set by CLI when connecting to a cloud browser) */
@@ -2818,10 +2815,7 @@ export async function startPlayWriterCDPRelayServer({
         blockProxyResources?: boolean
       }
     }
-    const humanInput = body.humanInput !== undefined ? normalizeHumanInputMode(body.humanInput) : 'auto'
-    if (!humanInput) {
-      return c.json({ error: 'humanInput must be one of: auto, on, off' }, 400)
-    }
+    const patchright = body.patchright === true
     const sessionId = allocateSessionId()
     // Resolve cwd with cross-OS awareness: if CLI runs on Windows and relay on
     // Linux (WSL), translate the Windows path to /mnt/<drive>/... so the sandbox
@@ -2939,13 +2933,13 @@ export async function startPlayWriterCDPRelayServer({
         cwd: cwd || undefined,
         tabGroup,
         tabGroupColor: tabGroupColor || undefined,
+        patchright,
         sessionMetadata: {
           extensionId: remoteEntry.stableKey,
           browser: remoteEntry.info.browser || 'Remote browser',
           profile: remoteEntry.info.email ? { email: remoteEntry.info.email, id: remoteEntry.info.id || '' } : null,
         },
       })
-      sessionHumanInput.set(sessionId, humanInput)
       const metadata = executor.getSessionMetadata()
       const tabGroupWarning: string | undefined = await (async () => {
         try {
@@ -2979,7 +2973,7 @@ export async function startPlayWriterCDPRelayServer({
         warning,
         tabGroup,
         tabGroupColor,
-        humanInput,
+        patchright,
       })
     }
 
@@ -3017,8 +3011,8 @@ export async function startPlayWriterCDPRelayServer({
       },
       enableCloudScope: true,
       cloudAuth: body.cloudAuth,
+      patchright,
     })
-    sessionHumanInput.set(sessionId, humanInput)
     const metadata = executor.getSessionMetadata()
     return c.json({
       id: sessionId,
@@ -3032,16 +3026,18 @@ export async function startPlayWriterCDPRelayServer({
       // Echoed so the CLI can detect relays that don't support tab groups
       tabGroup: executor.getTabGroup(),
       tabGroupColor: executor.getTabGroupColor(),
-      humanInput,
+      patchright,
     })
   })
 
-  // Update a session's tab group name and/or color. Renames move the session's
-  // existing tabs to the new name; color changes recolor the group (including
-  // the default 'playwriter' group when the session still uses it).
+  // Update a session's driver and/or tab group. patchright switches the executor
+  // between Playwright and Patchright mid-session.
+  // Tab group renames move the session's existing tabs to the new name; color
+  // changes recolor the group (including the default 'playwriter' group).
   app.post('/cli/session/update', async (c) => {
     try {
-      const body: { sessionId: string | number; tabGroup?: string; tabGroupColor?: string } = await c.req.json()
+      const body: { sessionId: string | number; tabGroup?: string; tabGroupColor?: string; patchright?: boolean } =
+        await c.req.json()
       const sessionId = normalizeSessionId(body.sessionId)
       if (!sessionId) {
         return c.json({ error: 'sessionId is required' }, 400)
@@ -3054,8 +3050,12 @@ export async function startPlayWriterCDPRelayServer({
       if (body.tabGroupColor !== undefined && !tabGroupColor) {
         return c.json({ error: 'tabGroupColor must be one of: grey, blue, red, yellow, green, pink, purple, cyan, orange' }, 400)
       }
-      if (!tabGroup && !tabGroupColor) {
-        return c.json({ error: 'Pass tabGroup and/or tabGroupColor' }, 400)
+      if (body.patchright !== undefined && typeof body.patchright !== 'boolean') {
+        return c.json({ error: 'patchright must be a boolean' }, 400)
+      }
+      const patchright = body.patchright
+      if (!tabGroup && !tabGroupColor && patchright === undefined) {
+        return c.json({ error: 'Pass patchright, tabGroup and/or tabGroupColor' }, 400)
       }
 
       const manager = await getExecutorManager()
@@ -3065,7 +3065,14 @@ export async function startPlayWriterCDPRelayServer({
       }
       const extensionId = executor.getSessionMetadata().extensionId
       if (!extensionId) {
-        return c.json({ error: 'Tab groups only apply to extension sessions.' }, 400)
+        return c.json({ error: 'Patchright and tab groups only apply to extension and remote control sessions.' }, 400)
+      }
+
+      // The new connection carries ?patchright=1, so the relay humanizes its input from then on
+      const patchrightResult =
+        patchright === undefined ? {} : { patchright, ...(await executor.setPatchright(patchright)) }
+      if (!tabGroup && !tabGroupColor) {
+        return c.json({ success: true, ...patchrightResult })
       }
 
       const previousTabGroup = executor.getTabGroup() || DEFAULT_TAB_GROUP_TITLE
@@ -3085,7 +3092,7 @@ export async function startPlayWriterCDPRelayServer({
       )
 
       if (previousTabGroup === nextTabGroup && !tabGroupColor) {
-        return c.json({ success: true, tabGroup: nextTabGroup, movedTabs: 0 })
+        return c.json({ success: true, ...patchrightResult, tabGroup: nextTabGroup, movedTabs: 0 })
       }
 
       // Ask the extension to move/recolor the session's existing tabs. The
@@ -3120,7 +3127,14 @@ export async function startPlayWriterCDPRelayServer({
         logger?.log(pc.yellow(`[session ${sessionId}] ${warning}`))
       }
 
-      return c.json({ success: true, tabGroup: nextTabGroup, tabGroupColor: tabGroupColor || undefined, movedTabs, warning })
+      return c.json({
+        success: true,
+        ...patchrightResult,
+        tabGroup: nextTabGroup,
+        tabGroupColor: tabGroupColor || undefined,
+        movedTabs,
+        warning,
+      })
     } catch (error: any) {
       logger?.error('Update session endpoint error:', error)
       return c.json({ error: error.message }, 500)
@@ -3177,7 +3191,6 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       await manager.deleteExecutor(sessionId)
-      sessionHumanInput.delete(sessionId)
 
       // Close the remote-control tunnel dial when its last session goes away
       releaseRemoteDialForSession(sessionId)

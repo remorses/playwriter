@@ -18,6 +18,7 @@ import { LOG_FILE_PATH, VERSION, parseRelayHost } from './utils.js'
 import { ensureRelayServer, RELAY_PORT } from './relay-client.js'
 import { PlaywrightExecutor, CodeExecutionTimeoutError, boundExecuteOutput } from './executor.js'
 import { installProcessGuard } from './process-guard.js'
+import { isPatchrightEnvEnabled } from './playwright-import.js'
 import { discoverChromeInstances, resolveDirectInput, appendSessionToWsUrl } from './chrome-discovery.js'
 import crypto from 'node:crypto'
 
@@ -147,6 +148,7 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
         cdpConfig: directConfig,
         logger: mcpLogger,
         cwd: process.cwd(),
+        patchright: isPatchrightEnvEnabled(),
       })
     }
 
@@ -161,6 +163,7 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
       cdpConfig,
       logger: mcpLogger,
       cwd: process.cwd(),
+      patchright: isPatchrightEnvEnabled(),
     })
   })()
 

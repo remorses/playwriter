@@ -78,6 +78,8 @@ export type PlaywrightClient = {
   tabGroup?: string
   /** Explicit tab group color (from the ?tabGroupColor= query param) */
   tabGroupColor?: TabGroupColor
+  /** Connected with Patchright (?patchright=1): its input is humanized on every page */
+  patchright?: boolean
 }
 
 export type RelayState = {
@@ -254,6 +256,7 @@ export function addPlaywrightClient(
     sessionId,
     tabGroup,
     tabGroupColor,
+    patchright,
   }: {
     id: string
     extensionId: string | null
@@ -261,10 +264,11 @@ export function addPlaywrightClient(
     sessionId?: string
     tabGroup?: string
     tabGroupColor?: TabGroupColor
+    patchright?: boolean
   },
 ): RelayState {
   const newClients = new Map(state.playwrightClients)
-  newClients.set(id, { id, extensionId, ws, sessionId, tabGroup, tabGroupColor })
+  newClients.set(id, { id, extensionId, ws, sessionId, tabGroup, tabGroupColor, patchright })
   return { ...state, playwrightClients: newClients }
 }
 

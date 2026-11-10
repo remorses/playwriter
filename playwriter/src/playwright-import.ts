@@ -1,7 +1,7 @@
 /**
- * Conditional playwright-core import. When patchright mode is enabled via
- * PLAYWRITER_PATCHRIGHT=1 env var, imports from @playwriter/patchright-core
- * instead of @xmorse/playwright-core. Both packages expose identical APIs.
+ * Playwright driver import. Each connection picks its driver: @xmorse/playwright-core by default,
+ * or @playwriter/patchright-core for `session new --patchright` sessions, and for the MCP with
+ * PLAYWRITER_PATCHRIGHT=1.
  *
  * Type imports continue to use @xmorse/playwright-core directly (types are
  * the same in both packages) so TypeScript resolution works without the
@@ -24,35 +24,35 @@ export type { BrowserType } from '@xmorse/playwright-core'
 
 type Chromium = typeof import('@xmorse/playwright-core').chromium
 
-let _chromium: Chromium | undefined
+const chromiumByDriver = new Map<'playwright' | 'patchright', Promise<Chromium>>()
 
-/**
- * Returns the chromium BrowserType, loading from patchright-core if enabled.
- * Caches after first call.
- */
-export async function getChromium(): Promise<Chromium> {
-  if (_chromium) {
-    return _chromium
+/** Chromium BrowserType of the chosen driver. Both drivers can be loaded in one process. */
+export function getChromium({ patchright = false }: { patchright?: boolean } = {}): Promise<Chromium> {
+  const driver = patchright ? 'patchright' : 'playwright'
+  let chromium = chromiumByDriver.get(driver)
+  if (!chromium) {
+    chromium = patchright ? importPatchright() : import('@xmorse/playwright-core').then((mod) => mod.chromium)
+    // Don't cache a failed import, so installing the package later works without a restart
+    chromium.catch(() => chromiumByDriver.delete(driver))
+    chromiumByDriver.set(driver, chromium)
   }
-  if (isPatchrightEnabled()) {
-    try {
-      // Dynamic import — @playwriter/patchright-core is an optional dependency.
-      // Types come from @xmorse/playwright-core (identical API surface).
-      const mod: { chromium: Chromium } = await import('@playwriter/patchright-core' as string)
-      _chromium = mod.chromium
-    } catch (e: unknown) {
-      throw new Error(
-        '@playwriter/patchright-core is not installed. Install it with: pnpm add @playwriter/patchright-core',
-        { cause: e },
-      )
-    }
-  } else {
-    const mod = await import('@xmorse/playwright-core')
-    _chromium = mod.chromium
-  }
-  return _chromium!
+  return chromium
 }
 
-export function isPatchrightEnabled(): boolean {
+async function importPatchright(): Promise<Chromium> {
+  try {
+    // Optional dependency. Types come from @xmorse/playwright-core (identical API surface).
+    const mod: { chromium: Chromium } = await import('@playwriter/patchright-core' as string)
+    return mod.chromium
+  } catch (e: unknown) {
+    throw new Error(
+      '@playwriter/patchright-core is not installed. Reinstall playwriter with optional dependencies, or use the session without --patchright.',
+      { cause: e },
+    )
+  }
+}
+
+/** Process-wide Patchright opt-in for the MCP (`playwriter --patchright`). CLI sessions choose per session. */
+export function isPatchrightEnvEnabled(): boolean {
   return process.env.PLAYWRITER_PATCHRIGHT === '1' || process.env.PLAYWRITER_PATCHRIGHT === 'true'
 }

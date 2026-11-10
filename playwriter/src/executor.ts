@@ -4,7 +4,7 @@
  */
 
 import type { Page, Frame, Browser, BrowserContext, Locator, FrameLocator, ElementHandle } from '@xmorse/playwright-core'
-import { getChromium, isPatchrightEnabled } from './playwright-import.js'
+import { getChromium } from './playwright-import.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -407,6 +407,8 @@ export interface SessionInfo {
   tabGroup: string | null
   /** Explicit tab group color, null when derived from the title hash */
   tabGroupColor: TabGroupColor | null
+  /** Connected with Patchright instead of Playwright */
+  patchright: boolean
 }
 
 export interface CloudSessionInfo {
@@ -429,6 +431,8 @@ export interface ExecutorOptions {
   enableCloudScope?: boolean
   /** Cloud API credentials kept outside the execution scope */
   cloudAuth?: CloudAuth
+  /** Connect with Patchright instead of Playwright. The relay also humanizes this connection's input. */
+  patchright?: boolean
 }
 
 function isRegExp(value: any): value is RegExp {
@@ -647,6 +651,7 @@ export class PlaywrightExecutor {
   private cloudSession: CloudSessionInfo | null
   private enableCloudScope: boolean
   private cloudAuth: CloudAuth | undefined
+  private patchright: boolean
   /** Last minute bucket for which a cloud timeout warning was enqueued (dedup) */
   private lastCloudTimeoutWarningMinute: number | null = null
 
@@ -666,6 +671,7 @@ export class PlaywrightExecutor {
     this.cloudSession = options.cloudSession || null
     this.enableCloudScope = options.enableCloudScope ?? false
     this.cloudAuth = options.cloudAuth
+    this.patchright = options.patchright ?? false
     // ScopedFS expects an array of allowed directories. If cwd is provided, use it; otherwise use defaults.
     this.scopedFs = new ScopedFS(
       this.sessionCwd ? [this.sessionCwd, '/tmp', os.tmpdir()] : undefined,
@@ -1182,7 +1188,7 @@ export class PlaywrightExecutor {
 
     if (this.isDirectCdpMode()) {
       // Direct CDP: connect straight to Chrome, no relay or extension needed
-      const chromium = await getChromium()
+      const chromium = await getChromium({ patchright: this.patchright })
       const browser = await chromium.connectOverCDP(this.cdpConfig.directCdpUrl!)
 
       browser.on('disconnected', () => {
@@ -1218,8 +1224,8 @@ export class PlaywrightExecutor {
     const extensionStatus = await this.requireConnectedExtension()
     this.warnIfExtensionOutdated(extensionStatus.playwriterVersion)
 
-    const cdpUrl = getCdpUrl(this.cdpConfig)
-    const chromium = await getChromium()
+    const cdpUrl = getCdpUrl({ ...this.cdpConfig, patchright: this.patchright })
+    const chromium = await getChromium({ patchright: this.patchright })
     const browser = await chromium.connectOverCDP(cdpUrl)
 
     browser.on('disconnected', () => {
@@ -1391,6 +1397,25 @@ export class PlaywrightExecutor {
 
   async reset(): Promise<{ context: BrowserContext }> {
     return this.runExclusive({ operation: () => this.resetInternal() })
+  }
+
+  /** Switch between Playwright and Patchright. A connected session reconnects like reset(), so tabs stay open and state is cleared. */
+  async setPatchright(patchright: boolean): Promise<{ reconnected: boolean }> {
+    return this.runExclusive({
+      operation: async () => {
+        if (this.patchright === patchright) {
+          return { reconnected: false }
+        }
+        // Fails before anything changes when the optional Patchright package is missing
+        await getChromium({ patchright })
+        this.patchright = patchright
+        if (!this.isConnected) {
+          return { reconnected: false }
+        }
+        await this.resetInternal()
+        return { reconnected: true }
+      },
+    })
   }
 
   private async resetInternal(): Promise<{ context: BrowserContext }> {
@@ -2063,7 +2088,7 @@ export class PlaywrightExecutor {
         let timer: ReturnType<typeof setTimeout> | undefined
         let onCallerAbort: (() => void) | undefined
         try {
-          const chromium = await getChromium()
+          const chromium = await getChromium({ patchright: this.patchright })
           // Runs in this executor's async context, so a forgotten await becomes a warning in this session.
           const runScript = () =>
             runAsFaultOwner({ owner: this, run: () => script.runInContext(vmContext, { timeout, displayErrors: true }) })
@@ -2263,6 +2288,7 @@ export class PlaywrightExecutor {
       cwd: this.sessionCwd,
       tabGroup: this.cdpConfig.tabGroup || null,
       tabGroupColor: this.cdpConfig.tabGroupColor || null,
+      patchright: this.patchright,
     }
   }
 
@@ -2315,6 +2341,8 @@ export class ExecutorManager {
     enableCloudScope?: boolean
     /** Cloud API credentials kept outside the execution scope */
     cloudAuth?: CloudAuth
+    /** Connect with Patchright instead of Playwright */
+    patchright?: boolean
   }): PlaywrightExecutor {
     const { sessionId, cwd, sessionMetadata } = options
     let executor = this.executors.get(sessionId)
@@ -2343,6 +2371,7 @@ export class ExecutorManager {
         cloudSession: options.cloudSession,
         enableCloudScope: options.enableCloudScope,
         cloudAuth: options.cloudAuth,
+        patchright: options.patchright,
       })
       this.executors.set(sessionId, executor)
     }

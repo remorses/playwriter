@@ -8,7 +8,7 @@ the extension uses chrome.debugger to manage the user browser
 read ./README.md for an overview of how this extension and mcp work
 read playwriter/src/skill.md to understand the MCP docs (source of truth)
 
-keep playwriter/src/skill.md token-efficient. Keep tab-group instructions brief, use the shortest clear single-word names with no spaces, and do not document `playwriter session update` there.
+keep playwriter/src/skill.md token-efficient. Keep tab-group instructions brief, use the shortest clear single-word names with no spaces, and do not document the tab group options of `playwriter session update` there (only `--patchright`).
 
 ## backward compatibility
 

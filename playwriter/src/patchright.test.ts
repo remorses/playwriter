@@ -1,8 +1,9 @@
 /**
- * Anti-bot features end to end:
- * - execute warns when a navigation lands on a bot challenge, and waits out one that clears by itself
- * - a session with human input on moves the mouse along a path of trusted events and spaces key presses,
- *   while an `auto` session on a site without bot detection (localhost) keeps Playwright's raw input
+ * Patchright sessions and verification pages end to end:
+ * - execute warns when a navigation lands on a verification page, and waits out one that clears by itself
+ * - a Patchright session moves the mouse along a path of trusted events and spaces key presses,
+ *   while a Playwright session on localhost keeps Playwright's raw input
+ * - a session switches to Patchright (isolated page.evaluate) and back mid-run
  * - pages see no playwriter globals, hooked DOM calls or DOM changes besides the toolbar and cursor
  */
 
@@ -21,7 +22,7 @@ import './test-declarations.js'
 
 const TEST_PORT = 19974
 
-describe('Anti-bot', () => {
+describe('Patchright and verification pages', () => {
   let client: Awaited<ReturnType<typeof createMCPClient>>['client']
   let cleanup: (() => Promise<void>) | null = null
   let testCtx: TestContext | null = null
@@ -39,7 +40,7 @@ describe('Anti-bot', () => {
   beforeAll(async () => {
     testCtx = await setupTestContext({
       port: TEST_PORT,
-      tempDirPrefix: 'pw-anti-bot-test-',
+      tempDirPrefix: 'pw-patchright-test-',
       toggleExtension: true,
     })
     const result = await createMCPClient({ port: TEST_PORT })
@@ -61,7 +62,7 @@ describe('Anti-bot', () => {
           <script>setTimeout(() => location.replace('/ok'), 800)</script>
         `,
         '/ok': '<!doctype html><title>Shop</title><h1>Welcome</h1>',
-        // Records what anti-bot code can see: globals, hooked DOM calls from foreign scripts, DOM changes.
+        // Records what page scripts can see: globals, hooked DOM calls from foreign scripts, DOM changes.
         // Adapted from anomalyco/browse stress/stealth/probe.html.
         '/probe': dedent`
           <!doctype html>
@@ -116,7 +117,7 @@ describe('Anti-bot', () => {
     testCtx = null
   })
 
-  it('warns about an interactive challenge and waits out one that clears', async () => {
+  it('warns about a verification page and waits out one that clears', async () => {
     const turnstile = await client.callTool({
       name: 'execute',
       arguments: {
@@ -144,7 +145,7 @@ describe('Anti-bot', () => {
   })
 
   it('leaves no page-visible traces and clicks a little off center', async () => {
-    const session = await post('/cli/session/new', { humanInput: 'on' })
+    const session = await post('/cli/session/new', { patchright: true })
     const result = await post('/cli/execute', {
       sessionId: session.id,
       timeout: 30000,
@@ -157,7 +158,8 @@ describe('Anti-bot', () => {
         await page.mouse.click(360, 220);
         await page.mouse.click(100, 100);
         await page.screenshot();
-        const report = await page.evaluate(() => JSON.stringify(window.report()));
+        // Patchright evaluates in an isolated world unless the third argument is false
+        const report = await page.evaluate(() => JSON.stringify(window.report()), undefined, false);
         await page.close();
         return report;
       `,
@@ -175,7 +177,6 @@ describe('Anti-bot', () => {
         "nodes": [
           "DIV",
           "DIV",
-          "DIV#__playwriter_ghost_cursor__",
         ],
       }
     `)
@@ -189,10 +190,10 @@ describe('Anti-bot', () => {
     expect(clicks.slice(3)).toEqual([[360, 220], [100, 100]])
   }, 60000)
 
-  it('humanizes input per session: on adds mouse paths and key gaps, auto skips localhost', async () => {
-    const measureInput = async (humanInput: string) => {
-      const session = await post('/cli/session/new', { humanInput })
-      expect(session.humanInput).toBe(humanInput)
+  it('Patchright sessions add mouse paths and key gaps, Playwright sessions on localhost do not', async () => {
+    const measureInput = async (patchright: boolean) => {
+      const session = await post('/cli/session/new', { patchright })
+      expect(session.patchright).toBe(patchright)
       const result = await post('/cli/execute', {
         sessionId: session.id,
         timeout: 30000,
@@ -205,7 +206,7 @@ describe('Anti-bot', () => {
           const measured = await page.evaluate(() => {
             const gaps = keys.slice(1).map((t, i) => t - keys[i]);
             return { moves: moves.length, keys: keys.length, minGap: Math.min(...gaps) };
-          });
+          }${patchright ? ', undefined, false' : ''});
           await page.close();
           return measured;
         `,
@@ -216,13 +217,64 @@ describe('Anti-bot', () => {
     }
 
     // Playwright alone sends 1 move per mouse.move/click; the relay adds a path of samples
-    const on = await measureInput('on')
+    const on = await measureInput(true)
     expect(on.moves).toBeGreaterThan(10)
     expect(on.keys).toBe(5)
     expect(on.minGap).toBeGreaterThan(25)
 
-    const auto = await measureInput('auto')
-    expect(auto.moves).toBeLessThanOrEqual(3)
-    expect(auto.keys).toBe(5)
+    const playwright = await measureInput(false)
+    expect(playwright.moves).toBeLessThanOrEqual(3)
+    expect(playwright.keys).toBe(5)
+  }, 60000)
+
+  it('switches a session to Patchright and back mid-run, tabs stay open', async () => {
+    const session = await post('/cli/session/new', {})
+    const run = async (code: string) => {
+      const result = await post('/cli/execute', { sessionId: session.id, timeout: 30000, code })
+      expect(result.isError).toBeFalsy()
+      return result.text as string
+    }
+    const findPage = js`const page = context.pages().find((p) => p.url().endsWith('/input'));`
+    // Playwright evaluates in the main world, so page globals are visible
+    expect(await run(js`
+      state.page = await context.newPage();
+      await state.page.goto('${server!.baseUrl}/input');
+      return await state.page.evaluate(() => typeof window.moves);
+    `)).toMatchInlineSnapshot(`"[return value] object"`)
+
+    const on = await post('/cli/session/update', { sessionId: session.id, patchright: true })
+    expect(on).toMatchInlineSnapshot(`
+      {
+        "patchright": true,
+        "reconnected": true,
+        "success": true,
+      }
+    `)
+    expect(await run(js`
+      ${findPage}
+      await page.click('#go');
+      return {
+        state: Object.keys(state),
+        isolated: await page.evaluate(() => typeof window.moves),
+        main: await page.evaluate(() => typeof window.moves, undefined, false),
+        humanized: await page.evaluate(() => moves.length > 10, undefined, false),
+      };
+    `)).toMatchInlineSnapshot(`"[return value] { state: [], isolated: 'undefined', main: 'object', humanized: true }"`)
+
+    const off = await post('/cli/session/update', { sessionId: session.id, patchright: false })
+    expect(off).toMatchInlineSnapshot(`
+      {
+        "patchright": false,
+        "reconnected": true,
+        "success": true,
+      }
+    `)
+    expect(await run(js`
+      ${findPage}
+      const main = await page.evaluate(() => typeof window.moves);
+      await page.close();
+      return main;
+    `)).toMatchInlineSnapshot(`"[return value] object"`)
+    await post('/cli/session/delete', { sessionId: session.id })
   }, 60000)
 })

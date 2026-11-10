@@ -55,6 +55,7 @@ export function getCdpUrl({
   tabGroup,
   tabGroupColor,
   client,
+  patchright,
 }: {
   port?: number
   host?: string
@@ -68,6 +69,8 @@ export function getCdpUrl({
   tabGroup?: string
   /** Explicit tab group color chosen with --tab-group-color. Old relays ignore it. */
   tabGroupColor?: TabGroupColor
+  /** The client connects with Patchright, so the relay humanizes its input on every page. Old relays ignore it. */
+  patchright?: boolean
 } = {}) {
   const id = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
   const params = new URLSearchParams()
@@ -85,6 +88,9 @@ export function getCdpUrl({
   }
   if (tabGroupColor) {
     params.set('tabGroupColor', tabGroupColor)
+  }
+  if (patchright) {
+    params.set('patchright', '1')
   }
   if (client) {
     params.set('client', client)

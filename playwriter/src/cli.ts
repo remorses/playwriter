@@ -18,7 +18,6 @@ import { killPortProcess } from './kill-port.js'
 import { canEmitKittyGraphics, emitKittyImage } from './kitty-graphics.js'
 import { VERSION, LOG_FILE_PATH, LOG_CDP_FILE_PATH, parseRelayHost } from './utils.js'
 import { TAB_GROUP_ALL_COLORS, normalizeTabGroupColor } from './protocol.js'
-import { HUMAN_INPUT_MODES, normalizeHumanInputMode, type HumanInputMode } from './human-input.js'
 import {
   ensureRelayServer,
   getRelayInfo,
@@ -128,7 +127,7 @@ cli
   .option('-s, --session <name>', 'Session ID (required for -e, get one with `playwriter session new`)')
   .option('-e, --eval <code>', 'Execute JavaScript code and exit, read https://playwriter.dev/SKILL.md for usage')
   .option('-f, --file <path>', 'Execute JavaScript from a file and exit')
-  .option('--patchright', 'Use @playwriter/patchright-core for stealth mode (bypasses bot detection)')
+  .option('--patchright', 'MCP: connect with Patchright (@playwriter/patchright-core) instead of Playwright, with human-like input. CLI sessions use session new --patchright')
   .option('--timeout [ms]', z.number().default(DEFAULT_EXEC_TIMEOUT).describe('Execution timeout in milliseconds'))
   .action(async (options) => {
     if (options.patchright) {
@@ -407,7 +406,6 @@ cli
   .option('--host <host>', 'Remote relay server host')
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .option('--browser <key>', 'Browser key when multiple browsers are available. Special values: "headless" (launch headless Chrome, no extension), "cloud" (cloud browser with stealth/proxies)')
-  .option('--patchright', 'Use @playwriter/patchright-core for stealth mode (bypasses bot detection)')
   .option('--direct [endpoint]', 'Use direct CDP connection without the extension. Enable debugging first at chrome://inspect/#remote-debugging or launch Chrome with --remote-debugging-port=9222. Auto-discovers instances or accepts an explicit ws:// endpoint')
   .option('--remote <id>', 'Connect to a browser another user shared via the extension `Remote control` button')
   .option('--proxy <region>', 'Enable residential proxy for cloud browser (e.g. us, de, jp). Disabled by default. Use for anti-detection or geo-targeting.')
@@ -416,12 +414,8 @@ cli
   .option('--disable-proxy-bandwidth-acceleration', 'Allow loading images, video, and fonts when proxy is enabled (they are blocked by default to save proxy bandwidth)')
   .option('--tab-group <name>', 'Tab group title for this session (default "playwriter", or "remote" with --remote)')
   .option('--tab-group-color <color>', 'Tab group color: grey, blue, red, yellow, green, pink, purple, cyan, orange (default derived from the group name)')
-  .option('--human-input <mode>', 'Human-like mouse, scroll and typing: auto (on for sites like x.com, amazon, google), on, off. Default auto')
+  .option('--patchright', 'Connect with Patchright (@playwriter/patchright-core) instead of Playwright, with human-like mouse, scroll and typing on every page')
   .action(async (options) => {
-    if (options.patchright) {
-      process.env.PLAYWRITER_PATCHRIGHT = '1'
-    }
-
     const tabGroup: string | undefined = (() => {
       if (!options.tabGroup) {
         return undefined
@@ -444,20 +438,10 @@ cli
       }
       return normalized
     })()
-    const humanInput: HumanInputMode | undefined = (() => {
-      if (!options.humanInput) {
-        return undefined
-      }
-      const normalized = normalizeHumanInputMode(options.humanInput)
-      if (!normalized) {
-        console.error(`Error: --human-input must be one of: ${HUMAN_INPUT_MODES.join(', ')}`)
-        process.exit(1)
-      }
-      return normalized
-    })()
+    const patchright: boolean | undefined = options.patchright ? true : undefined
     const warnExtensionOnlyFlags = (mode: string) => {
-      if (tabGroup || tabGroupColor || humanInput) {
-        console.error(pc.yellow(`Warning: --tab-group/--tab-group-color/--human-input only apply to extension sessions, ignored for ${mode}.`))
+      if (tabGroup || tabGroupColor || patchright) {
+        console.error(pc.yellow(`Warning: --tab-group/--tab-group-color/--patchright only apply to extension sessions, ignored for ${mode}.`))
       }
     }
 
@@ -479,7 +463,7 @@ cli
             cwd: process.cwd(),
             tabGroup,
             tabGroupColor,
-            humanInput,
+            patchright,
           }),
         })
         if (!response.ok) {
@@ -741,7 +725,7 @@ cli
         const response = await fetch(`${serverUrl}/cli/session/new`, {
           method: 'POST',
           headers: buildAuthHeaders({ token: options.token, json: true }),
-          body: JSON.stringify({ extensionId, cwd, cloudAuth: getRelayCloudAuth(), tabGroup, tabGroupColor, humanInput }),
+          body: JSON.stringify({ extensionId, cwd, cloudAuth: getRelayCloudAuth(), tabGroup, tabGroupColor, patchright }),
         })
         if (!response.ok) {
           const text = await response.text()
@@ -842,7 +826,7 @@ cli
               cloudAuth: getRelayCloudAuth(),
               tabGroup,
               tabGroupColor,
-              humanInput,
+              patchright,
             }),
           })
           if (!response.ok) {
@@ -1380,7 +1364,8 @@ cli
   })
 
 cli
-  .command('session update <sessionId>', 'Update a session tab group: rename it (moves its tabs) and/or change its color')
+  .command('session update <sessionId>', 'Switch a session to Patchright and back, or change its tab group (rename moves its tabs, and/or color)')
+  .option('--patchright [enabled]', 'Reconnect with Patchright and human-like input; --patchright false switches back to Playwright. Tabs stay open, state is cleared')
   .option('--tab-group <name>', 'New tab group title for the session')
   .option('--tab-group-color <color>', 'New tab group color: grey, blue, red, yellow, green, pink, purple, cyan, orange')
   .option('--host <host>', 'Remote relay server host')
@@ -1398,8 +1383,20 @@ cli
       }
       return normalized
     })()
-    if (!tabGroup && !tabGroupColor) {
-      console.error('Error: pass --tab-group <name> and/or --tab-group-color <color>')
+    // A bare --patchright parses to '', --patchright false to 'false'
+    const patchright: boolean | undefined = (() => {
+      if (options.patchright === undefined) {
+        return undefined
+      }
+      const value = String(options.patchright).trim().toLowerCase()
+      if (value !== '' && value !== 'true' && value !== 'false') {
+        console.error('Error: --patchright takes true or false')
+        process.exit(1)
+      }
+      return value !== 'false'
+    })()
+    if (!tabGroup && !tabGroupColor && patchright === undefined) {
+      console.error('Error: pass --patchright [true|false], --tab-group <name> and/or --tab-group-color <color>')
       process.exit(1)
     }
 
@@ -1416,6 +1413,7 @@ cli
           sessionId,
           tabGroup: tabGroup || undefined,
           tabGroupColor: tabGroupColor || undefined,
+          patchright,
         }),
       })
 
@@ -1439,18 +1437,33 @@ cli
 
       const result = (await response.json()) as {
         success: boolean
-        tabGroup: string
+        patchright?: boolean
+        reconnected?: boolean
+        tabGroup?: string
         tabGroupColor?: string
-        movedTabs: number
+        movedTabs?: number
         warning?: string
       }
       if (result.warning) {
         console.error(pc.yellow(`Warning: ${result.warning}`))
       }
-      const colorLabel = result.tabGroupColor ? `, color ${result.tabGroupColor}` : ''
-      console.log(
-        `Session ${sessionId} now uses tab group "${result.tabGroup}"${colorLabel} (${result.movedTabs} tab(s) updated).`,
-      )
+      if (patchright !== undefined && result.patchright === undefined) {
+        console.error('Error: the running relay does not support --patchright in session update. Restart it (kill port 19988) after updating playwriter.')
+        process.exit(1)
+      }
+      if (result.patchright !== undefined) {
+        const driver = result.patchright ? 'Patchright' : 'Playwright'
+        const reconnect = result.reconnected
+          ? ' Reconnected: tabs stay open, state was cleared, get pages again from context.pages().'
+          : ''
+        console.log(`Session ${sessionId} now uses ${driver}.${reconnect}`)
+      }
+      if (result.tabGroup) {
+        const colorLabel = result.tabGroupColor ? `, color ${result.tabGroupColor}` : ''
+        console.log(
+          `Session ${sessionId} now uses tab group "${result.tabGroup}"${colorLabel} (${result.movedTabs ?? 0} tab(s) updated).`,
+        )
+      }
     } catch (error: any) {
       console.error(`Error: ${error.message}`)
       process.exit(1)

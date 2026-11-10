@@ -146,6 +146,7 @@ describe('ExecutorManager.listSessions', () => {
           cwd: sessionDir,
           tabGroup: null,
           tabGroupColor: null,
+          patchright: false,
         },
       ])
     } finally {
