@@ -1406,8 +1406,6 @@ export class PlaywrightExecutor {
         if (this.patchright === patchright) {
           return { reconnected: false }
         }
-        // Fails before anything changes when the optional Patchright package is missing
-        await getChromium({ patchright })
         this.patchright = patchright
         if (!this.isConnected) {
           return { reconnected: false }

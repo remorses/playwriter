@@ -3,9 +3,7 @@
  * or @playwriter/patchright-core for `session new --patchright` sessions, and for the MCP with
  * PLAYWRITER_PATCHRIGHT=1.
  *
- * Type imports continue to use @xmorse/playwright-core directly (types are
- * the same in both packages) so TypeScript resolution works without the
- * optional patchright dep being installed.
+ * Type imports use @xmorse/playwright-core for both drivers.
  */
 
 export type {
@@ -31,25 +29,16 @@ export function getChromium({ patchright = false }: { patchright?: boolean } = {
   const driver = patchright ? 'patchright' : 'playwright'
   let chromium = chromiumByDriver.get(driver)
   if (!chromium) {
-    chromium = patchright ? importPatchright() : import('@xmorse/playwright-core').then((mod) => mod.chromium)
-    // Don't cache a failed import, so installing the package later works without a restart
-    chromium.catch(() => chromiumByDriver.delete(driver))
+    // Lazy: Patchright is only loaded by sessions that use it.
+    // TODO: import it typed once @playwriter/patchright-core is built on the same Playwright version as
+    // @xmorse/playwright-core (published 1.61 vs fork 1.59, and 1.61 lacks runWithAbortSignal, see executor.ts).
+    // ~/Documents/GitHub/patchright-playwriter
+    chromium = patchright
+      ? import('@playwriter/patchright-core' as string).then((mod: { chromium: Chromium }) => mod.chromium)
+      : import('@xmorse/playwright-core').then((mod) => mod.chromium)
     chromiumByDriver.set(driver, chromium)
   }
   return chromium
-}
-
-async function importPatchright(): Promise<Chromium> {
-  try {
-    // Optional dependency. Types come from @xmorse/playwright-core (identical API surface).
-    const mod: { chromium: Chromium } = await import('@playwriter/patchright-core' as string)
-    return mod.chromium
-  } catch (e: unknown) {
-    throw new Error(
-      '@playwriter/patchright-core is not installed. Reinstall playwriter with optional dependencies, or use the session without --patchright.',
-      { cause: e },
-    )
-  }
 }
 
 /** Process-wide Patchright opt-in for the MCP (`playwriter --patchright`). CLI sessions choose per session. */

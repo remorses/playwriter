@@ -14,3 +14,5 @@ playwriter session update 1 --patchright false
 ```
 
 With Patchright, `page.evaluate` runs in an isolated world: it sees the DOM but not page globals. Pass `false` as third argument for the main world. The Node API takes `connectViaExtension({ patchright: true })`. `playwriter --patchright` (MCP) now also humanizes input. `session new --patchright` used to set the driver for the whole relay only when it started the relay; it is now per session.
+
+`@playwriter/patchright-core` is now a regular dependency instead of an optional one.
