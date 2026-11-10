@@ -538,11 +538,6 @@ describe('Relay Core Tests', () => {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'fromApi=1; Path=/' })
         res.end(JSON.stringify({ cookie: req.headers.cookie || '' }))
         return
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('test server has no port')
-    }
-    const baseUrl = `http://127.0.0.1:${address.port}`
       }
       res.writeHead(200, { 'Content-Type': 'text/html' })
       res.end('<!doctype html><html><body>route issue repro</body></html>')
@@ -550,6 +545,11 @@ describe('Relay Core Tests', () => {
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', resolve)
     })
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('test server has no port')
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`
 
     try {
       const result = await client.callTool({
