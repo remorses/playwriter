@@ -545,6 +545,38 @@ describe('Session tab groups', () => {
     }
   }, 90000)
 
+  it('a background tab reports focus only while an execute of its session runs', async () => {
+    const response = await fetch(`${SERVER_URL}/cli/session/new`, { method: 'POST', headers: JSON_HEADERS, body: '{}' })
+    const { id: sessionId } = (await response.json()) as { id: string }
+    const first = await executeCli({
+      sessionId,
+      code: js`
+        state.page = await context.newPage();
+        await state.page.goto('about:blank');
+        return await state.page.evaluate(() => {
+          window.focusLog = [document.hasFocus()];
+          addEventListener('focus', () => focusLog.push('focus'));
+          addEventListener('blur', () => focusLog.push('blur'));
+          return document.hasFocus();
+        });
+      `,
+    })
+    expect(first.text).toMatchInlineSnapshot(`"[return value] true"`)
+    const second = await executeCli({
+      sessionId,
+      code: js`
+        const page = state.page;
+        delete state.page;
+        const log = await page.evaluate(() => [...focusLog, document.hasFocus()]);
+        await page.close();
+        return JSON.stringify(log);
+      `,
+    })
+    // blur when the first execute ended, focus when the second one used the tab
+    expect(second.text).toMatchInlineSnapshot(`"[return value] [true,"blur","focus",true]"`)
+    await fetch(`${SERVER_URL}/cli/session/delete`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ sessionId }) })
+  }, 60000)
+
   it('never reuses session ids across a relay restart', async () => {
     const createResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
       method: 'POST',

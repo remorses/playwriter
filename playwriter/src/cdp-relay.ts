@@ -821,6 +821,16 @@ export async function startPlayWriterCDPRelayServer({
     if (commandTarget && !canSee(commandTarget)) {
       throw new Error(`Tab ${commandTarget.targetId} belongs to another Playwriter session`)
     }
+    // CLI sessions: the relay owns focus emulation, so drop Playwright's own setting
+    const focusSessionId = client?.sessionId && !sharedTabSessionIds.has(client.sessionId) ? client.sessionId : undefined
+    if (focusSessionId && resolvedExtensionId && commandTarget?.targetInfo.type === 'page') {
+      if (method === 'Emulation.setFocusEmulationEnabled') {
+        return {}
+      }
+      if (executingSessions.has(focusSessionId)) {
+        await focusTab({ extensionId: resolvedExtensionId, tabSessionId: commandTarget.sessionId, cliSessionId: focusSessionId })
+      }
+    }
     switch (method) {
       case 'Browser.getVersion': {
         return {
@@ -1205,6 +1215,56 @@ export async function startPlayWriterCDPRelayServer({
       holders: Set<string>
     }
   >()
+
+  // Focus emulation makes document.hasFocus() true in a background tab. Like a person switching tabs, a tab
+  // reports focus only while an execute of a CLI session sends it commands, then has its real focus again.
+  // Ported from anomalyco/browse cdp/tab-activity.ts. MCP and SDK clients keep Playwright's always-on emulation.
+  const executingSessions = new Map<string, number>()
+  // `${extensionId}\0${tabSessionId}` -> CLI sessions whose running execute uses the tab
+  const focusedTabs = new Map<string, Set<string>>()
+
+  async function setFocusEmulation({ extensionId, tabSessionId, enabled }: { extensionId: string; tabSessionId: string; enabled: boolean }) {
+    await sendToExtension({
+      extensionId,
+      method: 'forwardCDPCommand',
+      params: { sessionId: tabSessionId, method: 'Emulation.setFocusEmulationEnabled', params: { enabled } },
+    }).catch((error) => {
+      logger?.log(pc.yellow(`[Focus] setFocusEmulationEnabled ${enabled} failed: ${String(error)}`))
+    })
+  }
+
+  async function focusTab({ extensionId, tabSessionId, cliSessionId }: { extensionId: string; tabSessionId: string; cliSessionId: string }) {
+    const key = `${extensionId}\0${tabSessionId}`
+    const sessions = focusedTabs.get(key) ?? new Set<string>()
+    if (sessions.has(cliSessionId)) {
+      return
+    }
+    focusedTabs.set(key, sessions.add(cliSessionId))
+    if (sessions.size === 1) {
+      await setFocusEmulation({ extensionId, tabSessionId, enabled: true })
+    }
+  }
+
+  function startSessionExecute(cliSessionId: string): void {
+    executingSessions.set(cliSessionId, (executingSessions.get(cliSessionId) ?? 0) + 1)
+  }
+
+  function endSessionExecute(cliSessionId: string): void {
+    const running = (executingSessions.get(cliSessionId) ?? 1) - 1
+    if (running > 0) {
+      executingSessions.set(cliSessionId, running)
+      return
+    }
+    executingSessions.delete(cliSessionId)
+    for (const [key, sessions] of focusedTabs) {
+      if (!sessions.delete(cliSessionId) || sessions.size > 0) {
+        continue
+      }
+      focusedTabs.delete(key)
+      const [extensionId, tabSessionId] = key.split('\0')
+      void setFocusEmulation({ extensionId, tabSessionId, enabled: false })
+    }
+  }
 
   function releaseClientRuntimes(clientId: string): void {
     for (const runtime of runtimes.values()) {
@@ -2227,6 +2287,7 @@ export async function startPlayWriterCDPRelayServer({
             } else if (method === 'Target.detachedFromTarget') {
               const detachParams = params!
               screencasts.delete(`${connectionId}\0${detachParams.sessionId}`)
+              focusedTabs.delete(`${connectionId}\0${detachParams.sessionId}`)
               nativeRecordings.delete(`${connectionId}\0${detachParams.sessionId}`)
               humanInput.forget({ extensionId: connectionId, sessionId: detachParams.sessionId })
               store.setState((s) =>
@@ -2893,10 +2954,12 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       let result: Awaited<ReturnType<typeof existingExecutor.execute>>
+      startSessionExecute(sessionId)
       try {
         // Aborted when the CLI caller disconnects (Ctrl-C, agent bash timeout), so the session lock is released.
         result = await existingExecutor.execute(code, { timeout, signal: c.req.raw.signal })
       } finally {
+        endSessionExecute(sessionId)
         if (cloudTracking) {
           cloudTracking.activeExecutions--
           cloudTracking.lastActivityAt = Date.now()
