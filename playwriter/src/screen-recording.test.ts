@@ -247,7 +247,7 @@ describe('buildTranscodeFfmpegArgs', () => {
       buildTranscodeFfmpegArgs({ width: 1920, height: 1080, fps: 60, audio: false, codec: 'libx264', outputPath: '/out/a.mkv' }).join(' '),
     ]).toMatchInlineSnapshot(`
       [
-        "-hide_banner -loglevel error -nostdin -f mp4 -i pipe:0 -map 0:v:0 -map 0:a:0? -vf scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1 -fps_mode passthrough -c:v h264_videotoolbox -b:v 20000k -realtime true -c:a aac -b:a 160k -movflags +faststart -y /out/a.mp4",
+        "-hide_banner -loglevel error -nostdin -f mp4 -i pipe:0 -map 0:v:0 -map 0:a:0? -vf scale=3840:2160:force_original_aspect_ratio=decrease,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1 -fps_mode passthrough -c:v h264_videotoolbox -b:v 20000k -realtime true -c:a aac -b:a 160k -video_track_timescale 90000 -movflags +faststart -y /out/a.mp4",
         "-hide_banner -loglevel error -nostdin -f mp4 -i pipe:0 -map 0:v:0 -vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1 -fps_mode passthrough -c:v libx264 -preset veryfast -crf 20 -y /out/a.mkv",
       ]
     `)

@@ -171,7 +171,9 @@ export function buildTranscodeFfmpegArgs(options: {
     '-fps_mode', 'passthrough',
     ...h264Args({ codec, kbps }),
     ...(audio ? ['-c:a', 'aac', '-b:a', '160k'] : []),
-    ...(extension === '.mkv' ? [] : ['-movflags', '+faststart']),
+    // MP4 picks the track timescale from the guessed frame rate. Segments of one recording
+    // need the same one, else concat -c copy stretches the later ones. mkv always uses 1 ms.
+    ...(extension === '.mkv' ? [] : ['-video_track_timescale', '90000', '-movflags', '+faststart']),
     '-y', outputPath,
   ]
 }
