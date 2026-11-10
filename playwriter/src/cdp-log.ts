@@ -104,7 +104,14 @@ export function createCdpLogger({
     }
     const lines = buffer
     buffer = []
-    await fs.promises.appendFile(resolvedLogFilePath, lines.join('\n') + '\n')
+    // Best effort: a deleted log folder or a full disk must not reject the queue, or logging stops for good
+    const written = await fs.promises.appendFile(resolvedLogFilePath, lines.join('\n') + '\n').then(
+      () => true,
+      () => false,
+    )
+    if (!written) {
+      return
+    }
     lineCount += lines.length
     if (lineCount > resolvedMaxEntries) {
       await rotate()

@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { startPlayWriterCDPRelayServer, type RelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
+import { createCdpLogger, type CdpLogger } from './cdp-log.js'
 import { killPortProcess } from './kill-port.js'
 
 const execAsync = promisify(exec)
@@ -72,6 +73,8 @@ export interface TestContext {
   relayServer: RelayServer
   /** Pass to a restarted relay so it keeps counting session ids */
   sessionCounterFile: string
+  /** This relay's own cdp.jsonl. Parallel test relays must not share ~/.playwriter/cdp.jsonl */
+  cdpLogger: CdpLogger
 }
 
 export async function setupTestContext({
@@ -105,7 +108,8 @@ export async function setupTestContext({
   const sessionCounterFile = path.join(userDataDir, 'playwriter-session-counter.json')
   const localLogPath = path.join(process.cwd(), 'relay-server.log')
   const logger = createFileLogger({ logFilePath: localLogPath })
-  const relayServer = await startPlayWriterCDPRelayServer({ ...relayOptions, port, logger, sessionCounterFile })
+  const cdpLogger = createCdpLogger({ logFilePath: path.join(userDataDir, 'cdp.jsonl') })
+  const relayServer = await startPlayWriterCDPRelayServer({ cdpLogger, ...relayOptions, port, logger, sessionCounterFile })
 
   const extensionPath = path.resolve('../extension', distDir)
   const allExtensionPaths = [extensionPath, ...additionalExtensions].join(',')
@@ -131,7 +135,7 @@ export async function setupTestContext({
     })
   }
 
-  return { browserContext, userDataDir, relayServer, sessionCounterFile }
+  return { browserContext, userDataDir, relayServer, sessionCounterFile, cdpLogger }
 }
 
 export async function cleanupTestContext(

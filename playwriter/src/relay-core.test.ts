@@ -2,7 +2,7 @@ import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { chromium } from '@xmorse/playwright-core'
 import { getCDPSessionForPage } from './cdp-session.js'
-import { getCdpUrl, LOG_CDP_FILE_PATH } from './utils.js'
+import { getCdpUrl } from './utils.js'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -158,15 +158,8 @@ describe('Relay Core Tests', () => {
   it('should emit download events for both Browser and Page domains in extension mode', async () => {
     const browserContext = getBrowserContext()
     const serviceWorker = await getExtensionServiceWorker(browserContext)
-    const logFilePath = LOG_CDP_FILE_PATH
-    const logLineCountBefore = fs.existsSync(logFilePath)
-      ? fs
-          .readFileSync(logFilePath, 'utf-8')
-          .split('\n')
-          .filter((line) => {
-            return line.trim().length > 0
-          }).length
-      : 0
+    const cdpLogger = testCtx!.cdpLogger
+    const startedAt = new Date().toISOString()
 
     const server = await createSimpleServer({
       routes: {
@@ -242,20 +235,19 @@ describe('Relay Core Tests', () => {
     await page.close()
     await server.close()
 
-    const logLinesAfter = fs
-      .readFileSync(logFilePath, 'utf-8')
+    // The logger batches writes; flush so the file has every entry of this test
+    await cdpLogger.flush()
+    const newEntries = fs
+      .readFileSync(cdpLogger.logFilePath, 'utf-8')
       .split('\n')
-      .filter((line) => {
-        return line.trim().length > 0
-      })
-      .slice(logLineCountBefore)
-
-    const newEntries = logLinesAfter
       .map((line) => {
         return tryJsonParse(line)
       })
-      .filter((entry): entry is { direction: string; message: { method?: string } } => {
+      .filter((entry): entry is { timestamp: string; direction: string; message: { method?: string } } => {
         return Boolean(entry && typeof entry === 'object' && 'direction' in entry && 'message' in entry)
+      })
+      .filter((entry) => {
+        return entry.timestamp >= startedAt
       })
 
     const methods = newEntries
@@ -296,11 +288,11 @@ describe('Relay Core Tests', () => {
 
     expect(summary).toMatchInlineSnapshot(`
       {
-        "hasBrowserDownloadProgress": false,
-        "hasBrowserDownloadWillBegin": false,
+        "hasBrowserDownloadProgress": true,
+        "hasBrowserDownloadWillBegin": true,
         "hasBrowserSetDownloadBehavior": true,
-        "hasPageDownloadProgress": false,
-        "hasPageDownloadWillBegin": false,
+        "hasPageDownloadProgress": true,
+        "hasPageDownloadWillBegin": true,
         "hasPageSetDownloadBehavior": true,
       }
     `)
