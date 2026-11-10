@@ -11,7 +11,7 @@ import { getCdpUrl } from './utils.js'
 import { getCDPSessionForPage } from './cdp-session.js'
 import type { CDPCommand } from './cdp-types.js'
 import { screenshotWithAccessibilityLabels } from './aria-snapshot.js'
-import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext, js } from './test-utils.js'
+import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext, js, findTestPageJs } from './test-utils.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19991
@@ -299,18 +299,11 @@ describe('Snapshot & Screenshot Tests', () => {
       await globalThis.toggleExtensionForActiveTab()
     })
 
-    await new Promise((r) => setTimeout(r, 400))
-
     const result = await client.callTool({
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('test-btn')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('test-btn')}
                     const btn = testPage.locator('#test-btn');
                     const locatorString = await getLocatorStringForElement(btn);
                     console.log('Locator string:', locatorString);
@@ -363,18 +356,11 @@ describe('Snapshot & Screenshot Tests', () => {
       await globalThis.toggleExtensionForActiveTab()
     })
 
-    await new Promise((r) => setTimeout(r, 400))
-
     const stylesResult = await client.callTool({
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('main-btn')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('main-btn')}
                     const btn = testPage.locator('#main-btn');
                     const styles = await getStylesForLocator({ locator: btn });
                     return styles;
@@ -451,12 +437,7 @@ describe('Snapshot & Screenshot Tests', () => {
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('main-btn')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('main-btn')}
                     const btn = testPage.locator('#main-btn');
                     const styles = await getStylesForLocator({ locator: btn });
                     return formatStylesAsText(styles);
@@ -963,18 +944,12 @@ describe('Snapshot & Screenshot Tests', () => {
     await serviceWorker.evaluate(async () => {
       await globalThis.toggleExtensionForActiveTab()
     })
-    await new Promise((r) => setTimeout(r, 400))
 
     const result = await client.callTool({
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('submit-btn')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('submit-btn')}
                     await screenshotWithAccessibilityLabels({ page: testPage });
                 `,
         timeout: 15000,

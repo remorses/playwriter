@@ -338,6 +338,20 @@ export function js(strings: TemplateStringsArray, ...values: unknown[]): string 
   return strings.reduce((result, str, i) => result + str + (values[i] || ''), '')
 }
 
+/** Execute code that sets `testPage` to the page whose HTML has `marker`. A toggled tab reaches the executor's context async. */
+export function findTestPageJs(marker: string): string {
+  return js`
+    let testPage;
+    for (let attempt = 0; attempt < 100 && !testPage; attempt++) {
+      for (const p of context.pages()) {
+        if ((await p.content().catch(() => '')).includes(${JSON.stringify(marker)})) { testPage = p; break; }
+      }
+      if (!testPage) await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!testPage) throw new Error('Test page not found');
+  `
+}
+
 export function tryJsonParse(str: string) {
   try {
     return JSON.parse(str)

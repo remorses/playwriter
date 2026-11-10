@@ -504,11 +504,12 @@ describe('Extension Connection Tests', () => {
     // Toolbar start, CLI stop, CLI start: toolbar Stop must stop the new recording,
     // not send the expired id of the first one.
     const relayPost = async (route: string) => {
-      await fetch(`http://127.0.0.1:${TEST_PORT}${route}`, {
+      const response = await fetch(`http://127.0.0.1:${TEST_PORT}${route}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       })
+      expect({ route, status: response.status, body: await response.text() }).toMatchObject({ status: 200 })
     }
     await expect.poll(toolbarWidth).toBe(idleWidth)
     await clickRecord()

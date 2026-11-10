@@ -16,6 +16,7 @@ import {
   tryJsonParse,
   createSimpleServer,
   safeCloseCDPBrowser,
+  findTestPageJs,
 } from './test-utils.js'
 import './test-declarations.js'
 
@@ -1597,19 +1598,13 @@ describe('Relay Core Tests', () => {
     await serviceWorker.evaluate(async () => {
       await globalThis.toggleExtensionForActiveTab()
     })
-    await new Promise((r) => setTimeout(r, 400))
 
     // Test basic getCleanHTML
     const result = await client.callTool({
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('Hello World')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('Hello World')}
                     const html = await getCleanHTML({ locator: testPage.locator('body') });
                     return html;
                 `,
@@ -1640,12 +1635,7 @@ describe('Relay Core Tests', () => {
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('Hello World')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('Hello World')}
                     const html = await getCleanHTML({ locator: testPage, search: /button/i });
                     return html;
                 `,
@@ -1698,19 +1688,13 @@ describe('Relay Core Tests', () => {
     await serviceWorker.evaluate(async () => {
       await globalThis.toggleExtensionForActiveTab()
     })
-    await new Promise((r) => setTimeout(r, 400))
 
     // Test basic getPageMarkdown
     const result = await client.callTool({
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('Test Article Title')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('Test Article Title')}
                     const content = await getPageMarkdown({ page: testPage });
                     console.log(content);
                 `,
@@ -1738,12 +1722,7 @@ describe('Relay Core Tests', () => {
       name: 'execute',
       arguments: {
         code: js`
-                    let testPage;
-                    for (const p of context.pages()) {
-                        const html = await p.content();
-                        if (html.includes('Test Article Title')) { testPage = p; break; }
-                    }
-                    if (!testPage) throw new Error('Test page not found');
+                    ${findTestPageJs('Test Article Title')}
                     const content = await getPageMarkdown({ page: testPage, search: /important/i, showDiffSinceLastCall: false });
                     return content;
                 `,
