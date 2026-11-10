@@ -385,6 +385,12 @@ export function createHumanInput({ log }: { log?: (message: string) => void } = 
   }
 
   async function paceKey({ tab, params }: { tab: TabState; params: Protocol.Input.DispatchKeyEventRequest }) {
+    // Playwright sends keyUp after Chrome acked keyDown, so the page already saw that keyDown.
+    // Gaps counted from here hold in the page, not only on the relay side.
+    if (params.type === 'keyUp') {
+      tab.lastKeyAt = Date.now()
+      return
+    }
     if (params.type !== 'keyDown' && params.type !== 'rawKeyDown') return
     const sinceLastKey = Date.now() - tab.lastKeyAt
     const gap = random(30, 110) - sinceLastKey
