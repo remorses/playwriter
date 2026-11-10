@@ -277,8 +277,8 @@ describe('Relay Navigation Tests', () => {
           errorMessage: 'Timed out waiting for button locator in empty-src iframe test',
         })
 
-        const buttonCount = await pluginFrame.locator('button').count()
-        expect(buttonCount).toBe(1)
+        // The frame goes from the login URL to the canvas URL; poll so a count during that swap does not fail
+        await expect.poll(() => pluginFrame.locator('button').count(), { timeout: 5000 }).toBe(1)
 
         await page.locator('#plugin-frame').evaluate((frame) => {
           frame.remove()

@@ -54,7 +54,7 @@ describe('Snapshot & Screenshot Tests', () => {
 
     await new Promise((r) => setTimeout(r, 100))
 
-    const capturedCommands: CDPCommand[] = []
+    const capturedCommands: Extract<CDPCommand, { method: 'Page.captureScreenshot' }>[] = []
     const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
       if (command.method === 'Page.captureScreenshot') {
         capturedCommands.push(command)
@@ -97,10 +97,13 @@ describe('Snapshot & Screenshot Tests', () => {
     testCtx!.relayServer.off('cdp:command', commandHandler)
 
     expect(capturedCommands.length).toBe(2)
+    // example.com is live: its full page height changes by a pixel with fonts
+    const fullPageClip = capturedCommands[1]?.params?.clip
+    expect(fullPageClip?.height).toBeGreaterThanOrEqual(720)
     expect(
       capturedCommands.map((c) => ({
         method: c.method,
-        params: c.params,
+        params: c === capturedCommands[1] ? { ...c.params, clip: { ...fullPageClip, height: 'page height' } } : c.params,
       })),
     ).toMatchInlineSnapshot(`
       [
@@ -123,7 +126,7 @@ describe('Snapshot & Screenshot Tests', () => {
           "params": {
             "captureBeyondViewport": true,
             "clip": {
-              "height": 740,
+              "height": "page height",
               "scale": 1,
               "width": 1280,
               "x": 0,
@@ -230,7 +233,7 @@ describe('Snapshot & Screenshot Tests', () => {
 
     await new Promise((r) => setTimeout(r, 400))
 
-    const capturedCommands: CDPCommand[] = []
+    const capturedCommands: Extract<CDPCommand, { method: 'Page.captureScreenshot' }>[] = []
     const commandHandler = ({ command }: { clientId: string; command: CDPCommand }) => {
       if (command.method === 'Page.captureScreenshot') {
         capturedCommands.push(command)

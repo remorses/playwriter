@@ -732,7 +732,7 @@ describe('Relay Core Tests', () => {
       expectedContent: ['role=link', 'Hacker News'],
       waitForCode: js`
         await state.page.locator('a[href="news"]').first().waitFor({ timeout: 10000 });
-        await state.page.locator('a.hnuser').first().waitFor({ timeout: 10000 });
+        await state.page.locator('a[href^="user?id="]').first().waitFor({ timeout: 10000 });
       `,
     },
     {
@@ -1786,27 +1786,15 @@ describe('Relay Core Tests', () => {
         `,
       },
     })
-    expect(result).toMatchInlineSnapshot(`
-      {
-        "content": [
-          {
-            "text": "
+    expect(result.isError).toBe(true)
+    // the call log retry lines depend on timing, keep the message and check the reason
+    const text = (result.content as any)[0].text as string
+    expect(text.slice(0, text.indexOf('Call log:'))).toMatchInlineSnapshot(`
+      "
       Error executing code: page.click: Timeout 100ms exceeded. Element is not visible — it may be hidden by CSS, inside a collapsed <details>, inactive tab, or closed accordion. Try: interact with the page to reveal it first, or use { force: true } to skip visibility checks
-      Call log:
-      [2m  - waiting for locator('#hidden-btn')[22m
-      [2m    - locator resolved to <button id="hidden-btn">Hidden Button</button>[22m
-      [2m  - attempting click action[22m
-      [2m    2 × waiting for element to be visible, enabled and stable[22m
-      [2m      - element is not visible[22m
-      [2m    - retrying click action[22m
-      [2m    - waiting 20ms[22m
-      ",
-            "type": "text",
-          },
-        ],
-        "isError": true,
-      }
+      "
     `)
+    expect(text).toContain('element is not visible')
     // Cleanup
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
@@ -1877,30 +1865,15 @@ describe('Relay Core Tests', () => {
         `,
       },
     })
-    expect(result).toMatchInlineSnapshot(`
-      {
-        "content": [
-          {
-            "text": "
+    expect(result.isError).toBe(true)
+    // the call log retry lines depend on timing, keep the message and check the reason
+    const text = (result.content as any)[0].text as string
+    expect(text.slice(0, text.indexOf('Call log:'))).toMatchInlineSnapshot(`
+      "
       Error executing code: page.click: Timeout 100ms exceeded. <div id="overlay">Overlay</div> intercepts pointer events
-      Call log:
-      [2m  - waiting for locator('#covered-btn')[22m
-      [2m    - locator resolved to <button id="covered-btn">Covered</button>[22m
-      [2m  - attempting click action[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      [2m    - element is visible, enabled and stable[22m
-      [2m    - scrolling into view if needed[22m
-      [2m    - done scrolling[22m
-      [2m    - <div id="overlay">Overlay</div> intercepts pointer events[22m
-      [2m  - retrying click action[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      ",
-            "type": "text",
-          },
-        ],
-        "isError": true,
-      }
+      "
     `)
+    expect(text).toContain('intercepts pointer events')
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
 
@@ -1924,27 +1897,15 @@ describe('Relay Core Tests', () => {
         `,
       },
     })
-    expect(result).toMatchInlineSnapshot(`
-      {
-        "content": [
-          {
-            "text": "
+    expect(result.isError).toBe(true)
+    // the call log retry lines depend on timing, keep the message and check the reason
+    const text = (result.content as any)[0].text as string
+    expect(text.slice(0, text.indexOf('Call log:'))).toMatchInlineSnapshot(`
+      "
       Error executing code: page.click: Timeout 100ms exceeded. Element is not visible — it may be hidden by CSS, inside a collapsed <details>, inactive tab, or closed accordion. Try: interact with the page to reveal it first, or use { force: true } to skip visibility checks
-      Call log:
-      [2m  - waiting for locator('#invisible')[22m
-      [2m    - locator resolved to <button id="invisible">Invisible</button>[22m
-      [2m  - attempting click action[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      [2m    - element is not visible[22m
-      [2m  - retrying click action[22m
-      [2m    - waiting for element to be visible, enabled and stable[22m
-      ",
-            "type": "text",
-          },
-        ],
-        "isError": true,
-      }
+      "
     `)
+    expect(text).toContain('element is not visible')
     await client.callTool({ name: 'execute', arguments: { code: js`await state.errorTestPage.close(); delete state.errorTestPage;` } })
   }, 30000)
 
