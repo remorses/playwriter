@@ -448,6 +448,20 @@ export async function startPlayWriterCDPRelayServer({
     }
   }
 
+  // chrome.debugger has no browser-level Target discovery, so emit what Chrome sends on navigation.
+  // CDP clients like browser-use track page URLs only from this event.
+  function sendTargetInfoChanged({ extensionId, sessionId }: { extensionId: string; sessionId: string }) {
+    const target = store.getState().extensions.get(extensionId)?.connectedTargets.get(sessionId)
+    if (!target) {
+      return
+    }
+    sendToPlaywright({
+      message: { method: 'Target.targetInfoChanged', params: { targetInfo: target.targetInfo } },
+      source: 'server',
+      extensionId,
+    })
+  }
+
   // The tab an event belongs to: its session, or for root Target.* events the target in params.
   // Undefined for workers, detached targets and browser events, which go to every client.
   function findEventTarget({
@@ -2463,9 +2477,16 @@ export async function startPlayWriterCDPRelayServer({
                 source: 'extension',
                 extensionId: connectionId,
               })
+              if (!frameParams.frame.parentId && sessionId) {
+                sendTargetInfoChanged({ extensionId: connectionId, sessionId })
+              }
             } else if (method === 'Page.navigatedWithinDocument') {
               const navParams = params!
-              if (sessionId) {
+              // A page's main frame id is its targetId. Iframe hash changes must not overwrite the tab URL.
+              const isMainFrame =
+                !!sessionId &&
+                navParams.frameId === store.getState().extensions.get(connectionId)?.connectedTargets.get(sessionId)?.targetId
+              if (sessionId && isMainFrame) {
                 store.setState((s) =>
                   relayState.updateTargetUrl(s, { extensionId: connectionId, sessionId, url: navParams.url }),
                 )
@@ -2484,6 +2505,9 @@ export async function startPlayWriterCDPRelayServer({
                 source: 'extension',
                 extensionId: connectionId,
               })
+              if (sessionId && isMainFrame) {
+                sendTargetInfoChanged({ extensionId: connectionId, sessionId })
+              }
             } else {
               sendToPlaywright({
                 message: {
