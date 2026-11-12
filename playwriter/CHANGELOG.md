@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.11.0
+
+1. **New `--patchright` session mode with human-like input**: for production sites where you are logged in. The session connects with Patchright (`@playwriter/patchright-core`) instead of Playwright. Mouse moves follow curved paths, clicks get human press timing, scrolling glides in wheel flicks, and key presses are spaced 30-110 ms apart.
+
+   ```bash
+   playwriter session new --tab-group shop --patchright
+   # switch an existing session; tabs stay open, state is cleared
+   playwriter session update 1 --patchright
+   playwriter session update 1 --patchright false
+   ```
+
+   With Patchright, `page.evaluate` runs in the main world like in Playwright. Pass `true` as fourth argument for Patchright's isolated world, where pages cannot see the call. `snapshot`, `getPageMarkdown` and `waitForPageLoad` always run isolated. `page.on('console')` stays silent because Patchright keeps CDP `Runtime` off; use `getLatestLogs`. The Node API takes `connectViaExtension({ patchright: true })`, and `playwriter --patchright` (MCP) also humanizes input. The driver is now per session, not per relay.
+
+2. **Each CLI session sees only its own tabs**: a session sees the tabs it opened (and their popups), plus tabs you enabled with the extension icon. Parallel agents no longer navigate or close each other's tabs. Tabs of a deleted session become shared again. SDK scripts and the MCP still see every tab. Needs extension 0.0.174; with an older extension every tab stays shared.
+
+3. **Tabs report focus only while an execute uses them**: `document.hasFocus()`, `focus` and `blur` events of a CLI session's tab are active only while an execute of that session runs. Before, every attached tab claimed focus all the time, and chat apps marked messages as read in tabs nobody looked at. MCP and SDK connections keep the always-focused behavior.
+
+4. **Native screen recording**: `recording.start` now uses Chrome's own screen recorder (Chrome 153+). A 1080p recording costs about 4x less Chrome CPU and 15x less CDP traffic.
+   - Defaults are 60 fps (max 120) and a 3840 px longest edge. Pass `maxSize: 1920` for X uploads.
+   - Output is H.264 MP4, so stop takes under a second. `codec: 'av1'` keeps Chrome's output and needs no ffmpeg.
+   - `audio: true` records tab audio, cross-origin iframes included.
+   - Auto-stop is 60 minutes and saves the file. A closed page keeps what was recorded. `stop()` returns `endReason`.
+   - The video grows in `<name>.<id>.partial.mp4`, so a crash leaves a playable file.
+   - `recording.stop({ page })` recovers a lost handle. Relative `outputPath` resolves against the session cwd.
+   - The `quality` option is removed. Older Chrome fails with an "update Chrome" error.
+
+5. **Warnings for verification and block pages**: after an execute navigates, Playwriter checks for a verification page. Checks that clear by themselves are waited out. Otherwise execute prints a `[WARNING]` that tells the agent not to reload and to ask the user.
+
+6. **Pages can no longer see Playwriter's scripts**: the ghost cursor, bot challenge check and screenshot cleanup run in a private isolated world. Pages find no `__playwriterGhostCursor` global, leftover `<style>` or `<html>` class. With human-like input, element clicks land a few pixels off center, inside the element.
+
+7. **`snapshot()` shows element state**: in Playwright aria syntax, before the locator:
+
+   ```
+   - heading "Settings" [level=2]
+   - checkbox "Alerts" [checked] [id="alerts"]
+   - [expanded] role=button[name="Menu"i]
+   ```
+
+   `snapshot({ search })` now matches strings case-insensitively, handles regexes with the `g` flag, and starts with a match count like `12 matches (showing 10)`. Snapshots never show Playwriter's toolbar.
+
+8. **Web workers work**: `page.on('worker')`, `page.workers()` and `worker.evaluate()` work in Playwright and Patchright sessions, also for workers that already ran before a reconnect.
+
+9. **Safe CLI upgrades**: a newer CLI asks the old relay to drain. It refuses new executes with a "relay is restarting" error and waits up to 30 seconds for running ones. `playwriter serve restart` refuses while executes run; pass `--force` to restart anyway. Ctrl-C or an agent bash timeout on `playwriter -e` aborts the running script.
+
+10. **Session ids are never reused**: ids survive relay restarts in `~/.playwriter/session-counter.json`. A stale `-s 1` now fails with `Session N ended or was lost when the relay restarted` instead of running in another agent's session.
+
+11. **Relay survives agent mistakes**: a missing `await` or a throwing timer callback no longer kills the relay. The session gets a `[WARNING] Unhandled promise rejection in your code (missing await?)` line. `reset` and `session delete` clear pending sandbox timers. `relay-server.log` keeps the previous run as `relay-server.log.1` and rotates at 20 MB. A background relay now uses `PLAYWRITER_PORT`.
+
+12. **Execute output keeps the return value**: long `console.log` output no longer hides the result. Logs keep their start and end, and repeated lines show once with a count, like `[log] retrying (x37)`. `playwriter -e` no longer cuts error output at 64 KiB when piped.
+
+13. **Better recovery guidance**: execute warns when a page in state crashes. Errors for crashed tabs, closed pages and failed navigations give specific steps instead of a session reset. Actions are never retried automatically.
+
+14. **Cookies and `route.fetch()` work**: `route.fetch()`, `context.cookies()` and `context.addCookies()` work, also with older extensions. `context.clearCookies()` throws a clear error, because it would delete cookies for every site in your browser. Fixes [#66](https://github.com/remorses/playwriter/issues/66).
+
+15. **Long `page.evaluate()` calls**: `page.evaluate()` and `page.waitForFunction()` can wait up to 5 minutes. Before, the relay cut them at 30 seconds with a misleading "Execution context was destroyed" error.
+
+16. **New CDP clients no longer break other sessions on a tab**: a running `page.evaluate()` keeps working and element handles stay valid when another client connects.
+
+17. **Raw CDP clients get `Target.targetInfoChanged`**: browser-use and other clients that track page URLs from this event no longer see every page as blank.
+
+18. **`refToLocator` resolves labelled screenshot refs**: it uses refs from the last `screenshotWithAccessibilityLabels` call. Labels are also drawn in the right place on scrolled pages.
+
+19. **Extension welcome page shows if Playwriter is pinned**: the "Pin the extension" step turns into a checkmark when you pin it.
+
+20. **Playwright 1.64.1**: `@xmorse/playwright-core` is based on Playwright 1.64.1. `locator.dblclick()` sends a real double click, and `playwriter recorder` reports clicks live, so a click comes before the popup it opens. Every recording names its first page `page`.
+
 ## 0.10.0
 
 1. **`recording.start()` returns a handle and supports a manual clock**: a manual clock keeps agent thinking time out of demo videos.
