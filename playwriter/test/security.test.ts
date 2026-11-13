@@ -195,6 +195,13 @@ describe('Security Tests', () => {
     })
     expect(formData.status).toBe(415)
 
+    // Still a simple request: the media type is text/plain, application/json is only a parameter
+    const jsonParameter = await httpRequest({
+      path: '/cli/execute',
+      headers: { 'Content-Type': 'text/plain;x=application/json' },
+    })
+    expect(jsonParameter.status).toBe(415)
+
     // missing Content-Type entirely
     const noContentType = await httpRequest({
       path: '/cli/execute',
@@ -324,18 +331,28 @@ describe('Security Tests', () => {
     server = await startPlayWriterCDPRelayServer({ port: TEST_PORT, logger })
 
     // Service worker fetch is Sec-Fetch-Site: cross-site (chrome-extension → localhost).
-    // These two routes skip that block so the toolbar Record button works.
-    const recorderStart = await httpRequest({
-      path: '/recorder/start',
-      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' },
-    })
+    // These two routes skip that block for our extension origin so the toolbar Record button works.
+    const extensionHeaders = {
+      'Content-Type': 'application/json',
+      'Sec-Fetch-Site': 'cross-site',
+      Origin: 'chrome-extension://jfeammnjpkecdekppnclgkkffahnhfhe',
+    }
+    const recorderStart = await httpRequest({ path: '/recorder/start', headers: extensionHeaders })
     expect(recorderStart.status).not.toBe(403)
 
-    const recorderStop = await httpRequest({
-      path: '/recorder/stop',
-      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' },
-    })
+    const recorderStop = await httpRequest({ path: '/recorder/stop', headers: extensionHeaders })
     expect(recorderStop.status).not.toBe(403)
+
+    // A website sends a CORS-safelisted Content-Type with no preflight, so only the Origin check stops it
+    const website = await httpRequest({
+      path: '/recorder/start',
+      headers: {
+        'Content-Type': 'text/plain;x=application/json',
+        'Sec-Fetch-Site': 'cross-site',
+        Origin: 'https://evil.com',
+      },
+    })
+    expect(website.status).toBe(403)
 
     const recorderStatus = await httpRequest({
       path: '/recorder/status',
@@ -377,7 +394,11 @@ describe('Security Tests', () => {
     // text/plain POST to /recorder/start should still be rejected (415)
     const textPlain = await httpRequest({
       path: '/recorder/start',
-      headers: { 'Content-Type': 'text/plain', 'Sec-Fetch-Site': 'cross-site' },
+      headers: {
+        'Content-Type': 'text/plain',
+        'Sec-Fetch-Site': 'cross-site',
+        Origin: 'chrome-extension://jfeammnjpkecdekppnclgkkffahnhfhe',
+      },
     })
     expect(textPlain.status).toBe(415)
   })

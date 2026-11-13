@@ -1400,14 +1400,7 @@ export async function startPlayWriterCDPRelayServer({
     '*',
     cors({
       origin: (origin) => {
-        if (!origin.startsWith('chrome-extension://')) {
-          return null
-        }
-        const extensionId = origin.replace('chrome-extension://', '')
-        if (!EXTENSION_IDS.includes(extensionId)) {
-          return null
-        }
-        return origin
+        return isOurExtensionOrigin(origin) ? origin : null
       },
       allowMethods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
     }),
@@ -1465,14 +1458,27 @@ export async function startPlayWriterCDPRelayServer({
     return host || null
   }
 
-  function hasValidToken(c: { req: { header: (name: string) => string | undefined; url: string } }): boolean {
-    if (!token) {
+  function isOurExtensionOrigin(origin: string | undefined): boolean {
+    if (!origin?.startsWith('chrome-extension://')) {
       return false
     }
+    return EXTENSION_IDS.includes(origin.slice('chrome-extension://'.length))
+  }
+
+  function isTokenEqual(candidate: string | null): boolean {
+    if (!token || candidate === null) {
+      return false
+    }
+    const expected = Buffer.from(token)
+    const actual = Buffer.from(candidate)
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected)
+  }
+
+  function hasValidToken(c: { req: { header: (name: string) => string | undefined; url: string } }): boolean {
     const authHeader = c.req.header('authorization') || ''
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
     const queryToken = new URL(c.req.url, 'http://localhost').searchParams.get('token')
-    return bearerToken === token || queryToken === token
+    return isTokenEqual(bearerToken) || isTokenEqual(queryToken)
   }
 
   const requireTokenWhenConfigured = async (
@@ -1659,12 +1665,8 @@ export async function startPlayWriterCDPRelayServer({
         }
       }
 
-      if (token) {
-        const url = new URL(c.req.url, 'http://localhost')
-        const providedToken = url.searchParams.get('token')
-        if (providedToken !== token) {
-          return c.text('Unauthorized', 401)
-        }
+      if (token && !isTokenEqual(new URL(c.req.url, 'http://localhost').searchParams.get('token'))) {
+        return c.text('Unauthorized', 401)
       }
       return next()
     },
@@ -2873,22 +2875,23 @@ export async function startPlayWriterCDPRelayServer({
     // Block cross-origin browser requests via Sec-Fetch-Site header.
     // Browsers always set this forbidden header; it cannot be spoofed.
     // Non-browser clients (Node.js, curl, MCP) don't send it.
-    // Exception: /recorder/start and /recorder/stop. The toolbar service worker
-    // fetch is chrome-extension:// → 127.0.0.1, so Sec-Fetch-Site is cross-site.
-    // Websites still cannot call these: CORS only allows our extension origin,
-    // so a page preflight fails and the POST is never sent.
+    // Exception: /recorder/start and /recorder/stop from our extension. The toolbar
+    // service worker fetch is chrome-extension:// → 127.0.0.1, so Sec-Fetch-Site is
+    // cross-site. Browsers always send Origin on POST, so websites cannot pass this.
     const secFetchSite = c.req.header('sec-fetch-site')
     const isRecorderToggle = c.req.path === '/recorder/start' || c.req.path === '/recorder/stop'
-    if (!isRecorderToggle && secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
+    const isCrossOrigin = Boolean(secFetchSite) && secFetchSite !== 'same-origin' && secFetchSite !== 'none'
+    if (isCrossOrigin && !(isRecorderToggle && isOurExtensionOrigin(c.req.header('origin')))) {
       logger?.log(pc.red(`Rejecting ${c.req.path}: cross-origin browser request (Sec-Fetch-Site: ${secFetchSite})`))
       return c.text('Forbidden - Cross-origin requests not allowed', 403)
     }
 
     // Require application/json on POST to force CORS preflight as backup defense.
-    // A text/plain POST is a "simple request" that skips preflight entirely.
+    // Compare the exact media type: `text/plain;x=application/json` is still a
+    // "simple request" that skips preflight.
     if (c.req.method === 'POST') {
       const contentType = c.req.header('content-type') || ''
-      if (!contentType.includes('application/json')) {
+      if (contentType.split(';')[0].trim().toLowerCase() !== 'application/json') {
         logger?.log(pc.red(`Rejecting ${c.req.path}: Content-Type must be application/json, got: ${contentType}`))
         return c.text('Content-Type must be application/json', 415)
       }

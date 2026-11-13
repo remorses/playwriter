@@ -1,8 +1,7 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import util from 'node:util'
 import stripAnsi from 'strip-ansi'
-import { LOG_FILE_PATH, redactRemoteControlSecrets } from './utils.js'
+import { LOG_FILE_PATH, PRIVATE_FILE_MODE, preparePrivateLogFile, redactRemoteControlSecrets } from './utils.js'
 
 export type Logger = {
   log(...args: unknown[]): Promise<void>
@@ -20,6 +19,8 @@ const MAX_LOG_BYTES = 20 * 1024 * 1024
 function rotateLogFile(filePath: string) {
   try {
     fs.renameSync(filePath, `${filePath}.1`)
+    // Older versions wrote logs as 0644
+    fs.chmodSync(`${filePath}.1`, PRIVATE_FILE_MODE)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error
@@ -29,10 +30,9 @@ function rotateLogFile(filePath: string) {
 
 export function createFileLogger({ logFilePath }: { logFilePath?: string } = {}): Logger {
   const resolvedLogFilePath = logFilePath || LOG_FILE_PATH
-  fs.mkdirSync(path.dirname(resolvedLogFilePath), { recursive: true })
   // Keep the previous run's log: the CLI restarts a crashed relay, and the crash line must survive.
   rotateLogFile(resolvedLogFilePath)
-  fs.writeFileSync(resolvedLogFilePath, '')
+  preparePrivateLogFile(resolvedLogFilePath)
   let bytesWritten = 0
 
   let queue: Promise<void> = Promise.resolve()
@@ -94,7 +94,7 @@ export function createFileLogger({ logFilePath }: { logFilePath?: string } = {})
   const flushSync = (): void => {
     const chunk = takeChunk()
     if (chunk) {
-      fs.appendFileSync(resolvedLogFilePath, chunk)
+      fs.appendFileSync(resolvedLogFilePath, chunk, { mode: PRIVATE_FILE_MODE })
     }
   }
 

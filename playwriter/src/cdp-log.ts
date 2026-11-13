@@ -1,6 +1,5 @@
 import fs from 'node:fs'
-import path from 'node:path'
-import { LOG_CDP_FILE_PATH, redactRemoteControlSecrets } from './utils.js'
+import { LOG_CDP_FILE_PATH, PRIVATE_FILE_MODE, preparePrivateLogFile, redactRemoteControlSecrets } from './utils.js'
 
 export type CdpLogEntry = {
   timestamp: string
@@ -19,6 +18,8 @@ export type CdpLogger = {
 
 const DEFAULT_MAX_STRING_LENGTH = Number(process.env.PLAYWRITER_CDP_LOG_MAX_STRING_LENGTH || 2000)
 const EXCLUDED_METHODS = new Set(['Page.screencastFrame'])
+// Session secrets in headers and cookie results. Header names keep their case, so compare lowercased.
+const REDACTED_KEYS = new Set(['cookie', 'set-cookie', 'authorization', 'proxy-authorization', 'cookies', 'headerstext'])
 
 function truncateString(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
@@ -30,7 +31,10 @@ function truncateString(value: string, maxLength: number): string {
 
 function createTruncatingReplacer({ maxStringLength }: { maxStringLength: number }) {
   const seen = new WeakSet<object>()
-  return (_key: string, value: unknown) => {
+  return (key: string, value: unknown) => {
+    if (REDACTED_KEYS.has(key.toLowerCase())) {
+      return '[redacted]'
+    }
     if (typeof value === 'string') {
       return truncateString(redactRemoteControlSecrets(value), maxStringLength)
     }
@@ -59,11 +63,7 @@ export function createCdpLogger({
   maxEntries,
 }: { logFilePath?: string; maxStringLength?: number; maxEntries?: number } = {}): CdpLogger {
   const resolvedLogFilePath = logFilePath || LOG_CDP_FILE_PATH
-  const logDir = path.dirname(resolvedLogFilePath)
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true })
-  }
-  fs.writeFileSync(resolvedLogFilePath, '')
+  preparePrivateLogFile(resolvedLogFilePath)
 
   let queue: Promise<void> = Promise.resolve()
   let lineCount = 0
@@ -89,7 +89,7 @@ export function createCdpLogger({
       })
       const kept = lines.slice(-keepAfterRotation)
       const tmpPath = `${resolvedLogFilePath}.tmp`
-      await fs.promises.writeFile(tmpPath, kept.join('\n') + '\n')
+      await fs.promises.writeFile(tmpPath, kept.join('\n') + '\n', { mode: PRIVATE_FILE_MODE })
       await fs.promises.rename(tmpPath, resolvedLogFilePath)
       lineCount = kept.length
     } catch {
@@ -105,7 +105,7 @@ export function createCdpLogger({
     const lines = buffer
     buffer = []
     // Best effort: a deleted log folder or a full disk must not reject the queue, or logging stops for good
-    const written = await fs.promises.appendFile(resolvedLogFilePath, lines.join('\n') + '\n').then(
+    const written = await fs.promises.appendFile(resolvedLogFilePath, lines.join('\n') + '\n', { mode: PRIVATE_FILE_MODE }).then(
       () => true,
       () => false,
     )

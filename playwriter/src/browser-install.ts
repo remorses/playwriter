@@ -251,18 +251,15 @@ export async function installChrome(): Promise<{ version: string; binaryPath: st
   console.log(`Downloading Chrome ${version} for ${getPlatformKey()}...`)
   console.log(`  ${downloadUrl}`)
 
-  const tmpZip = path.join(os.tmpdir(), `playwriter-chrome-${version}.zip`)
+  // Private random folder: a fixed /tmp path lets other users on the machine swap the zip
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'playwriter-chrome-'))
+  const tmpZip = path.join(tmpDir, `chrome-${version}.zip`)
   try {
     await downloadFile(downloadUrl, tmpZip)
     console.log('Extracting...')
     extractZip(tmpZip, destDir)
   } finally {
-    // Clean up temp zip
-    try {
-      fs.unlinkSync(tmpZip)
-    } catch {
-      // ignore cleanup errors
-    }
+    fs.rmSync(tmpDir, { recursive: true, force: true })
   }
 
   const binaryPath = findChromeBinaryInDir(destDir)

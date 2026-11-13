@@ -1938,13 +1938,15 @@ cli
     `Start the relay server on this machine (must be the same host where Chrome is running). Remote clients (Docker, other machines) connect via PLAYWRITER_HOST and PLAYWRITER_TOKEN. Use --host 0.0.0.0 for Docker, LAN, or internet access (requires --token).`,
   )
   .option('--host [host]', z.string().default('0.0.0.0').describe('Host to bind to (use "0.0.0.0" for Docker or remote access)'))
-  .option('--token <token>', 'Authentication token, required when --host is 0.0.0.0 (or use PLAYWRITER_TOKEN env var)')
+  .option('--token <token>', 'Authentication token, required unless --host is a loopback address like 127.0.0.1 (or use PLAYWRITER_TOKEN env var)')
   .option('--replace', 'Kill existing server if running')
   .action(async (options) => {
     const token = options.token || process.env.PLAYWRITER_TOKEN
-    const isPublicHost = options.host === '0.0.0.0' || options.host === '::'
-    if (isPublicHost && !token) {
-      console.error('Error: Authentication token is required when binding to a public host.')
+    // Any non-loopback bind is reachable from the network, and non-browser clients
+    // can send `Host: localhost`, so only the token protects it.
+    const isLoopbackHost = options.host === 'localhost' || options.host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(options.host)
+    if (!isLoopbackHost && !token) {
+      console.error(`Error: Authentication token is required when binding to a non-loopback host (${options.host}).`)
       console.error('Provide --token <token> or set PLAYWRITER_TOKEN environment variable.')
       process.exit(1)
     }

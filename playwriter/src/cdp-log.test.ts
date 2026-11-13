@@ -151,12 +151,24 @@ describe('CDP log privacy', () => {
         },
       },
     })
+    logger.log({
+      timestamp: new Date().toISOString(),
+      direction: 'from-extension',
+      message: {
+        method: 'Network.requestWillBeSentExtraInfo',
+        params: { headers: { Cookie: `sid=${secret}`, Authorization: `Bearer ${secret}`, Accept: 'text/html' } },
+      },
+    })
     await logger.flush()
 
     const content = fs.readFileSync(logFile, 'utf-8')
     expect(content).not.toContain('Page.screencastFrame')
     expect(content).not.toContain(secret)
     expect(content).toContain('[redacted]')
+    expect(content).toContain('text/html')
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(logFile).mode & 0o777).toBe(0o600)
+    }
 
     fs.rmSync(tmpDir, { recursive: true })
   })
