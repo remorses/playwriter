@@ -1414,6 +1414,13 @@ async function handleCommand(
     }
   }
 
+  if (msg.params.method === 'Target.createTarget' || msg.params.method === 'Page.navigate') {
+    const navigationError = getBlockedNavigationError(msg.params.params?.url || 'about:blank')
+    if (navigationError) {
+      throw new Error(navigationError)
+    }
+  }
+
   const resolved = getTabForCommand(msg)
   let targetTabId = resolved?.tabId
   let targetTab = resolved?.tab
@@ -1862,6 +1869,28 @@ type AttachTabOptions = {
   sessionId?: string
 }
 
+// getBlockedNavigationError stops clients from adding our extension pages to history, but a tab
+// can already hold one (the welcome tab the user kept browsing in). history.back() would then
+// load it with client init scripts and extension privileges, so clear such entries before any
+// client sees the tab. Throws if the tab is on an extension page right now.
+async function removeExtensionPagesFromHistory(debuggee: chrome.debugger.Debuggee): Promise<void> {
+  const { currentIndex, entries } = (await chrome.debugger.sendCommand(
+    debuggee,
+    'Page.getNavigationHistory',
+  )) as Protocol.Page.GetNavigationHistoryResponse
+  const isExtensionPage = (entry: Protocol.Page.NavigationEntry) => {
+    return entry.url.startsWith('chrome-extension://')
+  }
+  const current = entries[currentIndex]
+  if (current && isExtensionPage(current)) {
+    throw new Error('Cannot attach to an extension page')
+  }
+  if (entries.some(isExtensionPage)) {
+    logger.warn('Clearing tab history that contains an extension page:', debuggee.tabId)
+    await chrome.debugger.sendCommand(debuggee, 'Page.resetNavigationHistory')
+  }
+}
+
 function attachTab(tabId: number, options: AttachTabOptions = {}): Promise<AttachTabResult> {
   const inFlight = inFlightTabAttaches.get(tabId)
   if (inFlight) {
@@ -1911,6 +1940,7 @@ async function attachTabDebugger(
     logger.debug('Debugger attached successfully to tab:', tabId)
 
     await chrome.debugger.sendCommand(debuggee, 'Page.enable')
+    await removeExtensionPagesFromHistory(debuggee)
 
     // Reapply cached auto-attach for new tabs so OOPIF targets are reported immediately.
     if (autoAttachParams) {
@@ -2698,7 +2728,7 @@ async function resetDebugger(): Promise<void> {
   )
 }
 
-// Our extension IDs - allow attaching to our own extension pages for debugging
+// Our extension IDs: removeRestrictedIframes keeps our own iframes
 const OUR_EXTENSION_IDS = [
   'jfeammnjpkecdekppnclgkkffahnhfhe', // Production extension (Chrome Web Store)
   'pebbngnfojnignonigcnkdilknapkgid', // Dev extension (stable ID from manifest key)
@@ -2706,23 +2736,35 @@ const OUR_EXTENSION_IDS = [
 
 // undefined URL is for about:blank pages (not restricted) and chrome:// URLs (restricted).
 // We can't distinguish them without the `tabs` permission, so we just let attachment fail.
+// Our own extension pages are restricted too: chrome.debugger may attach to them, and a CDP
+// client there would run with this extension's privileges (debugger on every tab, storage).
 function isRestrictedUrl(url: string | undefined): boolean {
   if (!url) return false
 
-  // Allow our own extension pages, block all other extensions
-  if (url.startsWith('chrome-extension://')) {
-    const extensionId = url.replace('chrome-extension://', '').split('/')[0]
-    return !OUR_EXTENSION_IDS.includes(extensionId)
-  }
-
   const restrictedPrefixes = [
     'chrome://',
+    'chrome-extension://',
     'devtools://',
     'edge://',
     'https://chrome.google.com/',
     'https://chromewebstore.google.com/',
   ]
   return restrictedPrefixes.some((prefix) => url.startsWith(prefix))
+}
+
+/**
+ * Error for a URL a CDP client may not open with Target.createTarget or Page.navigate, or null.
+ * Our extension pages would give the client extension privileges that outlive Stop sharing.
+ * chrome.tabs.create resolves relative URLs against our extension origin, so only absolute URLs pass.
+ */
+function getBlockedNavigationError(url: string): string | null {
+  if (!URL.canParse(url)) {
+    return `Cannot open "${url}": pass an absolute URL.`
+  }
+  if (new URL(url).protocol === 'chrome-extension:') {
+    return 'Playwriter clients cannot open extension pages.'
+  }
+  return null
 }
 
 const icons = {
@@ -3956,6 +3998,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   return false
+})
+
+// Only for a user typing an extension URL into an attached tab: getBlockedNavigationError and
+// removeExtensionPagesFromHistory are the boundary, this detach runs after the page loads.
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0 || !details.url.startsWith('chrome-extension://')) {
+    return
+  }
+  if (!store.getState().tabs.has(details.tabId)) {
+    return
+  }
+  logger.warn('Detaching tab that navigated to an extension page:', details.tabId)
+  detachTab(details.tabId, true)
 })
 
 // Re-inject the toolbar after hard navigations in connected tabs.

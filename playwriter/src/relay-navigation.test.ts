@@ -845,6 +845,93 @@ describe('Relay Navigation Tests', () => {
     }
   }, 30000)
 
+  it('refuses to open our own extension pages', async () => {
+    // Extension pages run with the extension's privileges: a CDP client there could debug
+    // every tab and keep control after Remote control Stop sharing.
+    const serviceWorker = await getExtensionServiceWorker(getBrowserContext())
+    const extensionPageUrl = new URL('src/welcome.html', serviceWorker.url()).href
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    try {
+      const page = await browser.contexts()[0].newPage()
+      const { getCDPSessionForPage } = await import('./cdp-session.js')
+      const cdp = await getCDPSessionForPage({ page })
+      // chrome.tabs.create resolves relative URLs against the extension origin
+      const createErrors = await Promise.all(
+        [extensionPageUrl, 'src/welcome.html'].map((url) => {
+          return cdp.send('Target.createTarget', { url }).then(
+            () => 'opened',
+            (e: Error) => e.message,
+          )
+        }),
+      )
+      const navigateError = await page.goto(extensionPageUrl).then(
+        () => 'opened',
+        (e: Error) => e.message.split('\n')[0],
+      )
+      await page.close()
+      expect({ createErrors, navigateError }).toMatchInlineSnapshot(`
+        {
+          "createErrors": [
+            "cdpSession.send: Protocol error (Target.createTarget): Playwriter clients cannot open extension pages.",
+            "cdpSession.send: Protocol error (Target.createTarget): Cannot open "src/welcome.html": pass an absolute URL.",
+          ],
+          "navigateError": "page.goto: Protocol error (Page.navigate): Playwriter clients cannot open extension pages.",
+        }
+      `)
+    } finally {
+      await browser.close()
+    }
+  }, 30000)
+
+  it('clears extension pages from tab history before clients see the tab', async () => {
+    // A welcome tab the user kept browsing in still has the extension page in its history.
+    // history.back() must not load it with a client init script and extension privileges.
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const extensionPageUrl = new URL('src/welcome.html', serviceWorker.url()).href
+    const userPage = await browserContext.newPage()
+    await userPage.goto(extensionPageUrl)
+    await userPage.goto('about:blank')
+    await userPage.evaluate(() => {
+      window.name = 'history-test'
+    })
+    await userPage.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    try {
+      const pages = browser.contexts()[0].pages()
+      const names = await Promise.all(pages.map((p) => p.evaluate(() => window.name).catch(() => '')))
+      const page = pages[names.indexOf('history-test')]
+      expect(page).toBeTruthy()
+      const { getCDPSessionForPage } = await import('./cdp-session.js')
+      const cdp = await getCDPSessionForPage({ page })
+      await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `if (location.protocol === 'chrome-extension:') chrome.storage.local.set({ historyProof: 'escaped' })`,
+      })
+      const historyLength = await page.evaluate(() => window.history.length)
+      await page.evaluate(() => window.history.back())
+      await userPage.waitForTimeout(1000)
+      const proof = await serviceWorker.evaluate(() => chrome.storage.local.get('historyProof'))
+      expect({ historyLength, proof, url: userPage.url() }).toMatchInlineSnapshot(`
+        {
+          "historyLength": 1,
+          "proof": {},
+          "url": "about:blank",
+        }
+      `)
+    } finally {
+      await browser.close()
+      await serviceWorker
+        .evaluate(async () => {
+          await globalThis.toggleExtensionForActiveTab()
+        })
+        .catch(() => {})
+      await userPage.close()
+    }
+  }, 30000)
+
   it('should keep the page when another extension injects a chrome-extension:// iframe after attach', async () => {
     // Reproduces https://github.com/remorses/playwriter/issues/127
     // 1Password injects its inline menu iframe when a field gets focus. Chrome force-detaches
