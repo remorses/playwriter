@@ -1,7 +1,6 @@
 /**
  * Playwright driver import. Each connection picks its driver: @xmorse/playwright-core by default,
- * or @playwriter/patchright-core for `session new --patchright` sessions, and for the MCP with
- * PLAYWRITER_PATCHRIGHT=1.
+ * or @playwriter/patchright-core for sessions created with patchright.
  *
  * Type imports use @xmorse/playwright-core for both drivers.
  */
@@ -76,9 +75,4 @@ export async function evaluateIsolated<R>({
     return await evaluate(fn, arg, undefined, true)
   }
   return await evaluate(fn, arg)
-}
-
-/** Process-wide Patchright opt-in for the MCP (`playwriter --patchright`). CLI sessions choose per session. */
-export function isPatchrightEnvEnabled(): boolean {
-  return process.env.PLAYWRITER_PATCHRIGHT === '1' || process.env.PLAYWRITER_PATCHRIGHT === 'true'
 }

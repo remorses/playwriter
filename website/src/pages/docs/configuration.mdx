@@ -13,26 +13,7 @@ Playwriter is configured through **CLI flags** and **environment variables**. No
 |---|---|---|
 | `PLAYWRITER_HOST` | Remote relay server URL | `ws://localhost:19988` |
 | `PLAYWRITER_TOKEN` | Auth token for remote connections | - |
-| `PLAYWRITER_DIRECT` | CDP connection mode (see below) | - |
 | `PLAYWRITER_API_KEY` | API key for cloud browsers | - |
-
-### PLAYWRITER_DIRECT
-
-Connect directly to Chrome's DevTools Protocol, bypassing the extension:
-
-| Value | Behavior |
-|---|---|
-| `1` | Auto-discover Chrome on port 9222 |
-| `ws://...` or `wss://...` | Explicit WebSocket endpoint |
-| `host:port` | Resolves via HTTP probe to ws:// URL |
-
-```bash
-# Auto-discover local Chrome
-PLAYWRITER_DIRECT=1 playwriter session new
-
-# Cloud browser provider
-PLAYWRITER_DIRECT=wss://xxx.cdp.browser-use.com playwriter session new
-```
 
 ### PLAYWRITER_HOST and PLAYWRITER_TOKEN
 
@@ -54,7 +35,6 @@ playwriter session new
 | `--host <host>` | Remote relay server host |
 | `--token <token>` | Auth token for remote connections |
 | `--timeout <ms>` | Execution timeout (default: 10000) |
-| `--patchright` | MCP: connect with Patchright and human-like input. See [sessions](./sessions.mdx#patchright) |
 
 ## Session new flags
 
@@ -100,37 +80,9 @@ playwriter session new
 }
 ```
 
-### Direct CDP
+### Direct CDP and cloud browser providers
 
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["-y", "playwriter@latest"],
-      "env": {
-        "PLAYWRITER_DIRECT": "1"
-      }
-    }
-  }
-}
-```
-
-### Cloud browser provider
-
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["-y", "playwriter@latest"],
-      "env": {
-        "PLAYWRITER_DIRECT": "wss://xxx.cdp.browser-use.com"
-      }
-    }
-  }
-}
-```
+There is no MCP config for these. The agent calls the `session_new` tool with `direct: "auto"` to find Chrome with debugging on, or with an endpoint like `wss://xxx.cdp.browser-use.com`. See [MCP setup](./mcp-setup.mdx).
 
 ### Remote relay
 

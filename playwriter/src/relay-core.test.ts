@@ -2044,6 +2044,42 @@ describe('Relay Core Tests', () => {
     }
   }, 60000)
 
+
+  it('MCP session tools create, isolate, list and delete relay sessions', async () => {
+    const text = (result: unknown) => (result as { content: Array<{ text: string }> }).content[0].text
+    const server = await createSimpleServer({ routes: { '/mcp-owned': '<!doctype html><title>mcp</title>' } })
+    const created = text(await client.callTool({ name: 'session_new', arguments: { tabGroup: 'mcp-tools' } }))
+    const sessionId = created.match(/^Session (\S+) created/)?.[1]
+    expect(created).toBe(`Session ${sessionId} created. It is now the default session.`)
+
+    const opened = await client.callTool({
+      name: 'execute',
+      arguments: { code: js`state.page = await context.newPage(); await state.page.goto('${server.baseUrl}/mcp-owned'); return 'ok'` },
+    })
+    expect(text(opened)).toBe('[return value] ok')
+
+    const otherId = await createCliSession()
+    const seesMcpTab = js`return context.pages().some((p) => p.url().includes('mcp-owned'))`
+    expect((await executeCli({ sessionId: otherId, code: seesMcpTab })).text).toBe('[return value] false')
+
+    const listed = text(await client.callTool({ name: 'session_list', arguments: {} }))
+    expect(listed).toContain(`- ${sessionId} (default, yours): `)
+    expect(listed).toContain('group=mcp-tools')
+
+    expect(text(await client.callTool({ name: 'session_delete', arguments: {} }))).toBe(`Session ${sessionId} deleted.`)
+    // Tabs of a deleted session become shared with sessions that connect afterwards
+    const laterId = await createCliSession()
+    expect((await executeCli({ sessionId: laterId, code: seesMcpTab })).text).toBe('[return value] true')
+
+    const lost = await client.callTool({ name: 'execute', arguments: { code: '1', session: sessionId } })
+    expect((lost as { isError?: boolean }).isError).toBe(true)
+    expect(text(lost)).toContain(`Session ${sessionId} no longer exists`)
+
+    await executeCli({ sessionId: laterId, code: js`await context.pages().find((p) => p.url().includes('mcp-owned'))?.close()` })
+    await deleteCliSession(otherId)
+    await deleteCliSession(laterId)
+    await server.close()
+  }, 60000)
 })
 
 describe('Relay extension timeouts', () => {

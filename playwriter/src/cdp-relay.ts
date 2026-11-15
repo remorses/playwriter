@@ -853,7 +853,8 @@ export async function startPlayWriterCDPRelayServer({
       if (method === 'Emulation.setFocusEmulationEnabled') {
         return {}
       }
-      if (executingSessions.has(focusSessionId)) {
+      // Closing needs no focus, and a crashed tab never answers the focus command
+      if (executingSessions.has(focusSessionId) && method !== 'Target.closeTarget') {
         await focusTab({ extensionId: resolvedExtensionId, tabSessionId: commandTarget.sessionId, cliSessionId: focusSessionId })
       }
     }
@@ -2938,8 +2939,9 @@ export async function startPlayWriterCDPRelayServer({
       if (body.remoteControlUrl) return 'remote'
       return 'extension'
     })()
-    // Only the SDK's createRelaySession() sends client; every CLI path omits it.
-    trackEvent('session_created', { client: body.client === 'sdk' ? 'sdk' : 'cli', kind })
+    // The SDK's createRelaySession() and the MCP send client; every CLI path omits it.
+    const client = body.client === 'sdk' || body.client === 'mcp' ? body.client : 'cli'
+    trackEvent('session_created', { client, kind })
   })
 
   app.post('/mcp-log', async (c) => {

@@ -90,7 +90,7 @@ For AI assistants (Claude, Cursor, OpenCode, etc.), configure the MCP server ins
 }
 ```
 
-The MCP exposes a single **`execute`** tool that accepts any Playwright code. Your agent sends JavaScript and gets back the result, snapshots, and screenshots automatically.
+The main MCP tool is **`execute`**: it accepts any Playwright code and returns the result, snapshots, and screenshots. Session tools (`session_list`, `session_new`, `session_update`, `session_delete`) pick a browser, run parallel sessions, or turn on Patchright.
 
 See the full [MCP setup guide](./mcp-setup.mdx) for more options.
 

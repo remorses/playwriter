@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url'
 import { goke, openInBrowser, isAgent } from 'goke'
 import { z } from 'zod'
 import pc from 'picocolors'
-import { Agent, fetch as undiciFetch } from 'undici'
 
 // Prevent Buffers from dumping hex bytes in util.inspect output.
 Buffer.prototype[util.inspect.custom] = function () {
@@ -24,18 +23,26 @@ import {
   stopRelayServer,
   RELAY_PORT,
   waitForConnectedExtensions,
-  getLocalExtensionStatuses,
   getExtensionOutdatedWarning,
   getExtensionStatus,
-  type ExtensionStatus,
-  EXTENSION_NOT_CONNECTED_ERROR,
 } from './relay-client.js'
-import { discoverChromeInstances, resolveDirectInput, type DiscoveredInstance } from './chrome-discovery.js'
-import { getCloudClient, loadCloudAuth, saveCloudAuth, CloudClient, buildLiveUrl, type CloudAuth } from './cloud-client.js'
+import {
+  buildAuthHeaders,
+  deleteSession,
+  discoverBrowserOptions,
+  executeInSession,
+  ExtensionNotConnectedError,
+  formatBrowserTable,
+  getServerUrl,
+  listSessions,
+  newSession,
+  resetSession,
+  updateSession,
+} from './relay-sessions.js'
+import { getCloudClient, loadCloudAuth, saveCloudAuth, CloudClient, buildLiveUrl } from './cloud-client.js'
 import { printTelemetryNoticeOnce } from './telemetry.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const executeDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
 
 const cli = goke('playwriter')
 
@@ -119,6 +126,7 @@ cli
   })
 
 const DEFAULT_EXEC_TIMEOUT = Number(process.env.PLAYWRITER_EXEC_TIMEOUT) || 10000
+const BROWSER_LIST_EXTENSION_WAIT_MS = 2000
 
 cli
   .command('', 'Start the MCP server or controls the browser with -e')
@@ -127,13 +135,8 @@ cli
   .option('-s, --session <name>', 'Session ID (required for -e, get one with `playwriter session new`)')
   .option('-e, --eval <code>', 'Execute JavaScript code and exit, read https://playwriter.dev/SKILL.md for usage')
   .option('-f, --file <path>', 'Execute JavaScript from a file and exit')
-  .option('--patchright', 'MCP: connect with Patchright (@playwriter/patchright-core) instead of Playwright, with human-like input. CLI sessions use session new --patchright')
   .option('--timeout [ms]', z.number().default(DEFAULT_EXEC_TIMEOUT).describe('Execution timeout in milliseconds'))
   .action(async (options) => {
-    if (options.patchright) {
-      process.env.PLAYWRITER_PATCHRIGHT = '1'
-    }
-
     if (options.eval && options.file) {
       console.error('Error: -e and -f cannot be used together.')
       process.exit(1)
@@ -167,83 +170,12 @@ cli
     }
 
     // Otherwise start the MCP server
-    // For direct CDP in MCP mode, use PLAYWRITER_DIRECT env var
     const { startMcp } = await import('./mcp.js')
     await startMcp({
       host: options.host,
       token: options.token,
     })
   })
-
-async function getServerUrl(host?: string): Promise<string> {
-  const serverHost = host || process.env.PLAYWRITER_HOST || '127.0.0.1'
-  const { httpBaseUrl } = parseRelayHost(serverHost, RELAY_PORT)
-  return httpBaseUrl
-}
-
-// Centralized header builder so every CLI subcommand sends the token consistently.
-// Falls back to PLAYWRITER_TOKEN env var when --token is not provided.
-function getRelayCloudAuth(): CloudAuth | undefined {
-  return loadCloudAuth() ?? undefined
-}
-
-function buildAuthHeaders({ token, json }: { token?: string; json?: boolean }): Record<string, string> {
-  const headers: Record<string, string> = {}
-  if (json) {
-    headers['Content-Type'] = 'application/json'
-  }
-  const effectiveToken = token || process.env.PLAYWRITER_TOKEN
-  if (effectiveToken) {
-    headers['Authorization'] = `Bearer ${effectiveToken}`
-  }
-  return headers
-}
-
-async function fetchExtensionsStatus({ host, token }: { host?: string; token?: string } = {}): Promise<ExtensionStatus[]> {
-  try {
-    const serverUrl = await getServerUrl(host)
-    const headers = buildAuthHeaders({ token })
-    const response = await fetch(`${serverUrl}/extensions/status`, {
-      signal: AbortSignal.timeout(2000),
-      headers,
-    })
-    if (!response.ok) {
-      const fallback = await fetch(`${serverUrl}/extension/status`, {
-        signal: AbortSignal.timeout(2000),
-        headers,
-      })
-      if (!fallback.ok) {
-        return []
-      }
-      const fallbackData = (await fallback.json()) as {
-        connected: boolean
-        activeTargets: number
-        browser: string | null
-        profile: { email: string; id: string } | null
-        playwriterVersion?: string | null
-      }
-      if (!fallbackData?.connected) {
-        return []
-      }
-      return [
-        {
-          extensionId: 'default',
-          stableKey: undefined,
-          browser: fallbackData?.browser,
-          profile: fallbackData?.profile,
-          activeTargets: fallbackData?.activeTargets,
-          playwriterVersion: fallbackData?.playwriterVersion || null,
-        },
-      ]
-    }
-    const data = (await response.json()) as {
-      extensions: ExtensionStatus[]
-    }
-    return data?.extensions || []
-  } catch {
-    return []
-  }
-}
 
 async function executeCode(options: {
   code: string
@@ -262,8 +194,6 @@ async function executeCode(options: {
     console.error('Always run `playwriter session new` first to get a session ID to use.')
     process.exit(1)
   }
-
-  const serverUrl = await getServerUrl(host)
 
   // Ensure relay server is running (only for local)
   if (!host && !process.env.PLAYWRITER_HOST) {
@@ -287,40 +217,20 @@ async function executeCode(options: {
     console.error(outdatedWarning)
   }
 
-  // Build request URL with token if provided
-  const executeUrl = `${serverUrl}/cli/execute`
-
   try {
-    const response = await undiciFetch(executeUrl, {
-      method: 'POST',
-      headers: buildAuthHeaders({ token, json: true }),
-      body: JSON.stringify({ sessionId, code, timeout, cwd }),
-      dispatcher: executeDispatcher,
-      signal: AbortSignal.timeout(timeout + 30_000),
+    const result = await executeInSession({
+      relay: { host, token },
+      sessionId,
+      code,
+      timeout,
+      cwd,
+      signal: new AbortController().signal,
     })
 
-    if (!response.ok) {
-      const text = await response.text()
-      // 503 while the relay drains for an upgrade carries a readable message in text.
-      const message = (() => {
-        try {
-          const json = JSON.parse(text) as { text?: string; error?: string }
-          return json.text || json.error || text
-        } catch {
-          return text
-        }
-      })()
-      console.error(`Error: ${response.status} ${message}`)
+    if (result.status !== 200) {
+      console.error(`Error: ${result.text}`)
       process.exitCode = 1
       return
-    }
-
-    const result = (await response.json()) as {
-      text: string
-      images: Array<{ data: string; mimeType: string }>
-      screenshots: Array<{ path: string; base64: string; snapshot: string; labelCount: number }>
-      isError: boolean
-      isCloud?: boolean
     }
 
     // Print output
@@ -385,22 +295,6 @@ async function executeCode(options: {
 }
 
 // Session management commands
-// Unified browser option type used in the multi-browser selection table
-interface BrowserOption {
-  key: string
-  type: 'extension' | 'direct' | 'cloud' | 'headless'
-  browser: string
-  profile: string
-  /** For extension entries */
-  extensionId?: string | null
-  /** For direct CDP entries */
-  wsUrl?: string
-  /** Raw profile data from discovery (for passing to relay) */
-  profiles?: Array<{ name: string; email: string }>
-  /** For cloud entries — active BU session's cloud session ID (if VM is running) */
-  activeCloudSessionId?: string
-}
-
 cli
   .command('session new', 'Create a new session and print the session ID')
   .option('--host <host>', 'Remote relay server host')
@@ -416,820 +310,78 @@ cli
   .option('--tab-group-color <color>', 'Tab group color: grey, blue, red, yellow, green, pink, purple, cyan, orange (default derived from the group name)')
   .option('--patchright', 'Connect with Patchright (@playwriter/patchright-core) instead of Playwright, with human-like mouse, scroll and typing on every page')
   .action(async (options) => {
-    const tabGroup: string | undefined = (() => {
-      if (!options.tabGroup) {
-        return undefined
-      }
-      const normalized = String(options.tabGroup).trim()
-      if (!normalized) {
-        console.error('Error: --tab-group must be a non-empty name')
-        process.exit(1)
-      }
-      return normalized
-    })()
-    const tabGroupColor: string | undefined = (() => {
-      if (!options.tabGroupColor) {
-        return undefined
-      }
-      const normalized = normalizeTabGroupColor(options.tabGroupColor)
-      if (!normalized) {
-        console.error(`Error: --tab-group-color must be one of: ${TAB_GROUP_ALL_COLORS.join(', ')}`)
-        process.exit(1)
-      }
-      return normalized
-    })()
-    const patchright: boolean | undefined = options.patchright ? true : undefined
-    const warnExtensionOnlyFlags = (mode: string) => {
-      if (tabGroup || tabGroupColor || patchright) {
-        console.error(pc.yellow(`Warning: --tab-group/--tab-group-color/--patchright only apply to extension sessions, ignored for ${mode}.`))
-      }
-    }
-
-    const isLocal = !options.host && !process.env.PLAYWRITER_HOST
-
-    // --remote: bind the session to a browser another user shared via the
-    // extension Remote control button. Pass the id from the copied prompt. The
-    // local relay dials the tunnel, so later `playwriter -s N -e ...` calls need
-    // no extra flags.
-    if (options.remote) {
-      await ensureRelayForSessionCreation(isLocal)
-      const serverUrl = await getServerUrl(options.host)
-      try {
-        const response = await fetch(`${serverUrl}/cli/session/new`, {
-          method: 'POST',
-          headers: buildAuthHeaders({ token: options.token, json: true }),
-          body: JSON.stringify({
-            remoteControlUrl: options.remote,
-            cwd: process.cwd(),
-            tabGroup,
-            tabGroupColor,
-            patchright,
-          }),
-        })
-        if (!response.ok) {
-          const text = await response.text()
-          const parsed = (() => {
-            try {
-              return JSON.parse(text) as { error?: string }
-            } catch {
-              return null
-            }
-          })()
-          console.error(`Error: ${parsed?.error || `${response.status} ${text}`}`)
-          process.exit(1)
-        }
-        const result = (await response.json()) as {
-          id: string
-          browser?: string | null
-          warning?: string | null
-          tabGroup?: string | null
-        }
-        printSessionWarning(result)
-        warnIfTabGroupIgnored(tabGroup || tabGroupColor, result)
-        printSessionCreated(`Session ${result.id} created (remote browser). Use with: playwriter -s ${result.id} -e "..."`)
-        console.log(pc.dim('context.pages()[0] is the tab where the user started sharing. Remote control is not a security sandbox.'))
-        console.log(pc.dim('The user can revoke access anytime with Stop sharing on the Remote ON dropdown.'))
-      } catch (error: any) {
-        console.error(`Error: ${error.message}`)
-        process.exit(1)
-      }
-      return
-    }
-
-    // --browser headless: launch headless Chrome via chromium.launch(), no extension
-    if (options.browser === 'headless') {
-      warnExtensionOnlyFlags('headless sessions')
-      try {
-        await ensureRelayForSessionCreation(isLocal)
-        const serverUrl = await getServerUrl(options.host)
-        const response = await fetch(`${serverUrl}/cli/session/new`, {
-          method: 'POST',
-          headers: buildAuthHeaders({ token: options.token, json: true }),
-          body: JSON.stringify({ headless: true, cwd: process.cwd(), cloudAuth: getRelayCloudAuth() }),
-        })
-        if (!response.ok) {
-          const text = await response.text()
-          if (text.includes('Could not find a supported browser binary')) {
-            console.error('No Chrome browser found. Install one first:')
-            console.error('')
-            console.error('  playwriter browser install')
-            console.error('')
-            console.error('This downloads Chrome for Testing from Google.')
-            process.exit(1)
-          }
-          console.error(`Error: ${response.status} ${text}`)
-          process.exit(1)
-        }
-        const result = (await response.json()) as { id: string; warning?: string | null }
-        printSessionWarning(result)
-        printSessionCreated(`Session ${result.id} created (headless). Use with: playwriter -s ${result.id} -e "..."`)
-      } catch (error: any) {
-        if (error.message?.includes('Could not find a supported browser binary')) {
-          console.error('No Chrome browser found. Install one first:')
-          console.error('')
-          console.error('  playwriter browser install')
-          console.error('')
-          console.error('This downloads Chrome for Testing from Google.')
-          process.exit(1)
-        }
-        console.error(`Error: ${error.message}`)
-        process.exit(1)
-      }
-      return
-    }
-    // goke 6.6: optional-value flags are string | undefined
-    //   `--direct ws://...` → 'ws://...' (explicit endpoint)
-    //   `--direct`          → ''          (bare flag, auto-discover)
-    //   (omitted)           → undefined   (don't use direct CDP)
-    const directEndpoint = options.direct || null
-
-    // If --direct with explicit endpoint, resolve it (handles host:port → ws://) then skip discovery
-    if (directEndpoint) {
-      warnExtensionOnlyFlags('direct CDP sessions')
-      let cdpEndpoint: string
-      try {
-        cdpEndpoint = await resolveDirectInput(directEndpoint)
-      } catch (error: any) {
-        console.error(`Error: ${error.message}`)
-        process.exit(1)
-      }
-      await ensureRelayForSessionCreation(isLocal)
-      const serverUrl = await getServerUrl(options.host)
-      const result = await createDirectSession({ serverUrl, cdpEndpoint, token: options.token })
-      printSessionWarning(result)
-      printSessionCreated(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
-      return
-    }
-
-    // If --direct with no endpoint, discover Chrome instances
-    if (options.direct === '') {
-      warnExtensionOnlyFlags('direct CDP sessions')
-      if (!isLocal) {
-        console.error('Error: --direct auto-discovery only works locally.')
-        console.error('For remote relay, pass an explicit endpoint reachable from the relay host:')
-        console.error('  playwriter session new --host <host> --direct ws://relay-host:9222/devtools/browser/...')
-        process.exit(1)
-      }
-      await ensureRelayForSessionCreation(isLocal)
-      console.log(pc.dim('Discovering Chrome instances with debugging enabled...'))
-      const instances = await discoverChromeInstances()
-
-      if (instances.length === 0) {
-        console.error('No Chrome instances with debugging enabled found.')
-        console.error('')
-        console.error('Enable debugging in one of these ways:')
-        console.error('  1. Open chrome://inspect/#remote-debugging in Chrome')
-        console.error('  2. Launch Chrome with: chrome --remote-debugging-port=9222')
-        process.exit(1)
-      }
-
-      if (instances.length === 1 && !options.browser) {
-        const instance = instances[0]
-        const serverUrl = await getServerUrl(options.host)
-        const result = await createDirectSession({ serverUrl, cdpEndpoint: instance.wsUrl, browser: instance.browser, profiles: instance.profiles, token: options.token })
-        printSessionWarning(result)
-        const profileLabel = formatInstanceProfiles(instance)
-        printSessionCreated(
-          `Session ${result.id} created (direct CDP, ${instance.browser}${profileLabel}). Use with: playwriter -s ${result.id} -e "..."`,
-        )
-        return
-      }
-
-      // Multiple instances or --browser specified
-      const directOptions = instances.map((instance) => {
-        return instanceToBrowserOption(instance)
-      })
-
-      if (options.browser) {
-        const selected = directOptions.find((opt) => {
-          return opt.key === options.browser
-        })
-        if (!selected) {
-          await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: false })
-          console.error(`Browser not found: ${options.browser}`)
-          console.error('Available: ' + directOptions.map((opt) => opt.key).join(', '))
-          process.exit(1)
-        }
-        const serverUrl = await getServerUrl(options.host)
-        const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles, token: options.token })
-        printSessionWarning(result)
-        printSessionCreated(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
-        return
-      }
-
-      printBrowserTable(directOptions)
-      console.log('\nRun again with --browser <key>.')
+    const tabGroup = options.tabGroup ? String(options.tabGroup).trim() : undefined
+    if (options.tabGroup && !tabGroup) {
+      console.error('Error: --tab-group must be a non-empty name')
       process.exit(1)
     }
+    const tabGroupColor = options.tabGroupColor ? normalizeTabGroupColor(options.tabGroupColor) : undefined
+    if (options.tabGroupColor && !tabGroupColor) {
+      console.error(`Error: --tab-group-color must be one of: ${TAB_GROUP_ALL_COLORS.join(', ')}`)
+      process.exit(1)
+    }
+    // NaN for non-integers, so newSession rejects it with the range message
+    const cloudTimeoutMinutes = options.timeout === undefined ? undefined : /^\d+$/.test(options.timeout) ? Number(options.timeout) : NaN
 
-    // Default mode: extension-based (existing behavior)
-    let extensions: ExtensionStatus[] = []
-
-    if (isLocal) {
-      await ensureRelayServer({ logger: console })
-      extensions = await waitForConnectedExtensions({
-        timeoutMs: 12000,
-        pollIntervalMs: 250,
+    try {
+      const result = await newSession({
+        relay: { host: options.host, token: options.token },
+        cwd: process.cwd(),
+        client: 'cli',
+        browser: options.browser,
+        // goke: bare --direct is '', omitted is undefined
+        direct: options.direct,
+        remote: options.remote,
+        tabGroup,
+        tabGroupColor: tabGroupColor || undefined,
+        patchright: options.patchright || undefined,
+        proxy: options.proxy,
+        customProxy: options.customProxy,
+        cloudTimeoutMinutes,
+        disableProxyBandwidthAcceleration: options.disableProxyBandwidthAcceleration,
         logger: console,
       })
-
-      if (extensions.length === 0) {
-        console.log(pc.dim('Waiting briefly for extension to reconnect...'))
-        extensions = await waitForConnectedExtensions({
-          timeoutMs: 10000,
-          pollIntervalMs: 250,
-          logger: console,
-        })
+      for (const warning of result.warnings) {
+        console.error(pc.yellow(`Warning: ${warning}`))
       }
-    } else {
-      extensions = getLocalExtensionStatuses(
-        await fetchExtensionsStatus({ host: options.host, token: options.token }),
-      )
-    }
-
-    if (extensions.length === 0) {
-      // Before giving up, check if cloud browsers are available
-      const cloudOptions = await discoverCloudBrowsers()
-      if (cloudOptions.length > 0) {
-        // Cloud-only user: skip extension requirement, show cloud options
-        await ensureRelayForSessionCreation(isLocal)
-        const allOptions: BrowserOption[] = [...cloudOptions]
-
-        if (options.browser) {
-          const selected = allOptions.find((opt) => { return opt.key === options.browser })
-          if (!selected) {
-            await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: true })
-            console.error(`Browser not found: ${options.browser}`)
-            console.error('Available: ' + allOptions.map((opt) => opt.key).join(', '))
-            process.exit(1)
-          }
-          const serverUrl = await getServerUrl(options.host)
-          // Reuse existing running VM if selected, otherwise create new
-          const result = selected.activeCloudSessionId
-            ? await attachExistingCloudSession({
-              serverUrl,
-              cloudSessionId: selected.activeCloudSessionId,
-              blockProxyResources: computeBlockProxyResources(options),
-              token: options.token,
-            })
-            : await createCloudSession({
-              serverUrl,
-              proxyRegion: options.proxy,
-              customProxy: options.customProxy,
-              timeout: parseCloudTimeout(options.timeout),
-              blockProxyResources: computeBlockProxyResources(options),
-              token: options.token,
-            })
-          printSessionCreated(`Session ${result.id} created (cloud). Use with: playwriter -s ${result.id} -e "..."`)
-          if (result.liveUrl) {
-            console.log(pc.dim(`Live view: ${result.liveUrl}`))
-          }
-          return
-        }
-
-        console.log('\nNo local browsers detected, but cloud browsers are available:\n')
-        printBrowserTable(allOptions)
+      if (result.kind === 'choose') {
+        console.log(`\n${result.message}\n`)
+        console.log(formatBrowserTable(result.options))
         console.log('\nRun again with --browser <key>.')
         process.exit(1)
       }
-
-      if (options.browser) {
-        await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: false })
+      const { session } = result
+      const label = session.label ? ` (${session.label})` : ''
+      console.log(`Session ${session.id} created${label}. Use with: playwriter -s ${session.id} -e "..."`)
+      console.error('run playwriter skill to see how to use playwriter if not run already')
+      for (const note of session.notes) {
+        console.log(pc.dim(note))
       }
-      console.error('ERROR code=extension_not_connected')
-      console.error(EXTENSION_NOT_CONNECTED_ERROR)
-      console.error(pc.dim('Tip: Use --direct to connect via Chrome DevTools Protocol instead.'))
-      console.error(pc.dim('Tip: Run `playwriter cloud login` to use cloud browsers.'))
+      if (session.liveUrl) {
+        console.log(pc.dim(`Live view: ${session.liveUrl}`))
+      }
+      if (session.mode === 'extension') {
+        printCloudTip()
+      }
+    } catch (error) {
+      if (error instanceof ExtensionNotConnectedError) {
+        console.error(`ERROR code=${error.code}`)
+        console.error(error.message)
+        console.error(pc.dim('Tip: Use --direct to connect via Chrome DevTools Protocol instead.'))
+        console.error(pc.dim('Tip: Run `playwriter cloud login` to use cloud browsers.'))
+        process.exit(1)
+      }
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`)
       process.exit(1)
     }
-
-    // Warn if any connected extension was built with an older playwriter version
-    for (const ext of extensions) {
-      const warning = getExtensionOutdatedWarning(ext.playwriterVersion)
-      if (warning) {
-        console.error(warning)
-        break
-      }
-    }
-
-    // Single extension: auto-select (unchanged behavior)
-    if (extensions.length === 1 && !options.browser) {
-      const selectedExtension = extensions[0]
-      try {
-        const serverUrl = await getServerUrl(options.host)
-        const extensionId =
-          selectedExtension.extensionId === 'default'
-            ? null
-            : selectedExtension.stableKey || selectedExtension.extensionId
-        const cwd = process.cwd()
-        const response = await fetch(`${serverUrl}/cli/session/new`, {
-          method: 'POST',
-          headers: buildAuthHeaders({ token: options.token, json: true }),
-          body: JSON.stringify({ extensionId, cwd, cloudAuth: getRelayCloudAuth(), tabGroup, tabGroupColor, patchright }),
-        })
-        if (!response.ok) {
-          const text = await response.text()
-          console.error(`Error: ${response.status} ${text}`)
-          process.exit(1)
-        }
-        const result = (await response.json()) as {
-          id: string
-          extensionId: string | null
-          warning?: string | null
-          tabGroup?: string | null
-        }
-        printSessionWarning(result)
-        warnIfTabGroupIgnored(tabGroup || tabGroupColor, result)
-        printSessionCreated(`Session ${result.id} created. Use with: playwriter -s ${result.id} -e "..."`)
-        printCloudTip()
-      } catch (error: any) {
-        console.error(`Error: ${error.message}`)
-        process.exit(1)
-      }
-      return
-    }
-
-    // Multiple extensions: also discover direct CDP instances and cloud browsers.
-    // Direct discovery only works locally — remote relay can't reach local Chrome debug ports.
-    const directInstances = isLocal ? await (async () => {
-      console.log(pc.dim('Discovering additional Chrome instances...'))
-      return await discoverChromeInstances()
-    })() : []
-
-    // Fetch cloud browser slots if user is logged in
-    const cloudOptions = await discoverCloudBrowsers()
-
-    const allOptions: BrowserOption[] = [
-      ...extensions.map((ext) => {
-        return {
-          key: ext.stableKey || ext.extensionId,
-          type: 'extension' as const,
-          browser: ext.browser || 'Chrome',
-          profile: ext.profile?.email || '(not signed in)',
-          extensionId: ext.extensionId === 'default' ? null : ext.stableKey || ext.extensionId,
-        }
-      }),
-      ...directInstances.map((instance) => {
-        return instanceToBrowserOption(instance)
-      }),
-      ...cloudOptions,
-    ]
-
-    if (options.browser) {
-      const selected = allOptions.find((opt) => {
-        return opt.key === options.browser
-      })
-      if (!selected) {
-        await handleCloudBrowserNotFound(options.browser, { hasCloudOptions: cloudOptions.length > 0 })
-        console.error(`Browser not found: ${options.browser}`)
-        console.error('Available: ' + allOptions.map((opt) => opt.key).join(', '))
-        process.exit(1)
-      }
-
-      try {
-        const serverUrl = await getServerUrl(options.host)
-        if (selected.type === 'cloud') {
-          warnExtensionOnlyFlags('cloud sessions')
-          // Reuse existing running VM if selected, otherwise create new
-          const result = selected.activeCloudSessionId
-            ? await attachExistingCloudSession({
-              serverUrl,
-              cloudSessionId: selected.activeCloudSessionId,
-              blockProxyResources: computeBlockProxyResources(options),
-              token: options.token,
-            })
-            : await createCloudSession({
-              serverUrl,
-              proxyRegion: options.proxy,
-              customProxy: options.customProxy,
-              timeout: parseCloudTimeout(options.timeout),
-              blockProxyResources: computeBlockProxyResources(options),
-              token: options.token,
-            })
-          printSessionCreated(`Session ${result.id} created (cloud). Use with: playwriter -s ${result.id} -e "..."`)
-          if (result.liveUrl) {
-            console.log(pc.dim(`Live view: ${result.liveUrl}`))
-          }
-        } else if (selected.type === 'direct') {
-          warnExtensionOnlyFlags('direct CDP sessions')
-          const result = await createDirectSession({ serverUrl, cdpEndpoint: selected.wsUrl!, browser: selected.browser, profiles: selected.profiles, token: options.token })
-          printSessionWarning(result)
-          printSessionCreated(`Session ${result.id} created (direct CDP). Use with: playwriter -s ${result.id} -e "..."`)
-        } else {
-          const cwd = process.cwd()
-          const response = await fetch(`${serverUrl}/cli/session/new`, {
-            method: 'POST',
-            headers: buildAuthHeaders({ token: options.token, json: true }),
-            body: JSON.stringify({
-              extensionId: selected.extensionId,
-              cwd,
-              cloudAuth: getRelayCloudAuth(),
-              tabGroup,
-              tabGroupColor,
-              patchright,
-            }),
-          })
-          if (!response.ok) {
-            const text = await response.text()
-            console.error(`Error: ${response.status} ${text}`)
-            process.exit(1)
-          }
-          const result = (await response.json()) as { id: string; warning?: string | null; tabGroup?: string | null }
-          printSessionWarning(result)
-          warnIfTabGroupIgnored(tabGroup || tabGroupColor, result)
-          printSessionCreated(`Session ${result.id} created. Use with: playwriter -s ${result.id} -e "..."`)
-          printCloudTip()
-        }
-      } catch (error: any) {
-        console.error(`Error: ${error.message}`)
-        process.exit(1)
-      }
-      return
-    }
-
-    // Show unified table
-    console.log('\nMultiple browsers detected:\n')
-    printBrowserTable(allOptions)
-    console.log('\nRun again with --browser <key>.')
-    process.exit(1)
   })
-
-async function ensureRelayForSessionCreation(isLocal: boolean): Promise<void> {
-  if (isLocal) {
-    await ensureRelayServer({ logger: console })
-  }
-}
-
-/** Old relays don't echo tabGroup from /cli/session/new — warn instead of silently ignoring the flag. */
-function warnIfTabGroupIgnored(requested: string | undefined, result: { tabGroup?: string | null }): void {
-  if (requested && result.tabGroup === undefined) {
-    console.error(
-      pc.yellow('Warning: the running relay does not support tab groups. Restart it (kill port 19988) after updating playwriter.'),
-    )
-  }
-}
-
-async function createDirectSession({
-  serverUrl,
-  cdpEndpoint,
-  browser,
-  profiles,
-  token,
-}: {
-  serverUrl: string
-  cdpEndpoint: string
-  browser?: string
-  profiles?: Array<{ name: string; email: string }>
-  token?: string
-}): Promise<{ id: string; warning?: string | null }> {
-  const cwd = process.cwd()
-  const response = await fetch(`${serverUrl}/cli/session/new`, {
-    method: 'POST',
-    headers: buildAuthHeaders({ token, json: true }),
-    body: JSON.stringify({ cdpEndpoint, cwd, browser, profiles, cloudAuth: getRelayCloudAuth() }),
-  })
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`${response.status} ${text}`)
-  }
-  return (await response.json()) as { id: string; warning?: string | null }
-}
-
-function instanceToBrowserOption(instance: DiscoveredInstance): BrowserOption {
-  return {
-    key: `direct:${instance.port}`,
-    type: 'direct',
-    browser: instance.browser,
-    profile: formatInstanceProfiles(instance),
-    wsUrl: instance.wsUrl,
-    profiles: instance.profiles,
-  }
-}
-
-function formatInstanceProfiles(instance: DiscoveredInstance): string {
-  if (instance.profiles.length === 0) {
-    return '(unknown)'
-  }
-  return instance.profiles
-    .map((p) => {
-      return p.email ? `${p.name} (${p.email})` : p.name
-    })
-    .join(', ')
-}
-
-/** Discover cloud sessions from the website API, if logged in.
- *  Also adds a "cloud-new" option to create a new cloud browser. */
-async function discoverCloudBrowsers(): Promise<BrowserOption[]> {
-  const client = getCloudClient()
-  if (!client) return []
-
-  try {
-    const { sessions } = await client.getStatus()
-    const options: BrowserOption[] = sessions.map((s) => {
-      return {
-        key: `cloud-${s.index}`,
-        type: 'cloud' as const,
-        browser: 'Chromium',
-        profile: `(running, expires ${new Date(s.timeoutAt).toLocaleTimeString()})`,
-        activeCloudSessionId: s.cloudSessionId,
-      }
-    })
-    // Always offer a "cloud-new" option to spin up a fresh VM
-    options.push({
-      key: 'cloud',
-      type: 'cloud' as const,
-      browser: 'Chromium',
-      profile: '(new cloud browser)',
-    })
-    return options
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    console.error(pc.dim(`Cloud browser discovery failed: ${msg}`))
-    return []
-  }
-}
-
-/** Compute whether to block images/video/fonts for proxy bandwidth savings.
- *  Enabled by default when proxy or custom-proxy is set, disabled via
- *  --disable-proxy-bandwidth-acceleration. */
-function computeBlockProxyResources(options: { proxy?: string; customProxy?: string; disableProxyBandwidthAcceleration?: boolean }): boolean | undefined {
-  const proxyEnabled = !!(options.proxy || options.customProxy)
-  if (!proxyEnabled) return undefined // no proxy, no blocking needed
-  if (options.disableProxyBandwidthAcceleration) return false
-  return true
-}
-
-/** Check if user requested a cloud browser that isn't available.
- *  Shows helpful login/subscribe instructions instead of a generic "not found" error.
- *  @param hasCloudOptions whether any cloud options were discovered (to distinguish
- *         "not logged in" from "typo in cloud key") */
-async function handleCloudBrowserNotFound(browserKey: string, { hasCloudOptions }: { hasCloudOptions: boolean }): Promise<boolean> {
-  if (!browserKey.startsWith('cloud')) return false
-  // If cloud options exist, this is a typo (e.g. cloud-99) — let the
-  // generic "Browser not found" message show the available list instead.
-  if (hasCloudOptions) return false
-  const auth = loadCloudAuth()
-  if (!auth) {
-    console.error('Cloud browsers require authentication.')
-    console.error('')
-    console.error('  Option 1: Run `playwriter cloud login` (interactive browser flow)')
-    console.error('  Option 2: Set PLAYWRITER_API_KEY env var (create one at playwriter.dev/dashboard)')
-    console.error('')
-    console.error('  Then subscribe at playwriter.dev/dashboard and run `playwriter session new --browser cloud`')
-  } else {
-    // Verify token is still valid with a quick API check
-    const client = getCloudClient()
-    const tokenValid = await (async () => {
-      if (!client) return false
-      try {
-        await client.getStatus()
-        return true
-      } catch {
-        return false
-      }
-    })()
-
-    if (!tokenValid) {
-      console.error('Cloud authentication expired. Please re-authenticate.')
-      console.error('')
-      console.error('  Run `playwriter cloud login` or set PLAYWRITER_API_KEY env var.')
-    } else {
-      console.error('No cloud browser sessions available.')
-      console.error('')
-      console.error('  You are logged in, but you may need an active subscription.')
-      console.error('  Run `playwriter cloud subscribe` to manage your plan.')
-      console.error('  Then run `playwriter session new --browser cloud` to start a cloud browser.')
-    }
-  }
-  process.exit(1)
-}
-
-/** Print a warning from the relay's session new response if present. */
-function printSessionWarning(result: { warning?: string | null }): void {
-  if (result.warning) {
-    console.error(pc.yellow(`Warning: ${result.warning}`))
-  }
-}
-
-function printSessionCreated(line: string): void {
-  console.log(line)
-  console.error('run playwriter skill to see how to use playwriter if not run already')
-}
 
 function printCloudTip(): void {
   console.log('')
   console.log(
     pc.dim('Tip: Need stealth browsing, VPS control, or auto CAPTCHA solving? Run `playwriter cloud login` or set PLAYWRITER_API_KEY'),
   )
-  console.log(
-    pc.dim('     to control a browser in the cloud instead of local Chrome.'),
-  )
-}
-
-/** Parse a custom proxy string (host:port or user:pass@host:port) into an object. */
-function parseCustomProxy(proxyStr: string): { host: string; port: number; username?: string; password?: string } {
-  // Format: [user:pass@]host:port
-  const atIdx = proxyStr.lastIndexOf('@')
-  let hostPort: string
-  let username: string | undefined
-  let password: string | undefined
-
-  if (atIdx !== -1) {
-    const userPass = proxyStr.slice(0, atIdx)
-    hostPort = proxyStr.slice(atIdx + 1)
-    const colonIdx = userPass.indexOf(':')
-    if (colonIdx !== -1) {
-      username = userPass.slice(0, colonIdx)
-      password = userPass.slice(colonIdx + 1)
-    } else {
-      username = userPass
-    }
-  } else {
-    hostPort = proxyStr
-  }
-
-  const lastColon = hostPort.lastIndexOf(':')
-  if (lastColon === -1) {
-    throw new Error(`Invalid proxy format: missing port in "${proxyStr}". Expected host:port or user:pass@host:port`)
-  }
-  const host = hostPort.slice(0, lastColon)
-  const port = parseInt(hostPort.slice(lastColon + 1), 10)
-  if (isNaN(port)) {
-    throw new Error(`Invalid proxy port in "${proxyStr}"`)
-  }
-
-  return { host, port, username, password }
-}
-
-/** Parse and validate the --timeout CLI option (integer 1-240). */
-function parseCloudTimeout(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined
-  if (!/^\d+$/.test(value)) {
-    throw new Error('--timeout must be an integer from 1 to 240')
-  }
-  const timeout = Number(value)
-  if (timeout < 1 || timeout > 240) {
-    throw new Error('--timeout must be between 1 and 240 minutes')
-  }
-  return timeout
-}
-
-/** Connect to a cloud browser and create a playwriter session via the relay. */
-async function createCloudSession({
-  serverUrl,
-  proxyRegion,
-  customProxy,
-  timeout,
-  blockProxyResources,
-  token,
-}: {
-  serverUrl: string
-  proxyRegion?: string
-  customProxy?: string
-  /** Cloud browser timeout in minutes (1-240, default 60) */
-  timeout?: number
-  /** Block images/video/fonts to save proxy bandwidth (default: true when proxy is enabled) */
-  blockProxyResources?: boolean
-  token?: string
-}): Promise<{ id: string; liveUrl: string | null }> {
-  const client = getCloudClient()
-  if (!client) {
-    throw new Error('Not logged in to cloud. Run `playwriter cloud login` first.')
-  }
-
-  const connectResult = await client.connect({
-    proxyRegion,
-    customProxy: customProxy ? parseCustomProxy(customProxy) : undefined,
-    timeout,
-  })
-
-  if (!connectResult.cdpUrl) {
-    throw new Error('Cloud browser returned no CDP URL. The VM may have failed to start.')
-  }
-
-  // Normalize https:// CDP URL to wss:// for the relay
-  const cdpEndpoint = await resolveDirectInput(connectResult.cdpUrl)
-
-  // Create a playwriter session via the relay using the CDP URL (same as --direct).
-  // Also pass cloud metadata so the relay can track idle timeout and auto-disconnect.
-  const auth = loadCloudAuth()!
-  const cwd = process.cwd()
-  let response: Response
-  try {
-    response = await fetch(`${serverUrl}/cli/session/new`, {
-      method: 'POST',
-      headers: buildAuthHeaders({ token, json: true }),
-      body: JSON.stringify({
-        cdpEndpoint,
-        cwd,
-        browser: 'Chromium (cloud)',
-        cloud: {
-          cloudSessionId: connectResult.cloudSessionId,
-          cloudBaseUrl: auth.baseUrl,
-          cloudToken: auth.token,
-          timeoutAt: connectResult.timeoutAt,
-          blockProxyResources,
-        },
-      }),
-    })
-  } catch (cause) {
-    // Relay session creation failed — stop the cloud VM so we don't leak a paid resource
-    await client.disconnect(connectResult.cloudSessionId).catch(() => {})
-    throw new Error('Failed to create relay session', { cause })
-  }
-
-  if (!response.ok) {
-    await client.disconnect(connectResult.cloudSessionId).catch(() => {})
-    const text = await response.text()
-    throw new Error(`${response.status} ${text}`)
-  }
-  const result = (await response.json()) as { id: string }
-
-  return { id: result.id, liveUrl: connectResult.cdpUrl ? buildLiveUrl(connectResult.cdpUrl, auth.baseUrl) : null }
-}
-
-/** Reattach to an existing running cloud browser VM instead of creating a new one.
- *  Fetches the session's cdpUrl from the cloud API and creates a relay session. */
-async function attachExistingCloudSession({
-  serverUrl,
-  cloudSessionId,
-  blockProxyResources,
-  token,
-}: {
-  serverUrl: string
-  cloudSessionId: string
-  blockProxyResources?: boolean
-  token?: string
-}): Promise<{ id: string; liveUrl: string | null }> {
-  const client = getCloudClient()
-  if (!client) {
-    throw new Error('Not logged in to cloud. Run `playwriter cloud login` first.')
-  }
-
-  const session = await client.getSessionStatus(cloudSessionId)
-  if (!session || session.status !== 'active') {
-    throw new Error('Cloud session is no longer active. It may have timed out.')
-  }
-  if (!session.cdpUrl) {
-    throw new Error('Cloud session has no CDP URL available.')
-  }
-
-  const cdpEndpoint = await resolveDirectInput(session.cdpUrl)
-  const auth = loadCloudAuth()!
-  const cwd = process.cwd()
-
-  const response = await fetch(`${serverUrl}/cli/session/new`, {
-    method: 'POST',
-    headers: buildAuthHeaders({ token, json: true }),
-    body: JSON.stringify({
-      cdpEndpoint,
-      cwd,
-      browser: 'Chromium (cloud)',
-      cloud: {
-        cloudSessionId,
-        cloudBaseUrl: auth.baseUrl,
-        cloudToken: auth.token,
-        timeoutAt: session.timeoutAt,
-        blockProxyResources,
-      },
-    }),
-  })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`${response.status} ${text}`)
-  }
-  const result = (await response.json()) as { id: string }
-
-  return { id: result.id, liveUrl: session.cdpUrl ? buildLiveUrl(session.cdpUrl, auth.baseUrl) : null }
-}
-
-function printBrowserTable(options: BrowserOption[]): void {
-  const typeLabels = options.map((opt) => {
-    if (opt.type === 'direct') return '--direct'
-    if (opt.type === 'cloud') return 'cloud'
-    return opt.type
-  })
-  const keyWidth = Math.max(3, ...options.map((opt) => opt.key.length))
-  const typeWidth = Math.max(4, ...typeLabels.map((t) => t.length))
-  const browserWidth = Math.max(7, ...options.map((opt) => opt.browser.length))
-
-  console.log(
-    'KEY'.padEnd(keyWidth) + '  ' + 'TYPE'.padEnd(typeWidth) + '  ' + 'BROWSER'.padEnd(browserWidth) + '  ' + 'PROFILE',
-  )
-  console.log('-'.repeat(keyWidth + typeWidth + browserWidth + 20))
-  for (let i = 0; i < options.length; i++) {
-    const opt = options[i]
-    console.log(
-      opt.key.padEnd(keyWidth) +
-        '  ' +
-        typeLabels[i].padEnd(typeWidth) +
-        '  ' +
-        opt.browser.padEnd(browserWidth) +
-        '  ' +
-        opt.profile,
-    )
-  }
+  console.log(pc.dim('     to control a browser in the cloud instead of local Chrome.'))
 }
 
 cli
@@ -1241,42 +393,10 @@ cli
       await ensureRelayServer({ logger: console })
     }
 
-    const serverUrl = await getServerUrl(options.host)
-    let sessions: Array<{
-      id: string
-      stateKeys: string[]
-      browser: string | null
-      profile: { email: string; id: string } | null
-      extensionId: string | null
-      cwd: string | null
-      tabGroup?: string | null
-    }> = []
-
-    try {
-      const response = await fetch(`${serverUrl}/cli/sessions`, {
-        headers: buildAuthHeaders({ token: options.token }),
-        signal: AbortSignal.timeout(2000),
-      })
-      if (!response.ok) {
-        console.error(`Error: ${response.status} ${await response.text()}`)
-        process.exit(1)
-      }
-      const result = (await response.json()) as {
-        sessions: Array<{
-          id: string
-          stateKeys: string[]
-          browser: string | null
-          profile: { email: string; id: string } | null
-          extensionId: string | null
-          cwd: string | null
-          tabGroup?: string | null
-        }>
-      }
-      sessions = result.sessions
-    } catch (error: any) {
+    const sessions = await listSessions({ host: options.host, token: options.token }).catch((error: Error) => {
       console.error(`Error: ${error.message}`)
       process.exit(1)
-    }
+    })
 
     if (sessions.length === 0) {
       console.log('No active sessions')
@@ -1337,25 +457,12 @@ cli
   .option('--host <host>', 'Remote relay server host')
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .action(async (sessionId, options) => {
-    const serverUrl = await getServerUrl(options.host)
-
     if (!options.host && !process.env.PLAYWRITER_HOST) {
       await ensureRelayServer({ logger: console })
     }
 
     try {
-      const response = await fetch(`${serverUrl}/cli/session/delete`, {
-        method: 'POST',
-        headers: buildAuthHeaders({ token: options.token, json: true }),
-        body: JSON.stringify({ sessionId }),
-      })
-
-      if (!response.ok) {
-        const result = (await response.json()) as { error: string }
-        console.error(`Error: ${result.error}`)
-        process.exit(1)
-      }
-
+      await deleteSession({ relay: { host: options.host, token: options.token }, sessionId: String(sessionId) })
       console.log(`Session ${sessionId} deleted.`)
     } catch (error: any) {
       console.error(`Error: ${error.message}`)
@@ -1372,9 +479,9 @@ cli
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .action(async (sessionId, options) => {
     const tabGroup = options.tabGroup ? String(options.tabGroup).trim() : ''
-    const tabGroupColor: string = (() => {
+    const tabGroupColor = (() => {
       if (!options.tabGroupColor) {
-        return ''
+        return undefined
       }
       const normalized = normalizeTabGroupColor(options.tabGroupColor)
       if (!normalized) {
@@ -1403,53 +510,17 @@ cli
     if (!options.host && !process.env.PLAYWRITER_HOST) {
       await ensureRelayServer({ logger: console })
     }
-    const serverUrl = await getServerUrl(options.host)
 
     try {
-      const response = await fetch(`${serverUrl}/cli/session/update`, {
-        method: 'POST',
-        headers: buildAuthHeaders({ token: options.token, json: true }),
-        body: JSON.stringify({
-          sessionId,
-          tabGroup: tabGroup || undefined,
-          tabGroupColor: tabGroupColor || undefined,
-          patchright,
-        }),
+      const result = await updateSession({
+        relay: { host: options.host, token: options.token },
+        sessionId: String(sessionId),
+        tabGroup: tabGroup || undefined,
+        tabGroupColor: tabGroupColor || undefined,
+        patchright,
       })
-
-      if (!response.ok) {
-        const text = await response.text()
-        const parsed = (() => {
-          try {
-            return JSON.parse(text) as { error?: string }
-          } catch {
-            return null
-          }
-        })()
-        if (response.status === 404 && !parsed?.error) {
-          // Old relays don't have /cli/session/update
-          console.error('Error: the running relay does not support session update. Restart it (kill port 19988) after updating playwriter.')
-          process.exit(1)
-        }
-        console.error(`Error: ${parsed?.error || `${response.status} ${text}`}`)
-        process.exit(1)
-      }
-
-      const result = (await response.json()) as {
-        success: boolean
-        patchright?: boolean
-        reconnected?: boolean
-        tabGroup?: string
-        tabGroupColor?: string
-        movedTabs?: number
-        warning?: string
-      }
       if (result.warning) {
         console.error(pc.yellow(`Warning: ${result.warning}`))
-      }
-      if (patchright !== undefined && result.patchright === undefined) {
-        console.error('Error: the running relay does not support --patchright in session update. Restart it (kill port 19988) after updating playwriter.')
-        process.exit(1)
       }
       if (result.patchright !== undefined) {
         const driver = result.patchright ? 'Patchright' : 'Playwright'
@@ -1475,27 +546,16 @@ cli
   .option('--host <host>', 'Remote relay server host')
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .action(async (sessionId, options) => {
-    const cwd = process.cwd()
-    const serverUrl = await getServerUrl(options.host)
-
     if (!options.host && !process.env.PLAYWRITER_HOST) {
       await ensureRelayServer({ logger: console })
     }
 
     try {
-      const response = await fetch(`${serverUrl}/cli/reset`, {
-        method: 'POST',
-        headers: buildAuthHeaders({ token: options.token, json: true }),
-        body: JSON.stringify({ sessionId, cwd }),
+      const result = await resetSession({
+        relay: { host: options.host, token: options.token },
+        sessionId: String(sessionId),
+        cwd: process.cwd(),
       })
-
-      if (!response.ok) {
-        const text = await response.text()
-        console.error(`Error: ${response.status} ${text}`)
-        process.exit(1)
-      }
-
-      const result = (await response.json()) as { success: boolean; pagesCount: number }
       console.log(`Connection reset successfully. ${result.pagesCount} page(s) available.`)
     } catch (error: any) {
       console.error(`Error: ${error.message}`)
@@ -1663,7 +723,7 @@ cli
         const newResponse = await fetch(`${serverUrl}/cli/session/new`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ cwd: process.cwd(), cloudAuth: getRelayCloudAuth() }),
+          body: JSON.stringify({ cwd: process.cwd(), cloudAuth: loadCloudAuth() ?? undefined }),
         })
         const newResult = (await newResponse.json()) as { id?: string; error?: string }
         if (!newResponse.ok || !newResult.id) {
@@ -2043,52 +1103,14 @@ cli
   .option('--host <host>', z.string().describe('Remote relay server host'))
   .option('--token <token>', 'Authentication token (or use PLAYWRITER_TOKEN env var)')
   .action(async (options) => {
-    const isLocal = !options.host && !process.env.PLAYWRITER_HOST
-
-    // Start relay if local so the extension can connect, then fetch in parallel
-    if (isLocal) {
-      await ensureRelayServer({ logger: console })
+    const { options: allOptions, warnings } = await discoverBrowserOptions({
+      relay: { host: options.host, token: options.token },
+      extensionWaitMs: BROWSER_LIST_EXTENSION_WAIT_MS,
+      logger: console,
+    })
+    for (const warning of warnings) {
+      console.error(pc.dim(warning))
     }
-
-    const [extensions, directInstances] = await Promise.all([
-      isLocal
-        ? waitForConnectedExtensions({ timeoutMs: 2000, pollIntervalMs: 200, logger: console })
-        : fetchExtensionsStatus({ host: options.host, token: options.token }),
-      isLocal ? discoverChromeInstances() : Promise.resolve([] as DiscoveredInstance[]),
-    ])
-
-    const cloudOptions = await discoverCloudBrowsers()
-
-    // Check if a Chrome binary is available for headless mode
-    const headlessOption: BrowserOption[] = await (async () => {
-      try {
-        const { resolveBrowserExecutablePath } = await import('./browser-config.js')
-        resolveBrowserExecutablePath()
-        return [{
-          key: 'headless',
-          type: 'headless' as const,
-          browser: 'Chrome (Headless)',
-          profile: '-',
-        }]
-      } catch {
-        return []
-      }
-    })()
-
-    const allOptions: BrowserOption[] = [
-      ...extensions.map((ext) => {
-        return {
-          key: ext.stableKey || ext.extensionId,
-          type: 'extension' as const,
-          browser: ext.browser || 'Chrome',
-          profile: ext.profile?.email || '(not signed in)',
-          extensionId: ext.extensionId === 'default' ? null : ext.stableKey || ext.extensionId,
-        }
-      }),
-      ...directInstances.map(instanceToBrowserOption),
-      ...headlessOption,
-      ...cloudOptions,
-    ]
 
     if (allOptions.length === 0) {
       console.log('No browsers detected.\n')
@@ -2099,7 +1121,7 @@ cli
       return
     }
 
-    printBrowserTable(allOptions)
+    console.log(formatBrowserTable(allOptions))
     console.log('')
 
     const hasDirectInstances = allOptions.some((opt) => {

@@ -24,37 +24,27 @@ npx -y @playwriter/install-mcp playwriter@latest
 ## Using the MCP
 
 1. Enable the extension on at least one tab (click icon → turns green)
-2. MCP automatically starts relay server and connects to enabled tabs
+2. MCP automatically starts the relay server
 3. Use the `execute` tool to run Playwright code
 
-The MCP exposes:
+The first `execute` creates a **default session** on the connected browser. Each session has its own `state` and sees only the tabs it opens, plus tabs you enabled with the extension icon.
 
-- `execute` tool - run Playwright code snippets
-- `reset` tool - reconnect if connection issues occur
+| Tool | What it does |
+|---|---|
+| `execute` | Run Playwright code. Optional `session` |
+| `reset` | Reconnect a session after connection errors |
+| `session_list` | Active sessions and the browsers a new session can use |
+| `session_new` | New session on a browser key, `headless`, `cloud`, `direct` CDP or a `remote` control id. Options: `patchright`, `tabGroup`, cloud proxy |
+| `session_update` | Switch `patchright` or the tab group of a session |
+| `session_delete` | Delete a session, optionally closing its tabs |
+
+With several Chrome profiles connected, the agent calls `session_list`, then `session_new` with a browser key.
 
 ## Direct CDP (no extension needed)
 
-Connect directly to Chrome's DevTools Protocol without the extension. Set `PLAYWRITER_DIRECT` in your MCP config:
-
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["-y", "playwriter@latest"],
-      "env": {
-        "PLAYWRITER_DIRECT": "1"
-      }
-    }
-  }
-}
-```
-
-Enable debugging in Chrome first: open `chrome://inspect/#remote-debugging` or launch with `--remote-debugging-port=9222`.
+Enable debugging in Chrome: open `chrome://inspect/#remote-debugging` or launch with `--remote-debugging-port=9222`. Then the agent calls `session_new` with `direct: "auto"`, or with an explicit endpoint like `ws://127.0.0.1:9222/devtools/browser/abc` or `wss://xxx.cdp.browser-use.com`.
 
 Chrome 136+ may show an approval dialog the first time a connection is made.
-
-You can also pass an explicit WebSocket endpoint: `PLAYWRITER_DIRECT=ws://127.0.0.1:9222/devtools/browser/abc`.
 
 ## Remote Agents (Devcontainers, VMs, SSH)
 

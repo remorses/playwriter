@@ -133,28 +133,6 @@ playwriter session new --direct 192.168.1.50:9222
 playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto('https://example.com')"
 ```
 
-**MCP configuration** (for AI assistants): set the `PLAYWRITER_DIRECT` env var in your MCP client config. If the user provides a CDP URL (like `wss://xxx.cdp.browser-use.com`), use it as the value:
-
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["-y", "playwriter@latest"],
-      "env": {
-        "PLAYWRITER_DIRECT": "wss://xxx.cdp.browser-use.com"
-      }
-    }
-  }
-}
-```
-
-`PLAYWRITER_DIRECT` accepts:
-
-- `1` — auto-discover Chrome on port 9222
-- `ws://` or `wss://` URL — explicit WebSocket endpoint (local or cloud browser provider)
-- `host:port` — resolves via HTTP probe to a ws:// URL
-
 ### Remote control (drive another user's browser)
 
 When a user shares their browser with you, they send a secret **id** (created by the toolbar **Remote control** button). The user needs no playwriter install, only the extension.
@@ -415,24 +393,6 @@ Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
 
 You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs.
 
-**Direct CDP mode (no extension needed):** Playwriter can connect directly to Chrome's DevTools Protocol, bypassing the extension. This is useful in CI, Docker, headless environments, when Chrome has `--remote-debugging-port=9222`, or with cloud browser providers (e.g. `wss://xxx.cdp.browser-use.com`). If the user provides a CDP URL, set `PLAYWRITER_DIRECT` in the MCP client config:
-
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["-y", "playwriter@latest"],
-      "env": {
-        "PLAYWRITER_DIRECT": "wss://xxx.cdp.browser-use.com"
-      }
-    }
-  }
-}
-```
-
-`PLAYWRITER_DIRECT` accepts `1` (auto-discover Chrome on port 9222), a `ws://` or `wss://` endpoint (including cloud browser providers), or `host:port`.
-
 ## context variables
 
 - `state` - object persisted between calls **within your session**. Each session has its own isolated state. Use to store pages, data, listeners (e.g., `state.page = await context.newPage()`)
@@ -473,7 +433,7 @@ await cloud.sendCookies({
 
 The result contains the browser key, cookie count, domains, and skipped count. It never contains cookie values. This copies cookies only. It does not copy local storage, IndexedDB, service workers, saved passwords, or device-bound credentials.
 
-`cloud` is available for local extension, headless, and direct CLI sessions. It is not available inside managed cloud sessions, remote-control sessions, or the MCP server. Run `playwriter cloud login` or set `PLAYWRITER_API_KEY` on the CLI machine before you create the session. The CLI forwards the credentials to the relay without exposing them in the execution scope. Credentials already present on the relay machine also work.
+`cloud` is available for local extension, headless, and direct CLI sessions. It is not available inside managed cloud sessions or remote-control sessions. Run `playwriter cloud login` or set `PLAYWRITER_API_KEY` on the CLI machine before you create the session. The CLI forwards the credentials to the relay without exposing them in the execution scope. Credentials already present on the relay machine also work.
 
 ### importing local scripts
 
@@ -514,7 +474,7 @@ export async function saveTitle({ page, outputPath }) {
 **Important:** `state` is **session-isolated**. Tabs your session opens are visible only to your session; tabs the user enabled are shared. See "working with pages".
 
 **Sandboxed `fs` write restrictions:** `require('node:fs')` is scoped. Writes (writeFileSync, mkdirSync, etc.) only succeed in:
-- The **directory where `playwriter` CLI was invoked** (the session's cwd)
+- The **session's cwd**: where `playwriter session new` ran, or the MCP server's working directory
 - `/tmp`
 - The OS temp directory (`os.tmpdir()`, e.g. `/var/folders/.../T/` on macOS)
 
@@ -636,29 +596,14 @@ await state.page.keyboard.press('Enter')
 await state.page.keyboard.type('Line 2')
 ```
 
-**6. Quote escaping in bash**
-Bash parses `$`, backticks, and `\` inside double-quoted strings. This silently corrupts JS code. Always use single quotes or heredoc:
-
-```bash
-# single quotes — bash passes everything through literally
-playwriter -s 1 -e 'await state.page.locator(`[id="_r_a_"]`).click()'
-
-# heredoc for complex code with mixed quotes
-playwriter -s 1 -e "$(cat <<'EOF'
-await state.page.locator('[id="_r_a_"]').click()
-const match = html.match(/\$[\d.]+/g)
-EOF
-)"
-```
-
-**7. Using screenshots when snapshots suffice**
+**6. Using screenshots when snapshots suffice**
 Screenshots + image analysis is expensive and slow. Only use screenshots for visual/CSS issues. Use snapshot for text checks:
 
 ```js
 await snapshot({ page: state.page, search: /expected text/i })
 ```
 
-**8. Assuming page content loaded**
+**7. Assuming page content loaded**
 Even after `goto()`, dynamic content may not be ready:
 
 ```js
@@ -669,7 +614,7 @@ await state.page.waitForSelector('article', { timeout: 10000 })
 await waitForPageLoad({ page: state.page, timeout: 5000 })
 ```
 
-**9. Not using playwriter for JS-rendered sites**
+**8. Not using playwriter for JS-rendered sites**
 Do NOT waste context trying webfetch, curl, or Playwright CLI screenshots on SPAs (Instagram, Twitter, etc.). These return empty HTML shells. Use playwriter directly:
 
 ```js
@@ -679,7 +624,7 @@ await waitForPageLoad({ page: state.page, timeout: 8000 })
 await snapshot({ page: state.page, search: /cookie|consent|accept/i }).then(console.log)
 ```
 
-**10. Login buttons that open popups**
+**9. Login buttons that open popups**
 Popup windows (`window.open` with features, OAuth buttons) are auto-relocated to tabs in the main window by the Playwriter extension. The new tab appears in `context.pages()` and is fully controllable. You will receive a `[WARNING] New page opened from current page (index N, initial url: ...)` message pointing to the new tab — the `initial url` may be `about:blank` for blank-then-scripted popups, so check `context.pages()[N].url()` for the final URL:
 
 ```js
@@ -696,7 +641,7 @@ await loginPage.waitForURL('**/callback**')
 // Original page should now be authenticated
 ```
 
-**11. Click times out or does nothing — snapshot to find the blocker**
+**10. Click times out or does nothing — snapshot to find the blocker**
 When a click times out, a **modal or overlay** is likely intercepting pointer events. Do not retry with different selectors or `{ force: true }` — snapshot to find the blocker:
 
 ```js
@@ -706,14 +651,14 @@ await snapshot({ page: state.page, search: /dialog|modal/i })
 await state.page.getByRole('radio', { name: 'Nope, Vanilla' }).click()
 ```
 
-**12. Never use `dispatchEvent` or `{ force: true }` to bypass blockers**
+**11. Never use `dispatchEvent` or `{ force: true }` to bypass blockers**
 `dispatchEvent(new MouseEvent(...))`, `{ force: true }`, and `element.click()` inside `page.evaluate()` bypass Playwright checks but **do not trigger React/Vue/Svelte handlers** — state won't update. Use snapshot to find the real interactive element:
 
 ```js
 await state.page.getByRole('radio', { name: 'Node.js' }).click()
 ```
 
-**13. Over-investigating instead of just interacting**
+**12. Over-investigating instead of just interacting**
 When something doesn't respond to a click, do NOT start inspecting CDP event listeners, React fibers, canvas pixel data, or writing `page.evaluate()` to read class names and bounding boxes. This wastes massive context. Instead:
 
 1. Take a `snapshot({ page: state.page })` — it shows every interactive element and what to click
@@ -831,7 +776,7 @@ state.page.locator('tr').filter({ hasText: 'John' }).locator('button').click()
 
 ## working with pages
 
-**Your tabs are yours.** `context.pages()` returns the tabs your session opened (and their popups) plus tabs the user enabled with the extension icon. Other CLI sessions never see your tabs, but user-enabled tabs are shared, so another agent may navigate or close them. To avoid interference, **get your own page**.
+**Your tabs are yours.** `context.pages()` returns the tabs your session opened (and their popups) plus tabs the user enabled with the extension icon. Other sessions never see your tabs, but user-enabled tabs are shared, so another agent may navigate or close them. To avoid interference, **get your own page**.
 
 There is **no default `page`** in the sandbox. Reading `page` throws. Helpers that take `page` (`snapshot`, `getLatestLogs`, `waitForPageLoad`, `recording`, `ghostCursor`, `refToLocator`) need `{ page: state.page }`. `snapshot` also accepts a `locator` or `frame` from your tab.
 

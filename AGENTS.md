@@ -24,7 +24,7 @@ Chrome Web Store review can delay an extension release by days or weeks. Users c
 
 - user installs the extension in chrome. we assume there is only one chrome window for now, the first opened.
 - extension connects to a websocket server on port 19988. if this server is not yet open, it retries connecting in a loop
-- the MCP spawns the ws server if not already listening on 19988, in background. the mcp then connects to this same server with a playwright client
+- the CLI and MCP spawn the ws server if not already listening on 19988, in background. both are thin HTTP clients of its `/cli/*` API: the relay owns sessions and their executors. shared client code lives in `playwriter/src/relay-sessions.ts` (browser discovery, session create/list/update/delete, execute)
 - the server exposes /cdp/client-id which is used by playwright clients to communicate with the extension
 - the extension instead connects to /extension which is used to receive cdp commands and send responses and cdp events.
 - some events are treated specially for example because

@@ -177,18 +177,17 @@ you're done.
 
 ## MCP and agent usage
 
-Cloud browsers work with the MCP server too. Set env vars in your MCP client config:
+Cloud browsers work with the MCP server too. Log in on the MCP machine with `playwriter cloud login`, or set an API key in your MCP client config:
 
 ```json
 {
   "env": {
-    "PLAYWRITER_CLOUD_TOKEN": "your-token"
+    "PLAYWRITER_API_KEY": "your-api-key"
   }
 }
 ```
 
-The MCP server discovers cloud browsers alongside local ones. Agents can request a cloud browser
-when they need stealth browsing, geo-targeted access, or CAPTCHA bypass without any extra prompting.
+The `session_list` tool shows cloud browsers next to local ones. The agent creates one with the `session_new` tool and `browser: "cloud"`, plus optional `proxy`, `customProxy` and `cloudTimeoutMinutes`.
 
 ## Alternative: remote-control the user's own browser
 

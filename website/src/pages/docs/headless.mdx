@@ -75,29 +75,15 @@ Either:
 - Launch Chrome with `--remote-debugging-port=9222`
 - Use `playwriter browser start` (enables debugging automatically)
 
-## MCP configuration for headless
+## MCP
 
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["-y", "playwriter@latest"],
-      "env": {
-        "PLAYWRITER_DIRECT": "1"
-      }
-    }
-  }
-}
-```
+No MCP config is needed. The agent calls the `session_new` tool:
 
-`PLAYWRITER_DIRECT` accepts:
-
-| Value | Behavior |
+| Parameters | Behavior |
 |---|---|
-| `1` | Auto-discover Chrome on port 9222 |
-| `ws://` or `wss://` URL | Explicit WebSocket endpoint |
-| `host:port` | Resolves via HTTP probe to ws:// URL |
+| `browser: "headless"` | Launch headless Chrome |
+| `direct: "auto"` | Find Chrome with debugging on, port 9222 first |
+| `direct: "ws://..."` or `"host:port"` | Explicit CDP endpoint |
 
 ## CI / Docker
 

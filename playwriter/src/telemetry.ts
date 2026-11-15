@@ -53,7 +53,7 @@ export type SessionKind = 'extension' | 'headless' | 'cdp' | 'cloud' | 'remote'
 
 type TelemetryEvents = {
   relay_started: { os: string; arch: string; node: string }
-  session_created: { client: 'cli' | 'sdk'; kind: SessionKind }
+  session_created: { client: 'cli' | 'sdk' | 'mcp'; kind: SessionKind }
   mcp_connected: Record<string, never>
   extension_connected: { browser: string; extension_version: string }
   /** Hourly rollup, so long agent sessions still count as daily active. */

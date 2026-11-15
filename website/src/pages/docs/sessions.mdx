@@ -147,7 +147,7 @@ playwriter session update 1 --patchright false  # back to Playwright
 | `page.evaluate` | Main world, sees page globals | Main world, sees page globals. Pass `true` as fourth argument for an isolated world that pages cannot see |
 | `getLatestLogs` | All console messages | May miss console messages |
 
-The Node API takes the same option: `connectViaExtension({ patchright: true })`. It applies to extension and remote control sessions. For the MCP, start it with `playwriter --patchright`.
+The Node API takes the same option: `connectViaExtension({ patchright: true })`. It applies to extension and remote control sessions. In the MCP, pass `patchright: true` to the `session_new` or `session_update` tool.
 
 ## Node API
 

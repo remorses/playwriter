@@ -54,15 +54,12 @@ export function getCdpUrl({
   sessionId,
   tabGroup,
   tabGroupColor,
-  client,
   patchright,
 }: {
   port?: number
   host?: string
   token?: string
   extensionId?: string | null
-  /** Which client opens this connection, for anonymous usage stats. Old relays ignore it. */
-  client?: 'mcp'
   /** CLI session id, sent as ?session= so the relay can map this client to its session */
   sessionId?: string
   /** Tab group title for tabs this client creates (default 'playwriter'). Old relays ignore it. */
@@ -91,9 +88,6 @@ export function getCdpUrl({
   }
   if (patchright) {
     params.set('patchright', '1')
-  }
-  if (client) {
-    params.set('client', client)
   }
   const queryString = params.toString()
   const suffix = queryString ? `?${queryString}` : ''
