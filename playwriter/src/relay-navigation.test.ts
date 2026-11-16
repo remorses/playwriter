@@ -883,6 +883,41 @@ describe('Relay Navigation Tests', () => {
     }
   }, 30000)
 
+  it('lets the user attach our extension pages with an icon click', async () => {
+    // Agents cannot open these pages, but a user icon click on one still attaches it
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const extensionPageUrl = new URL('src/welcome.html', serviceWorker.url()).href
+    const userPage = await browserContext.newPage()
+    await userPage.goto(extensionPageUrl)
+    await userPage.bringToFront()
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    try {
+      const { isConnected } = await serviceWorker.evaluate(async () => {
+        return await globalThis.toggleExtensionForActiveTab()
+      })
+      const context = browser.contexts()[0]
+      const page =
+        context.pages().find((p) => p.url() === extensionPageUrl) ||
+        (await context.waitForEvent('page', { predicate: (p) => p.url() === extensionPageUrl, timeout: 5000 }))
+      const title = await page.title()
+      expect({ isConnected, title }).toMatchInlineSnapshot(`
+        {
+          "isConnected": true,
+          "title": "Welcome to Playwriter",
+        }
+      `)
+    } finally {
+      await browser.close()
+      await serviceWorker
+        .evaluate(async () => {
+          await globalThis.toggleExtensionForActiveTab()
+        })
+        .catch(() => {})
+      await userPage.close()
+    }
+  }, 30000)
+
   it('clears extension pages from tab history before clients see the tab', async () => {
     // A welcome tab the user kept browsing in still has the extension page in its history.
     // history.back() must not load it with a client init script and extension privileges.

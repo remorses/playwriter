@@ -1424,6 +1424,9 @@ async function handleCommand(
   const resolved = getTabForCommand(msg)
   let targetTabId = resolved?.tabId
   let targetTab = resolved?.tab
+  if (remoteRuntime && targetTabId !== undefined && userApprovedExtensionPageTabs.has(targetTabId)) {
+    throw new Error('Remote control cannot use Playwriter extension pages.')
+  }
   // Hold commands while reattachTab restores the session (same sessionId), Chrome would reject them.
   if (targetTabId) {
     await tabReattaches.get(targetTabId)
@@ -1872,8 +1875,12 @@ type AttachTabOptions = {
 // getBlockedNavigationError stops clients from adding our extension pages to history, but a tab
 // can already hold one (the welcome tab the user kept browsing in). history.back() would then
 // load it with client init scripts and extension privileges, so clear such entries before any
-// client sees the tab. Throws if the tab is on an extension page right now.
+// client sees the tab. Throws if the tab is on an extension page right now, unless the user
+// attached it with an icon click (userApprovedExtensionPageTabs).
 async function removeExtensionPagesFromHistory(debuggee: chrome.debugger.Debuggee): Promise<void> {
+  if (debuggee.tabId !== undefined && userApprovedExtensionPageTabs.has(debuggee.tabId)) {
+    return
+  }
   const { currentIndex, entries } = (await chrome.debugger.sendCommand(
     debuggee,
     'Page.getNavigationHistory',
@@ -2033,6 +2040,7 @@ async function attachTabDebugger(
 }
 
 function detachTab(tabId: number, shouldDetachDebugger: boolean): void {
+  userApprovedExtensionPageTabs.delete(tabId)
   const tab = store.getState().tabs.get(tabId)
   if (!tab) {
     logger.debug('detachTab: tab not found in map:', tabId)
@@ -2734,10 +2742,20 @@ const OUR_EXTENSION_IDS = [
   'pebbngnfojnignonigcnkdilknapkgid', // Dev extension (stable ID from manifest key)
 ]
 
+/** Our own pages (welcome, tutorial). Attachable only by a user icon click, see userApprovedExtensionPageTabs. */
+function isOwnExtensionPage(url: string | undefined): boolean {
+  return Boolean(url?.startsWith(chrome.runtime.getURL('')))
+}
+
+// Tabs the user attached with an icon click while on one of our extension pages. A CDP client
+// there runs with this extension's privileges, so only the user can grant it, never an agent
+// (getBlockedNavigationError), and Remote control peers cannot send commands to it (handleCommand).
+const userApprovedExtensionPageTabs = new Set<number>()
+
 // undefined URL is for about:blank pages (not restricted) and chrome:// URLs (restricted).
 // We can't distinguish them without the `tabs` permission, so we just let attachment fail.
-// Our own extension pages are restricted too: chrome.debugger may attach to them, and a CDP
-// client there would run with this extension's privileges (debugger on every tab, storage).
+// Our own extension pages are restricted too: automatic attach paths (popups, tab groups) must
+// never attach them. onActionClicked handles the explicit user click with isOwnExtensionPage.
 function isRestrictedUrl(url: string | undefined): boolean {
   if (!url) return false
 
@@ -2852,7 +2870,7 @@ async function updateIcons(): Promise<void> {
 
     const iconConfig = (() => {
       if (connectionState === 'extension-replaced') return icons.extensionReplaced
-      if (tabId !== undefined && isRestrictedUrl(tabUrl)) return icons.restricted
+      if (tabId !== undefined && isRestrictedUrl(tabUrl) && !isOwnExtensionPage(tabUrl)) return icons.restricted
       if (tabInfo?.state === 'error') return icons.tabError
       if (tabInfo?.state === 'connecting') return icons.connecting
       if (tabInfo?.state === 'connected') return icons.connected
@@ -2933,13 +2951,18 @@ async function onActionClicked(tab: chrome.tabs.Tab): Promise<void> {
     store.setState({ currentTabId: tab.id, preferredWindowId: tab.windowId })
   }
 
-  if (isRestrictedUrl(tab.url)) {
+  if (isRestrictedUrl(tab.url) && !isOwnExtensionPage(tab.url)) {
     logger.debug('Cannot attach to restricted URL:', tab.url)
     return
   }
 
   const { tabs, connectionState } = store.getState()
   const tabInfo = tabs.get(tab.id)
+
+  // A click that disconnects clears it again in detachTab
+  if (isOwnExtensionPage(tab.url)) {
+    userApprovedExtensionPageTabs.add(tab.id)
+  }
 
   // If another Playwriter extension took over, clear error state and try to reconnect this tab
   if (connectionState === 'extension-replaced') {
@@ -4006,7 +4029,7 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId !== 0 || !details.url.startsWith('chrome-extension://')) {
     return
   }
-  if (!store.getState().tabs.has(details.tabId)) {
+  if (!store.getState().tabs.has(details.tabId) || userApprovedExtensionPageTabs.has(details.tabId)) {
     return
   }
   logger.warn('Detaching tab that navigated to an extension page:', details.tabId)
