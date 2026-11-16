@@ -57,7 +57,7 @@ Colors: `grey, blue, red, yellow, green, pink, purple, cyan, orange`; otherwise 
 
 ### Patchright
 
-**Always** use `--patchright` for production websites where the user is logged in with their own account (email, social, shopping, admin dashboards). **Never** for localhost, dev servers or tunnels. It connects with Patchright and moves the mouse and types like a person. Switch an existing session mid-task, even after pages loaded:
+**Always** use `--patchright` every time you drive a production website with the user's credentials or account: x.com, Google, Gmail, Reddit, LinkedIn, Instagram, GitHub, email, shopping, banking, admin dashboards. If the session was created without it, run `session update <id> --patchright` before touching that site. **Never** for localhost, dev servers, tunnels or the user's own sites (the app or website being built in the current project, even in production). It connects with Patchright and moves the mouse and types like a person. Switch an existing session mid-task, even after pages loaded:
 
 ```bash
 playwriter session new --tab-group shop --patchright

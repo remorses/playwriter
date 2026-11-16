@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.12.0
+
+1. **MCP sessions work like the CLI**: the MCP now runs code in relay sessions. MCP tabs belong to their session, survive relay upgrades and show in `playwriter session list`. Cancelling a tool call in the client stops the running execute. New MCP tools:
+
+   - `session_list`: active sessions and the browsers a new session can use
+   - `session_new`: pick a browser key, `headless`, `cloud` (with proxy options), `direct` CDP or a `remote` control id, plus `patchright` and `tabGroup`
+   - `session_update`: switch `patchright` or the tab group
+   - `session_delete`: delete a session, optionally closing its tabs
+
+   `execute` and `reset` take an optional `session`. Without it they use a default session, created on first use when one browser is connected.
+
+   **Breaking:** the MCP no longer reads `PLAYWRITER_DIRECT`, and `playwriter --patchright` is removed. Use `session_new` with `direct` or `patchright` instead.
+
+2. **Clients cannot open Playwriter's extension pages**: `Target.createTarget` and `page.goto()` could open `chrome-extension://<playwriter id>/...` pages, and code there had the extension's privileges. The extension now rejects these URLs with `Playwriter clients cannot open extension pages.` Extension pages are also removed from an attached tab's back/forward history. Needs extension 0.0.175.
+
+3. **Hardened local relay**:
+   - Websites can no longer start or stop a skill recording with a cross-origin `POST` to `/recorder/*`. Privileged routes check the exact `application/json` media type.
+   - `playwriter serve --host` with any non-loopback address, for example a LAN IP, now requires `--token`.
+   - `~/.playwriter` is `0700`, and `relay-server.log` and `cdp.jsonl` are `0600`. `cdp.jsonl` redacts `Cookie`, `Set-Cookie`, `Authorization` and cookie results.
+   - Relay tokens are compared in constant time, and the Chrome for Testing zip downloads to a private temp folder.
+
+4. **Clearer Patchright guidance for agents**: the skill tells agents to use `--patchright` on every production site where you are logged in, and never on localhost or the site being built in the current project.
+
 ## 0.11.0
 
 1. **New `--patchright` session mode with human-like input**: for production sites where you are logged in. The session connects with Patchright (`@playwriter/patchright-core`) instead of Playwright. Mouse moves follow curved paths, clicks get human press timing, scrolling glides in wheel flicks, and key presses are spaced 30-110 ms apart.
