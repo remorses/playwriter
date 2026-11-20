@@ -190,6 +190,7 @@ Code executed with `-e` or `-f` has access to:
 | `getCleanHTML` | Get cleaned HTML from page |
 | `getPageMarkdown` | Extract article content as text |
 | `waitForPageLoad` | Smart load detection |
+| `handoff` | Hand the tab to the user for a sign-in or captcha |
 
 There is no default `page` global. Reading `page` throws. Create a tab with `context.newPage()` and store it in `state.page`.
 
