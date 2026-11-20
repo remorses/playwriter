@@ -1450,13 +1450,35 @@ describe('Extension toolbar icons', () => {
       }, tabTitle)
     }
 
+    const readIcons = () => {
+      return serviceWorker.evaluate(async () => {
+        const tabs = await chrome.tabs.query({})
+        const ours = tabs.filter((tab) => tab.title?.startsWith('icon-tab-') || tab.url === 'chrome://version/')
+        const rows = await Promise.all(
+          ours.map(async (tab) => {
+            const name = tab.url === 'chrome://version/' ? 'chrome://version' : tab.title
+            const title = await chrome.action.getTitle({ tabId: tab.id })
+            const badge = await chrome.action.getBadgeText({ tabId: tab.id })
+            return `${name}: ${title} [${badge}]`
+          }),
+        )
+        return rows.join('\n')
+      })
+    }
+
     await serviceWorker.evaluate(async () => {
       await globalThis.toggleExtensionForActiveTab()
     })
     await expect.poll(() => getActionTitle('icon-tab-0')).toBe('Connected - Click to disconnect')
-    const tabCount = await serviceWorker.evaluate(async () => (await chrome.tabs.query({})).length)
-    // Default icon + each tab, at most twice: connecting then connected (count badge)
-    expect(await takeSetIconCalls()).toBeLessThanOrEqual(2 * (tabCount + 1))
+    // Only the connected tab (connecting, connected) and the default icon (count badge)
+    expect(await takeSetIconCalls()).toMatchInlineSnapshot(`3`)
+    // The connecting badge "..." is cleared, so the connected tab shows the default count badge
+    expect(await readIcons()).toMatchInlineSnapshot(`
+      "icon-tab-0: Connected - Click to disconnect [1]
+      icon-tab-1: Click to attach debugger [1]
+      icon-tab-2: Click to attach debugger [1]
+      chrome://version: Cannot attach to this page [1]"
+    `)
 
     // Listeners run in registration order, so the extension handled every change once ours sees the last one
     const titleChanges = 10
@@ -1479,46 +1501,28 @@ describe('Extension toolbar icons', () => {
     await serviceWorker.evaluate(() => (globalThis as any).lastTitleSeen)
     expect(await takeSetIconCalls()).toBe(0)
 
-    // Chrome resets per-tab icons on a new document: the connected tab gets its icon back
+    // Chrome clears per-tab icons on a new document: the connected tab gets its icon back
     await pages[0].goto('data:text/html,<title>icon-tab-0 reloaded</title>')
     await expect.poll(() => getActionTitle('icon-tab-0 reloaded')).toBe('Connected - Click to disconnect')
-
-    const icons = await serviceWorker.evaluate(async () => {
-      ;(globalThis as any).restoreSetIcon()
-      const tabs = await chrome.tabs.query({})
-      const ours = tabs.filter((tab) => tab.title?.startsWith('icon-tab-') || tab.url === 'chrome://version/')
-      return Promise.all(
-        ours.map(async (tab) => ({
-          tab: tab.url === 'chrome://version/' ? 'chrome://version' : tab.title,
-          title: await chrome.action.getTitle({ tabId: tab.id }),
-          badge: await chrome.action.getBadgeText({ tabId: tab.id }),
-        })),
-      )
-    })
-    expect(icons).toMatchInlineSnapshot(`
-      [
-        {
-          "badge": "1",
-          "tab": "icon-tab-0 reloaded",
-          "title": "Connected - Click to disconnect",
-        },
-        {
-          "badge": "1",
-          "tab": "icon-tab-1",
-          "title": "Click to attach debugger",
-        },
-        {
-          "badge": "1",
-          "tab": "icon-tab-2 10",
-          "title": "Click to attach debugger",
-        },
-        {
-          "badge": "1",
-          "tab": "chrome://version",
-          "title": "Cannot attach to this page",
-        },
-      ]
+    expect(await readIcons()).toMatchInlineSnapshot(`
+      "icon-tab-0 reloaded: Connected - Click to disconnect [1]
+      icon-tab-1: Click to attach debugger [1]
+      icon-tab-2 10: Click to attach debugger [1]
+      chrome://version: Cannot attach to this page [1]"
     `)
+
+    // Disconnecting resets the tab to idle and every tab falls back to the empty default badge
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await expect.poll(() => getActionTitle('icon-tab-0 reloaded')).toBe('Click to attach debugger')
+    expect(await readIcons()).toMatchInlineSnapshot(`
+      "icon-tab-0 reloaded: Click to attach debugger []
+      icon-tab-1: Click to attach debugger []
+      icon-tab-2 10: Click to attach debugger []
+      chrome://version: Cannot attach to this page []"
+    `)
+    await serviceWorker.evaluate(() => (globalThis as any).restoreSetIcon())
 
     for (const page of pages) {
       await page.close()
