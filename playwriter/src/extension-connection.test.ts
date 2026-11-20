@@ -1397,3 +1397,131 @@ describe('Extension connect during relay handshake', () => {
     `)
   }, 60000)
 })
+
+describe('Extension toolbar icons', () => {
+  const PORT = 19980
+  let testCtx: TestContext | null = null
+
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: PORT, tempDirPrefix: 'pw-icons-test-' })
+  }, 600000)
+
+  afterAll(async () => {
+    await cleanupTestContext(testCtx, null)
+    testCtx = null
+  })
+
+  // Regression: every title change in any tab re-sent the icon of every open tab.
+  // 20 tabs updating their title each second kept Chrome at ~1.5 cores. https://github.com/remorses/playwriter/pull/142
+  it('sends icons only for tabs whose icon changed', async () => {
+    const browserContext = testCtx!.browserContext
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const pages = await Promise.all(Array.from({ length: 4 }, () => browserContext.newPage()))
+    for (const [i, page] of pages.entries()) {
+      await page.goto(`data:text/html,<title>icon-tab-${i}</title>`)
+    }
+    await pages[3].goto('chrome://version')
+    await pages[0].bringToFront()
+    await expect
+      .poll(() => serviceWorker.evaluate(async () => (await chrome.tabs.query({ status: 'loading' })).length))
+      .toBe(0)
+
+    await serviceWorker.evaluate(() => {
+      const calls = { setIcon: 0 }
+      const setIcon = chrome.action.setIcon.bind(chrome.action)
+      chrome.action.setIcon = ((details: chrome.action.TabIconDetails) => {
+        calls.setIcon++
+        return setIcon(details)
+      }) as typeof chrome.action.setIcon
+      Object.assign(globalThis, { iconCalls: calls, restoreSetIcon: () => (chrome.action.setIcon = setIcon) })
+    })
+    const takeSetIconCalls = () => {
+      return serviceWorker.evaluate(() => {
+        const calls = (globalThis as any).iconCalls as { setIcon: number }
+        const count = calls.setIcon
+        calls.setIcon = 0
+        return count
+      })
+    }
+    const getActionTitle = (tabTitle: string) => {
+      return serviceWorker.evaluate(async (tabTitle) => {
+        const [tab] = await chrome.tabs.query({ title: tabTitle })
+        return tab ? chrome.action.getTitle({ tabId: tab.id }) : null
+      }, tabTitle)
+    }
+
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    await expect.poll(() => getActionTitle('icon-tab-0')).toBe('Connected - Click to disconnect')
+    const tabCount = await serviceWorker.evaluate(async () => (await chrome.tabs.query({})).length)
+    // Default icon + each tab, at most twice: connecting then connected (count badge)
+    expect(await takeSetIconCalls()).toBeLessThanOrEqual(2 * (tabCount + 1))
+
+    // Listeners run in registration order, so the extension handled every change once ours sees the last one
+    const titleChanges = 10
+    await serviceWorker.evaluate((last) => {
+      const lastTitleSeen = new Promise<void>((resolve) => {
+        chrome.tabs.onUpdated.addListener(function onTitle(_tabId, changeInfo) {
+          if (changeInfo.title !== last) return
+          chrome.tabs.onUpdated.removeListener(onTitle)
+          resolve()
+        })
+      })
+      Object.assign(globalThis, { lastTitleSeen })
+    }, `icon-tab-2 ${titleChanges}`)
+    await pages[2].evaluate(async (count) => {
+      for (let i = 1; i <= count; i++) {
+        document.title = `icon-tab-2 ${i}`
+        await new Promise((r) => setTimeout(r, 20))
+      }
+    }, titleChanges)
+    await serviceWorker.evaluate(() => (globalThis as any).lastTitleSeen)
+    expect(await takeSetIconCalls()).toBe(0)
+
+    // Chrome resets per-tab icons on a new document: the connected tab gets its icon back
+    await pages[0].goto('data:text/html,<title>icon-tab-0 reloaded</title>')
+    await expect.poll(() => getActionTitle('icon-tab-0 reloaded')).toBe('Connected - Click to disconnect')
+
+    const icons = await serviceWorker.evaluate(async () => {
+      ;(globalThis as any).restoreSetIcon()
+      const tabs = await chrome.tabs.query({})
+      const ours = tabs.filter((tab) => tab.title?.startsWith('icon-tab-') || tab.url === 'chrome://version/')
+      return Promise.all(
+        ours.map(async (tab) => ({
+          tab: tab.url === 'chrome://version/' ? 'chrome://version' : tab.title,
+          title: await chrome.action.getTitle({ tabId: tab.id }),
+          badge: await chrome.action.getBadgeText({ tabId: tab.id }),
+        })),
+      )
+    })
+    expect(icons).toMatchInlineSnapshot(`
+      [
+        {
+          "badge": "1",
+          "tab": "icon-tab-0 reloaded",
+          "title": "Connected - Click to disconnect",
+        },
+        {
+          "badge": "1",
+          "tab": "icon-tab-1",
+          "title": "Click to attach debugger",
+        },
+        {
+          "badge": "1",
+          "tab": "icon-tab-2 10",
+          "title": "Click to attach debugger",
+        },
+        {
+          "badge": "1",
+          "tab": "chrome://version",
+          "title": "Cannot attach to this page",
+        },
+      ]
+    `)
+
+    for (const page of pages) {
+      await page.close()
+    }
+  }, 60000)
+})

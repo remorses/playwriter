@@ -2854,46 +2854,74 @@ const icons = {
   },
 } as const
 
+// Last icon sent per tab (undefined key = default icon). tabs.onUpdated fires on every title
+// change, so unchanged tabs are skipped instead of re-sending 4 chrome.action calls.
+const appliedIcons = new Map<
+  number | undefined,
+  { iconConfig: (typeof icons)[keyof typeof icons]; title: string; badgeText: string }
+>()
+
+function updateTabIcon({ tabId, tabUrl }: { tabId: number | undefined; tabUrl: string | undefined }): void {
+  const { connectionState, tabs, errorText } = store.getState()
+  const tabInfo = tabId !== undefined ? tabs.get(tabId) : undefined
+
+  const iconConfig = (() => {
+    if (connectionState === 'extension-replaced') return icons.extensionReplaced
+    if (tabId !== undefined && isRestrictedUrl(tabUrl) && !isOwnExtensionPage(tabUrl)) return icons.restricted
+    if (tabInfo?.state === 'error') return icons.tabError
+    if (tabInfo?.state === 'connecting') return icons.connecting
+    if (tabInfo?.state === 'connected') return icons.connected
+    return icons.idle
+  })()
+
+  const title = (() => {
+    if (connectionState === 'extension-replaced' && errorText) return errorText
+    if (tabInfo?.errorText) return tabInfo.errorText
+    return iconConfig.title
+  })()
+
+  const badgeText = (() => {
+    if (iconConfig === icons.connected || iconConfig === icons.idle || iconConfig === icons.restricted) {
+      const connectedCount = Array.from(tabs.values()).filter((t) => t.state === 'connected').length
+      return connectedCount > 0 ? String(connectedCount) : ''
+    }
+    return iconConfig.badgeText
+  })()
+
+  const applied = appliedIcons.get(tabId)
+  if (applied?.iconConfig === iconConfig && applied.title === title && applied.badgeText === badgeText) return
+  appliedIcons.set(tabId, { iconConfig, title, badgeText })
+
+  void chrome.action.setIcon({ tabId, path: iconConfig.path })
+  void chrome.action.setTitle({ tabId, title })
+  if (iconConfig.badgeColor) void chrome.action.setBadgeBackgroundColor({ tabId, color: iconConfig.badgeColor })
+  void chrome.action.setBadgeText({ tabId, text: badgeText })
+}
+
+let iconsUpdateRunning = false
+let iconsUpdatePending = false
+
+/** Updates every tab's icon. Calls made while a pass runs share one extra pass. */
 async function updateIcons(): Promise<void> {
-  const state = store.getState()
-  const { connectionState, tabs, errorText } = state
-
-  const connectedCount = Array.from(tabs.values()).filter((t) => t.state === 'connected').length
-
-  const allTabs = await chrome.tabs.query({})
-  const tabUrlMap = new Map(allTabs.map((tab) => [tab.id, tab.url]))
-  const allTabIds = [undefined, ...allTabs.map((tab) => tab.id).filter(isTruthy)]
-
-  for (const tabId of allTabIds) {
-    const tabInfo = tabId !== undefined ? tabs.get(tabId) : undefined
-    const tabUrl = tabId !== undefined ? tabUrlMap.get(tabId) : undefined
-
-    const iconConfig = (() => {
-      if (connectionState === 'extension-replaced') return icons.extensionReplaced
-      if (tabId !== undefined && isRestrictedUrl(tabUrl) && !isOwnExtensionPage(tabUrl)) return icons.restricted
-      if (tabInfo?.state === 'error') return icons.tabError
-      if (tabInfo?.state === 'connecting') return icons.connecting
-      if (tabInfo?.state === 'connected') return icons.connected
-      return icons.idle
-    })()
-
-    const title = (() => {
-      if (connectionState === 'extension-replaced' && errorText) return errorText
-      if (tabInfo?.errorText) return tabInfo.errorText
-      return iconConfig.title
-    })()
-
-    const badgeText = (() => {
-      if (iconConfig === icons.connected || iconConfig === icons.idle || iconConfig === icons.restricted) {
-        return connectedCount > 0 ? String(connectedCount) : ''
+  iconsUpdatePending = true
+  if (iconsUpdateRunning) return
+  iconsUpdateRunning = true
+  try {
+    while (iconsUpdatePending) {
+      const allTabs = await chrome.tabs.query({})
+      // Cleared after the await: the loop below reads the latest store state synchronously
+      iconsUpdatePending = false
+      const openTabIds = new Set(allTabs.map((tab) => tab.id).filter(isTruthy))
+      for (const tabId of appliedIcons.keys()) {
+        if (tabId !== undefined && !openTabIds.has(tabId)) appliedIcons.delete(tabId)
       }
-      return iconConfig.badgeText
-    })()
-
-    void chrome.action.setIcon({ tabId, path: iconConfig.path })
-    void chrome.action.setTitle({ tabId, title })
-    if (iconConfig.badgeColor) void chrome.action.setBadgeBackgroundColor({ tabId, color: iconConfig.badgeColor })
-    void chrome.action.setBadgeText({ tabId, text: badgeText })
+      updateTabIcon({ tabId: undefined, tabUrl: undefined })
+      for (const tab of allTabs) {
+        if (tab.id) updateTabIcon({ tabId: tab.id, tabUrl: tab.url })
+      }
+    }
+  } finally {
+    iconsUpdateRunning = false
   }
 }
 
@@ -3431,7 +3459,9 @@ chrome.tabs.onRemoved.addListener(onTabRemoved)
 chrome.tabs.onActivated.addListener(onTabActivated)
 chrome.action.onClicked.addListener(onActionClicked)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  void updateIcons()
+  // Chrome resets a tab's action icon, title and badge when it loads a new document
+  if (changeInfo.status !== undefined || changeInfo.url !== undefined) appliedIcons.delete(tabId)
+  updateTabIcon({ tabId, tabUrl: tab.url })
   // Chrome 155 can create child tabs inside the group without a later groupId change.
   // Recorded events: https://github.com/remorses/playwriter/issues/133#issuecomment-6278536708
   const isUntrackedGroupedTabLoading =
