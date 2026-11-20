@@ -1819,6 +1819,8 @@ async function removeRestrictedIframes(tabId: number): Promise<number> {
     const results = await chrome.scripting.executeScript({
       // allFrames: true ensures we also scan same-origin subframes, not just the top document.
       target: { tabId, allFrames: true },
+      // Runs before every attach: never wait for a loading page to reach document_idle
+      injectImmediately: true,
       func: (ownExtIds: string[]) => {
         // Returns the extension ids of removed iframes. Extensions like 1Password put their
         // iframes in closed shadow roots, only reachable via chrome.dom from an isolated world.
@@ -1920,11 +1922,13 @@ async function attachTabDebugger(
   try {
     logger.debug('Attaching debugger to tab:', tabId)
 
-    // Bounded retry loop: chrome.debugger.attach fails if the tab contains chrome-extension://
-    // iframes from other extensions. We remove them and retry, but aggressive extensions can
-    // re-inject between cleanup and retry, so we allow up to 3 attempts.
+    // chrome.debugger.attach fails if the tab contains chrome-extension:// iframes from other
+    // extensions, and an iframe still loading during attach fails the next commands when it
+    // commits. So remove them before every attempt. Aggressive extensions can re-inject between
+    // cleanup and attach, so we allow up to 3 attempts.
     const maxAttachAttempts = 3
     for (let attempt = 1; attempt <= maxAttachAttempts; attempt++) {
+      await removeRestrictedIframes(tabId)
       try {
         await chrome.debugger.attach(debuggee, '1.3')
         break
@@ -1935,10 +1939,9 @@ async function attachTabDebugger(
           throw attachError
         }
         logger.debug(
-          `Debugger attach blocked by chrome-extension:// iframe (attempt ${attempt}/${maxAttachAttempts}), removing and retrying:`,
+          `Debugger attach blocked by chrome-extension:// iframe (attempt ${attempt}/${maxAttachAttempts}), retrying:`,
           tabId,
         )
-        await removeRestrictedIframes(tabId)
         await sleep(50)
       }
     }
