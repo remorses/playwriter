@@ -159,7 +159,7 @@ Rules for remote-control sessions:
 
 ### Headless browser (no extension, no user browser)
 
-Launch a headless Chrome automatically. No extension setup, no user browser involvement. Useful when the user doesn't want their personal browser used, in CI/server environments, or for fully autonomous automation.
+Launch a headless Chrome automatically. No extension setup, no user browser involvement. Use it only when the user asks for headless, or in CI/server environments with no user browser. Never use headless on live production sites (x.com, Google, Reddit, LinkedIn, GitHub, shopping, banking and similar) unless the user asks: use the user's browser. Do not pick headless to avoid stealing focus: Playwriter does not steal focus in normal extension tabs by default, only a few operations do.
 
 ```bash
 # Install Chrome for Testing (first time only, if no Chrome is available)

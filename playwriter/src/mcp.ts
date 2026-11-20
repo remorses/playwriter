@@ -367,7 +367,7 @@ server.tool(
     browser: z
       .string()
       .optional()
-      .describe('Browser KEY from session_list. "headless" launches headless Chrome. "cloud" starts a cloud browser (stealth, proxies)'),
+      .describe('Browser KEY from session_list. "headless" launches headless Chrome, use it only when the user asks. "cloud" starts a cloud browser (stealth, proxies)'),
     direct: z
       .string()
       .optional()
