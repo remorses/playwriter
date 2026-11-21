@@ -123,50 +123,34 @@ export function focusPageHtml(): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Playwriter</title>
 <style>
-  :root { color-scheme: light dark; --bg: #f5f5f7; --card: #fff; --label: #1d1d1f; --secondary: #6e6e73; --hairline: rgba(0, 0, 0, 0.08); }
-  @media (prefers-color-scheme: dark) { :root { --bg: #000; --card: #1c1c1e; --label: #f5f5f7; --secondary: #98989d; --hairline: rgba(255, 255, 255, 0.1); } }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg);
-    font: 15px/22px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; color: var(--label);
-    -webkit-font-smoothing: antialiased; }
-  main { box-sizing: border-box; width: min(400px, calc(100vw - 32px)); padding: 32px 28px 28px; border-radius: 24px; text-align: center;
-    background: var(--card); box-shadow: 0 0 0 0.5px var(--hairline), 0 16px 40px rgba(0, 0, 0, 0.08); }
-  svg { display: block; width: 56px; height: 56px; margin: 0 auto 18px; }
-  h1 { margin: 0 0 8px; font-size: 20px; line-height: 26px; font-weight: 650; letter-spacing: -0.01em; }
-  p { margin: 0; color: var(--secondary); }
-  ul { margin: 16px 0 0; padding: 14px 16px; list-style: none; border-radius: 14px; background: var(--bg); color: var(--secondary);
-    text-align: left; display: grid; gap: 6px; font-size: 14px; line-height: 20px; }
-  li { position: relative; padding-left: 14px; }
-  li::before { content: ""; position: absolute; left: 0; top: 8px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.6; }
-  .hint { margin-top: 16px; font-size: 13px; line-height: 18px; }
-  [hidden] { display: none; }
+  :root { color-scheme: light dark; --bg: #fff; --fg: #000; --muted: #666; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --fg: #ededed; --muted: #a1a1a1; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+    font: 14px/20px Geist, "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { display: grid; justify-items: center; gap: 12px; text-align: center; padding: 24px; }
+  svg { width: 32px; height: 32px; margin-bottom: 4px; }
+  h1 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0; color: var(--muted); }
 </style>
 </head><body><main>
 ${logo}
-<h1 id="title">Opening your tab…</h1>
-<p id="text">Playwriter is bringing the tab that needs you to the front.</p>
-<ul id="reasons" hidden>
-  <li>You finished the step and the agent carried on.</li>
-  <li>The card was closed, or the agent ended the handoff.</li>
-  <li>The tab was closed, or Playwriter restarted.</li>
-</ul>
-<p class="hint" id="hint" hidden>Still need to do it? Ask the agent in chat for a new link.</p>
+<h1 id="title">Opening tab…</h1>
+<p id="text"></p>
 </main>
 <script>
-const show = (title, text, reasons) => {
+const show = (title, text) => {
   document.getElementById('title').textContent = title
   document.getElementById('text').textContent = text
-  document.getElementById('reasons').hidden = !reasons
-  document.getElementById('hint').hidden = !reasons
 }
 fetch(location.pathname, { method: 'POST' }).then((res) => {
   if (res.ok) {
-    show('Your tab is in front', 'Do the step shown on the Playwriter card there. You can close this tab.')
+    show('Tab opened', 'You can close this page.')
     window.close()
     return
   }
-  show('This handoff has ended', 'No step is waiting for you in Playwriter. Usually because:', true)
+  show('Handoff ended', 'Ask the agent for a new link.')
 }).catch(() => {
-  show('Playwriter is not running', 'The Playwriter relay on this computer stopped. Ask the agent in chat to start again.')
+  show('Playwriter is not running', 'Ask the agent to start again.')
 })
 </script></body></html>`
 }
