@@ -391,7 +391,25 @@ start chrome.exe --profile-directory=Default
 Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
 ```
 
-You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs. For a step only they can do, hand them the tab with `handoff` (see utility functions).
+You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs. For a step only they can do, hand them the tab with `handoff` (see next section).
+
+## handing off to the user
+
+For a step only the user can do (sign-in, 2FA code, captcha, phone approval), call `handoff`. It shows a Playwriter card in the tab without stealing focus and prints a `[HINT]` with a link. Always send the link in chat: opening it brings the tab to the front and scrolls to the step.
+
+```js
+const { link } = await handoff({ page: state.page, message: 'Sign in to Discord with your own account.' })
+await handoff({ page: state.page, message: 'Enter the 6-digit code.', target: state.page.locator('#otp') }) // rings the field
+await handoff({ page: state.page, message: 'Approve the sign-in on your phone.', manual: true }) // nothing on the page changes: adds a Done button
+```
+
+Then wait in a separate execute with a long `--timeout`, in the background if you can. It holds the session; on timeout the card stays, so wait again. It throws if the user closes the card: then ask in chat.
+
+```js
+await waitForHandoff({ page: state.page, until: /\/channels\/@me/ }) // URL RegExp, or a function run in the page
+await waitForHandoff({ page: state.page }) // manual: waits for Done
+await clearHandoff({ page: state.page }) // remove the card without waiting
+```
 
 ## context variables
 
@@ -1188,25 +1206,6 @@ Put each action and its `wait()` in the **same execute call**, or the animation 
 ```js
 await ghostCursor.show({ page: state.page, style: 'screenstudio' }) // 'minimal' (default), 'dot', 'screenstudio'
 await ghostCursor.hide({ page: state.page }) // hide until next show() or hard navigation
-```
-
-**handoff / waitForHandoff** - hand the tab to the user for a step only they can do. The tab shows a Playwriter card with your one-line ask, without stealing focus. `handoff` returns `{ link }` and prints it as a `[HINT]`: always send it to the user in chat, opening it brings the tab to the front and scrolls to the step. `waitForHandoff` returns once the page shows the step is done:
-
-```js
-const { link } = await handoff({ page: state.page, message: 'Sign in to Discord with your own account.' })
-console.log(link) // send to the user: "Sign in to Discord here: <link>"
-// ring one element and put the card beside it
-await handoff({ page: state.page, message: 'Enter the 6-digit code.', target: state.page.locator('#otp') })
-// nothing on the page shows it's done: the card gets a Done button
-await handoff({ page: state.page, message: 'Approve the sign-in on your phone.', manual: true })
-```
-
-Wait in a separate execute with a long timeout, in the background if you can. It holds the session until it returns; on timeout the card stays, so wait again. It throws if the user closes the card, then ask in chat:
-
-```js
-await waitForHandoff({ page: state.page, until: /\/channels\/@me/ }) // URL RegExp, or a function run in the page
-await waitForHandoff({ page: state.page }) // manual handoff: waits for Done
-await clearHandoff({ page: state.page }) // remove the card without waiting
 ```
 
 **createDemoVideo** - for `clock: 'real'` recordings: speeds up idle sections (time between execute() calls) while keeping interactions at normal speed. Requires `ffmpeg`/`ffprobe`. Timestamps are tracked automatically during recording and returned by `state.video.stop()`. **Timeout**: can take 60–120+ seconds, always pass `--timeout 120000` or higher.
