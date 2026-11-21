@@ -140,6 +140,16 @@ await page.goto('https://example.com')
 // Don't call browser.close() - it would close the user's Chrome
 ```
 
+When you connect to the relay **directly** (LAN, Docker, localhost), send the token in an `Authorization` header instead. This keeps it out of URLs and process arguments, where other local users can read it with `ps`:
+
+```typescript
+const browser = await chromium.connectOverCDP('ws://192.168.1.10:19988/cdp/session1', {
+  headers: { Authorization: `Bearer ${process.env.PLAYWRITER_TOKEN}` },
+})
+```
+
+Keep `?token=` through a traforo tunnel: the tunnel does not forward WebSocket request headers.
+
 ## Use cases
 
 **Control a remote Mac mini** - Run Chrome on a headless machine and control it from your laptop. The Mac mini runs the tunnel persistently via tmux. Automate browser tasks, run tests against real Chrome, or manage web apps from anywhere.
@@ -267,7 +277,7 @@ On Linux, make sure the container has `--add-host=host.docker.internal:host-gate
 
 **Traforo URLs are non-guessable.** Each tunnel gets a unique ID (random UUID by default). Nobody can discover your tunnel by scanning.
 
-**Token authentication is required.** When `playwriter serve` binds to `0.0.0.0`, it refuses to start without a `--token`. Every privileged HTTP request (`/cli/*`, `/recording/*`) needs `Authorization: Bearer <token>` or `?token=<token>`, and every `/cdp` WebSocket connection needs `?token=<token>`. Without the correct token, the relay returns 401.
+**Token authentication is required.** When `playwriter serve` binds to `0.0.0.0`, it refuses to start without a `--token`. Every privileged HTTP request (`/cli/*`, `/recorder/*`) and every `/cdp` WebSocket connection needs `Authorization: Bearer <token>` or `?token=<token>`. Without the correct token, the relay returns 401.
 
 **Extension endpoint is localhost-only.** The `/extension` WebSocket endpoint only accepts connections from `127.0.0.1` or `::1`. A remote attacker cannot impersonate the extension even with the token.
 

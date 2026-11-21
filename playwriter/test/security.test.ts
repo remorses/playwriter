@@ -38,10 +38,10 @@ describe('Security Tests', () => {
     })
 
     // Helper to try connecting
-    const tryConnect = (tokenParam?: string) => {
+    const tryConnect = (tokenParam?: string, bearerToken?: string) => {
       return new Promise<void>((resolve, reject) => {
         const url = `ws://127.0.0.1:${TEST_PORT}/cdp${tokenParam ? `?token=${tokenParam}` : ''}`
-        const ws = new WebSocket(url)
+        const ws = new WebSocket(url, bearerToken ? { headers: { Authorization: `Bearer ${bearerToken}` } } : {})
 
         ws.on('open', () => {
           ws.close()
@@ -67,6 +67,10 @@ describe('Security Tests', () => {
 
     // 3. Correct token -> Should succeed
     await expect(tryConnect(token)).resolves.not.toThrow()
+
+    // 4. Authorization header keeps the token out of the URL and process arguments
+    await expect(tryConnect(undefined, 'wrong-token')).rejects.toThrow(/Unexpected response: (400|401|403)/)
+    await expect(tryConnect(undefined, token)).resolves.not.toThrow()
   })
 
   it('starts the MCP against a token-protected remote relay', async () => {
