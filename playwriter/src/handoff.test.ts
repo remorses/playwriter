@@ -95,6 +95,15 @@ describe('handoff', () => {
     expect(await page.locator(HOST).count()).toBe(0)
   })
 
+  it('moves a target card to the corner when a navigation drops the target', async () => {
+    await page.goto(`${baseUrl}/sign-in`)
+    await handoff({ page, message: 'Type your email here.', target: page.locator('#email') })
+    await page.goto(`${baseUrl}/sign-in?again`)
+    await page.locator(`${HOST} .card.corner`).waitFor({ timeout: 2000 })
+    expect(await page.locator(RING).count()).toBe(0)
+    await clearHandoff({ page })
+  })
+
   it('rings a target, follows it on scroll, and ends on a URL match', async () => {
     await page.goto(`${baseUrl}/sign-in`)
     await handoff({ page, message: 'Type your email here.', target: page.locator('#email') })

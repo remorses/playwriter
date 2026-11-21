@@ -181,19 +181,20 @@ function renderCard(arg: RenderArg): void {
 
   document.getElementById(arg.hostId)?.remove()
   document.getElementById(arg.ringId)?.remove()
+  // a navigation drops the target, so the card falls back to the corner
+  const anchor = spec.spot ? document.querySelector(`[${arg.targetAttr}]`) : null
+  const spot = Boolean(anchor)
   const host = el('playwriter-handoff')
   host.id = arg.hostId
-  pin(host, spec.spot ? arg.place.spot : arg.place.corner)
+  pin(host, spot ? arg.place.spot : arg.place.corner)
   const root = host.attachShadow({ mode: 'open' })
   const sheet = new window.CSSStyleSheet()
   sheet.replaceSync(arg.css)
   root.adoptedStyleSheets = [sheet]
-  if (spec.spot) {
-    document.querySelector(`[${arg.targetAttr}]`)?.style.setProperty('anchor-name', '--playwriter-handoff')
-  }
+  anchor?.style.setProperty('anchor-name', '--playwriter-handoff')
 
   const app = el('div', 'app')
-  if (spec.spot) app.append(svg(arg.icon, 'icon'))
+  if (spot) app.append(svg(arg.icon, 'icon'))
   app.append('Playwriter')
   const body = [app]
   if (spec.done) {
@@ -217,13 +218,13 @@ function renderCard(arg: RenderArg): void {
   }
   const text = el('div', 'text')
   text.append(...body)
-  const card = el('div', `card ${spec.spot ? 'spot' : 'corner'}${spec.done ? ' done' : ''}`)
+  const card = el('div', `card ${spot ? 'spot' : 'corner'}${spec.done ? ' done' : ''}`)
   card.setAttribute('role', 'status')
-  if (!spec.spot) card.append(svg(arg.icon, 'icon'))
+  if (!spot) card.append(svg(arg.icon, 'icon'))
   card.append(text)
   root.append(card)
   document.documentElement.appendChild(host)
-  if (spec.spot && !spec.done) {
+  if (spot && !spec.done) {
     const ring = el('playwriter-handoff-ring')
     ring.id = arg.ringId
     pin(ring, arg.place.ring)
