@@ -27,13 +27,5 @@
   "license": "",
   "dependencies": {
     "mcp-extension": "workspace:^"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "workerd"
-    ],
-    "overrides": {
-      "spiceflow": "1.26.0-rsc.22"
-    }
   }
 }

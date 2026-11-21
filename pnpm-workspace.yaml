@@ -7,10 +7,13 @@ packages:
 
 preferWorkspacePackages: true
 
-onlyBuiltDependencies:
-  - bufferutil
-  - esbuild
-  - sharp
+overrides:
+  spiceflow: 1.26.0-rsc.22
 
-ignoredBuiltDependencies:
-  - electron
+allowBuilds:
+  '@opencode/cli': false
+  bufferutil: true
+  electron: false
+  esbuild: true
+  sharp: true
+  workerd: true
