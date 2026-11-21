@@ -351,6 +351,21 @@ export type CloseTabsForKeyResult = {
   closedTabs: number
 }
 
+/** Sent by the relay when a client calls `releasePage(page)`. Detaches the debugger from the tab
+ *  with `targetId` and takes it out of its group, leaving it open for the user.
+ *  Old extensions reply `{id}` with no result; the relay then tells the caller to update. */
+export type ReleaseTabMessage = {
+  id: number
+  method: 'releaseTab'
+  params: {
+    targetId: string
+  }
+}
+
+export type ReleaseTabResult = {
+  success: boolean
+}
+
 export type CreateInitialTabParams = {
   /** Tab group title the auto-created tab joins (default 'playwriter') */
   tabGroup?: string

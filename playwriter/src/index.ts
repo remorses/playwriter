@@ -17,7 +17,7 @@ export type {
 } from './relay-client.js'
 export type { Browser, BrowserContext, Page } from './playwright-import.js'
 export type { TabGroupColor } from './protocol.js'
-export { getCDPSessionForPage, PlaywrightCDPSessionAdapter } from './cdp-session.js'
+export { getCDPSessionForPage, PlaywrightCDPSessionAdapter, releasePage } from './cdp-session.js'
 export type { ICDPSession } from './cdp-session.js'
 export { Editor } from './editor.js'
 export type { ReadResult, SearchMatch, EditResult } from './editor.js'

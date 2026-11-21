@@ -87,6 +87,34 @@ export async function getCDPSessionForPage({ page }: { page: Page }): Promise<Pl
 
 const cdpSessions = new WeakMap<Page, Promise<PlaywrightCDPSessionAdapter>>()
 
+/**
+ * Hands a tab back to the user: Playwriter detaches from it and it leaves the tab group, but it stays
+ * open. Resolves once the page is closed for Playwright. Chrome hides its debugging banner when no tab
+ * is attached anymore. Needs a Playwriter session connected through the extension.
+ */
+export async function releasePage({ page }: { page: Page }): Promise<void> {
+  const cdp = await getCDPSessionForPage({ page })
+  let onClose = () => {}
+  const closed = new Promise<void>((resolve) => {
+    onClose = resolve
+  })
+  page.once('close', onClose)
+  try {
+    // The relay intercepts this custom method. The detach can reach Playwright before the reply, and
+    // Playwright then rejects the command with TargetClosedError: the release still happened.
+    const error = await cdp.send('Playwriter.releasePage' as never).then(
+      () => undefined,
+      (e: Error) => e,
+    )
+    if (error && error.name !== 'TargetClosedError') {
+      throw error
+    }
+    await closed
+  } finally {
+    page.off('close', onClose)
+  }
+}
+
 /** Isolated world for playwriter's own page scripts. Pages cannot see its globals or calls. */
 export const PLAYWRITER_WORLD_NAME = `playwriter_${crypto.randomUUID().replaceAll('-', '')}`
 

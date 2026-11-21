@@ -78,7 +78,7 @@ await using page = await connection.browser.contexts()[0].newPage()
 await page.goto('https://example.com')
 ```
 
-**Always** close the tabs your script opens (`await using page` or `page.close()`). A tab you leave open stays in Chrome, so a later process can reuse it via `context.pages()`. Match the tab by its **exact** url (`p.url() === 'https://example.com/app'`), never `startsWith`/`includes`: `context.pages()` also lists tabs other sessions opened for other work. `closeTabsOnEnd: true` makes `close()` also close every tab the session opened.
+**Always** close the tabs your script opens (`await using page` or `page.close()`). A tab you leave open stays in Chrome, so a later process can reuse it via `context.pages()`. Match the tab by its **exact** url (`p.url() === 'https://example.com/app'`), never `startsWith`/`includes`: `context.pages()` also lists tabs other sessions opened for other work. `closeTabsOnEnd: true` makes `close()` also close every tab the session opened. To leave a tab open for the user instead, call `releasePage({ page })` (exported by `playwriter`).
 
 To share one tab between processes (for example many SDK scripts calling `fetch` inside a signed-in site), keep the holder list inside the tab (`window.__shared`, updated with one atomic `page.evaluate`), and let the last holder call `page.close()`. Full example: https://playwriter.dev/docs/sessions#sharing-one-tab-between-processes
 
@@ -1059,6 +1059,12 @@ await waitForPageLoad({ page: state.page, timeout?, pollInterval?, minWait? })
 ```js
 const cdp = await getCDPSession({ page: state.page })
 const metrics = await cdp.send('Page.getLayoutMetrics')
+```
+
+**releasePage** - hand a tab you opened back to the user (a form to finish, a page to read). It stays open, Playwriter detaches from it, and the page counts as closed for you:
+
+```js
+await releasePage({ page: state.page })
 ```
 
 **getLocatorStringForElement** - get stable Playwright selector from an element:

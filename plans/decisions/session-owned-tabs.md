@@ -8,5 +8,6 @@
 - (agent) OOPIF iframes and worker sessions follow the owner of their parent tab. Existing workers replay under their parent after reconnecting.
 - Why: agents in parallel sessions stop navigating or closing each other's tabs. A Playwright session no longer sends `Runtime.enable` to a Patchright session's tabs, which broke Patchright stealth.
 - Lost: one CLI session cannot pick up a tab another live CLI session opened.
+- (agent, issue #143) `releasePage({ page })` hands a tab back to the user: detached and ungrouped like an icon click, left open, invisible to every session. The relay checks ownership, so a session can only release tabs it can see.
 - Open: whether a session can adopt a shared tab so others stop seeing it.
 - Lives in: `playwriter/src/cdp-relay.ts` (`canClientSeeTarget`), `playwriter/src/relay-state.ts`, `extension/src/background.ts` (`ownerKey`).

@@ -357,6 +357,10 @@ export function getRemoteExtensionMethodRejection(method: string): string | null
   if (method === 'closeTabsForKey') {
     return 'Closing session tabs is not available over Remote control.'
   }
+  // The handler finds the tab by targetId among every local tab
+  if (method === 'releaseTab') {
+    return 'releasePage() is not available over Remote control.'
+  }
   if (method === 'ghost-browser') {
     return 'Ghost Browser APIs are not available over Remote control.'
   }

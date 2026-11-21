@@ -21,7 +21,7 @@ import { isRemoteExtensionKey } from './relay-state.js'
 import { REMOTE_EXTENSION_NOT_CONNECTED_ERROR } from './remote-control.js'
 import { EXTENSION_NOT_CONNECTED_ERROR, getExtensionOutdatedWarning } from './relay-client.js'
 import { waitForPageLoad, WaitForPageLoadOptions, WaitForPageLoadResult } from './wait-for-page-load.js'
-import { ICDPSession, getCDPSessionForPage } from './cdp-session.js'
+import { ICDPSession, getCDPSessionForPage, releasePage } from './cdp-session.js'
 import type { Protocol } from './cdp-types.js'
 import { Debugger } from './debugger.js'
 import { Editor } from './editor.js'
@@ -2048,6 +2048,7 @@ export class PlaywrightExecutor {
           return waitForPageLoad(options)
         },
         getCDPSession,
+        releasePage,
         createDebugger,
         createEditor,
         getStylesForLocator: getStylesForLocatorFn,

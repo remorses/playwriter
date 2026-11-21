@@ -474,6 +474,78 @@ describe('Session tab groups', () => {
     expect(cleaned.some((g) => g.title === 'agent-shared')).toBe(false)
   }, 60000)
 
+  it('releasePage leaves the tab open, detached and ungrouped, and hidden from later sessions', async () => {
+    const newSession = async () => {
+      const response = await fetch(`${SERVER_URL}/cli/session/new`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ tabGroup: 'agent-release' }),
+      })
+      return ((await response.json()) as { id: string }).id
+    }
+    const sessionId = await newSession()
+    const released = await executeCli({
+      sessionId,
+      code: js`
+        const page = await context.newPage();
+        await page.goto('about:blank');
+        await page.evaluate(() => { document.title = 'released' });
+        await releasePage({ page });
+        return page.isClosed();
+      `,
+    })
+    expect(released.text).toMatchInlineSnapshot(`"[return value] true"`)
+
+    const groups = await waitForGroups((g) => !g.some((group) => group.title === 'agent-release'))
+    expect(groups.some((g) => g.title === 'agent-release')).toBe(false)
+    const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
+    const tab = await serviceWorker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ title: 'released' })
+      // getTargets() also counts the test harness CDP connection, so probe with our own attach:
+      // it fails while this extension is attached
+      const probe = (tabId: number) => {
+        return chrome.debugger.attach({ tabId }, '1.3').then(
+          () => chrome.debugger.detach({ tabId }).then(() => 'free'),
+          () => 'attached',
+        )
+      }
+      const [attachedTabId] = globalThis.getExtensionState().tabs.keys()
+      return {
+        open: Boolean(tab),
+        tracked: globalThis.getExtensionState().tabs.has(tab.id!),
+        released: await probe(tab.id!),
+        stillAttachedTab: await probe(attachedTabId),
+      }
+    })
+    expect(tab).toMatchInlineSnapshot(`
+      {
+        "open": true,
+        "released": "free",
+        "stillAttachedTab": "attached",
+        "tracked": false,
+      }
+    `)
+
+    const later = await newSession()
+    const pages = await executeCli({
+      sessionId: later,
+      code: js`return JSON.stringify(await Promise.all(context.pages().map((p) => p.title())))`,
+    })
+    expect(pages.text).not.toContain('released')
+
+    await serviceWorker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ title: 'released' })
+      await chrome.tabs.remove(tab.id!)
+    })
+    for (const id of [sessionId, later]) {
+      await fetch(`${SERVER_URL}/cli/session/delete`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ sessionId: id, closeCreatedTabs: true }),
+      })
+    }
+  }, 60000)
+
   it('a session sees only its own tabs and popups plus toggled tabs, also after reconnecting', async () => {
     const newSession = async () => {
       const response = await fetch(`${SERVER_URL}/cli/session/new`, {

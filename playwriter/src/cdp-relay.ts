@@ -11,6 +11,7 @@ import type {
   ExtensionEventMessage,
   UpdateTabGroupResult,
   CloseTabsForKeyResult,
+  ReleaseTabResult,
 } from './protocol.js'
 import {
   DEFAULT_TAB_GROUP_TITLE,
@@ -854,7 +855,7 @@ export async function startPlayWriterCDPRelayServer({
         return {}
       }
       // Closing needs no focus, and a crashed tab never answers the focus command
-      if (executingSessions.has(focusSessionId) && method !== 'Target.closeTarget') {
+      if (executingSessions.has(focusSessionId) && method !== 'Target.closeTarget' && method !== 'Playwriter.releasePage') {
         await focusTab({ extensionId: resolvedExtensionId, tabSessionId: commandTarget.sessionId, cliSessionId: focusSessionId })
       }
     }
@@ -1016,6 +1017,23 @@ export async function startPlayWriterCDPRelayServer({
         throw new Error(
           'context.clearCookies() is not supported: in the user browser it deletes cookies for every site in the profile. Delete cookies by name with Network.deleteCookies on a page CDP session.',
         )
+      }
+
+      // releasePage(page): sent on the page's own session. canSee above already rejected other sessions' tabs.
+      case 'Playwriter.releasePage': {
+        if (!commandTarget || commandTarget.targetInfo.type !== 'page') {
+          throw new Error('releasePage() needs a page attached through Playwriter')
+        }
+        const result = (await sendToExtension({
+          extensionId: resolvedExtensionId,
+          method: 'releaseTab',
+          params: { targetId: commandTarget.targetId },
+        })) as ReleaseTabResult | undefined
+        // Old extensions do not know releaseTab and reply with an empty result
+        if (result?.success !== true) {
+          throw new Error('releasePage() needs a newer Playwriter extension. Update the extension.')
+        }
+        return {}
       }
 
       // Ghost Browser API - forward to extension for chrome.ghostPublicAPI/ghostProxies/projects

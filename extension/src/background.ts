@@ -12,7 +12,12 @@ import { createStore } from 'zustand/vanilla'
 import type { ExtensionState, ConnectionState, TabState, TabInfo } from './types'
 import { initPlaywriterToolbar } from './toolbar/toolbar'
 import type { CDPEvent, Protocol } from 'playwriter/src/cdp-types'
-import type { CloseTabsForKeyResult, ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/protocol'
+import type {
+  CloseTabsForKeyResult,
+  ExtensionCommandMessage,
+  ExtensionResponseMessage,
+  ReleaseTabResult,
+} from 'playwriter/src/protocol'
 import {
   DEFAULT_TAB_GROUP_TITLE,
   EXTENSION_INVENTORY_FAILED_CLOSE,
@@ -945,6 +950,28 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
       const closedTabs = results.filter((r) => r.status === 'fulfilled').length
       sink.send({ id: message.id, result: { success: true, closedTabs } satisfies CloseTabsForKeyResult })
     })
+    return
+  }
+
+  // Hand a tab back to the user (releasePage): detach like an icon click, keep the tab open.
+  // The relay already checked that the calling session may see the tab.
+  if (message.method === 'releaseTab') {
+    const targetId = (message.params as { targetId?: string } | undefined)?.targetId
+    const findTab = () => [...store.getState().tabs].find(([, info]) => targetId && info.targetId === targetId)
+    const pending = findTab()
+    // A reattach in flight would attach the tab again after the release, so let it settle first
+    if (pending) {
+      await tabReattaches.get(pending[0])
+    }
+    const entry = findTab()
+    if (!entry) {
+      sink.send({ id: message.id, error: `releaseTab: no attached tab with targetId ${targetId}` })
+      return
+    }
+    // Reply before detaching: Playwright rejects pending commands of a session once it sees
+    // Target.detachedFromTarget, so the response must reach the relay first.
+    sink.send({ id: message.id, result: { success: true } satisfies ReleaseTabResult })
+    await disconnectTab(entry[0])
     return
   }
 
