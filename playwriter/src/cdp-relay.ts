@@ -1666,7 +1666,8 @@ export async function startPlayWriterCDPRelayServer({
         }
       }
 
-      if (token && !isTokenEqual(new URL(c.req.url, 'http://localhost').searchParams.get('token'))) {
+      if (token && !hasValidToken(c)) {
+        logger?.log(pc.red(`Rejecting ${c.req.path}: invalid or missing token`))
         return c.text('Unauthorized', 401)
       }
       return next()
