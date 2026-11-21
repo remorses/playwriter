@@ -33,6 +33,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { VERSION, EXTENSION_IDS } from './utils.js'
+import { focusHandoff, focusPageHtml } from './handoff.js'
 import { createCdpLogger, type CdpLogEntry, type CdpLogger } from './cdp-log.js'
 import { appendSessionToWsUrl } from './chrome-discovery.js'
 import * as relayState from './relay-state.js'
@@ -1417,6 +1418,8 @@ export async function startPlayWriterCDPRelayServer({
   // allow through regardless of Host since remote clients use real hostnames.
   const ALLOWED_HOSTS = new Set([
     'localhost',
+    // handoff focus links; *.localhost always resolves to loopback (RFC 6761)
+    'playwriter.localhost',
     '127.0.0.1',
     '[::1]',
     '::1',
@@ -1525,6 +1528,16 @@ export async function startPlayWriterCDPRelayServer({
   // pid, instanceId and activeExecutes were added later. Old clients only read version.
   app.get('/version', (c) => {
     return c.json({ version: VERSION, pid: process.pid, instanceId: relayInstanceId, activeExecutes })
+  })
+
+  // Focus links from handoff(): the random handoff token is the secret, so no relay token is needed.
+  // GET only serves the page; the page POSTs, so link prefetchers never move focus.
+  app.get('/handoff/:token', (c) => {
+    return c.html(focusPageHtml())
+  })
+  app.post('/handoff/:token', async (c) => {
+    const focused = await focusHandoff({ token: c.req.param('token') }).catch(() => false)
+    return focused ? c.body(null, 204) : c.text('This handoff has ended', 404)
   })
 
   app.use('/extension/status', requireTokenWhenConfigured)

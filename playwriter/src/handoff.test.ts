@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import http from 'node:http'
 import vm from 'node:vm'
 import { chromium, type Page, type Browser } from '@xmorse/playwright-core'
-import { clearHandoff, handoff, waitForHandoff } from './handoff.js'
+import { clearHandoff, focusHandoff, handoff, waitForHandoff } from './handoff.js'
 
 const CSP = "default-src 'none'; style-src 'self'; require-trusted-types-for 'script'"
 const CSS = `body { font: 16px system-ui; margin: 0; padding: 120px 80px; }
@@ -19,6 +19,7 @@ const HOME = '<!doctype html><h1>Signed in</h1>'
 
 const HOST = '#__playwriter_handoff'
 const RING = '#__playwriter_handoff_ring'
+const RELAY = 'http://127.0.0.1:19988'
 
 describe('handoff', () => {
   let browser: Browser
@@ -54,14 +55,14 @@ describe('handoff', () => {
 
   it('shows a corner card with a Done button that ends a manual handoff', async () => {
     await page.goto(`${baseUrl}/sign-in`)
-    await handoff({ page, message: 'Approve the sign-in on your phone.', manual: true })
+    await handoff({ page, relayUrl: RELAY, message: 'Approve the sign-in on your phone.', manual: true })
     const card = page.locator(`${HOST} .card.corner`)
     expect(await card.textContent()).toMatchInlineSnapshot(
-      `"PlaywriterApprove the sign-in on your phone.Press Done once you've finished.Done"`,
+      `"PlaywriterApprove the sign-in on your phone.Press Done when finished.Done"`,
     )
 
     const wait = waitForHandoff({ page, timeout: 10_000 })
-    await page.locator(`${HOST} button`).click()
+    await page.locator(`${HOST} .done-button`).click()
     await page.locator(`${HOST} .got`).waitFor({ timeout: 2000 })
     expect(await page.locator(`${HOST} .got`).textContent()).toMatchInlineSnapshot(`"Got it, carrying on."`)
     await wait
@@ -75,7 +76,7 @@ describe('handoff', () => {
         document.body.dataset.clicked = '1'
       })
     })
-    await handoff({ page, message: 'Sign in with your own account.' })
+    await handoff({ page, relayUrl: RELAY, message: 'Sign in with your own account.' })
     const button = (await page.locator('#corner').boundingBox())!
     const card = (await page.locator(`${HOST} .card`).boundingBox())!
     expect(button.x > card.x && button.y > card.y && button.y < card.y + card.height).toBe(true)
@@ -86,7 +87,7 @@ describe('handoff', () => {
 
   it('comes back after a navigation until cleared', async () => {
     await page.goto(`${baseUrl}/sign-in`)
-    await handoff({ page, message: 'Sign in with your own account.' })
+    await handoff({ page, relayUrl: RELAY, message: 'Sign in with your own account.' })
     await page.goto(`${baseUrl}/sign-in?again`)
     await page.locator(`${HOST} .card.corner`).waitFor({ timeout: 2000 })
     await clearHandoff({ page })
@@ -97,7 +98,7 @@ describe('handoff', () => {
 
   it('moves a target card to the corner when a navigation drops the target', async () => {
     await page.goto(`${baseUrl}/sign-in`)
-    await handoff({ page, message: 'Type your email here.', target: page.locator('#email') })
+    await handoff({ page, relayUrl: RELAY, message: 'Type your email here.', target: page.locator('#email') })
     await page.goto(`${baseUrl}/sign-in?again`)
     await page.locator(`${HOST} .card.corner`).waitFor({ timeout: 2000 })
     expect(await page.locator(RING).count()).toBe(0)
@@ -106,7 +107,7 @@ describe('handoff', () => {
 
   it('rings a target, follows it on scroll, and ends on a URL match', async () => {
     await page.goto(`${baseUrl}/sign-in`)
-    await handoff({ page, message: 'Type your email here.', target: page.locator('#email') })
+    await handoff({ page, relayUrl: RELAY, message: 'Type your email here.', target: page.locator('#email') })
     const field = (await page.locator('#email').boundingBox())!
     const spot = page.locator(`${HOST} .card.spot`)
     // measure where the card lands, not where its entry animation starts
@@ -115,7 +116,9 @@ describe('handoff', () => {
     const card = (await spot.boundingBox())!
     expect(Math.abs(ring.x - (field.x - 4))).toBeLessThan(1)
     expect(Math.abs(ring.width - (field.width + 8))).toBeLessThan(1)
-    expect(Math.abs(card.y - (field.y + field.height + 14))).toBeLessThan(1)
+    // beside the field, centered on it, so it never covers the next field
+    expect(Math.abs(card.x - (field.x + field.width + 14))).toBeLessThan(1)
+    expect(Math.abs(card.y + card.height / 2 - (field.y + field.height / 2))).toBeLessThan(1)
 
     await page.mouse.wheel(0, 60)
     await page.waitForFunction((y) => document.querySelector('#email')!.getBoundingClientRect().y !== y, field.y)
@@ -130,9 +133,18 @@ describe('handoff', () => {
     expect(await page.locator(`${HOST}, ${RING}`).count()).toBe(0)
   })
 
+  it('ends any wait with an error when the user closes the card', async () => {
+    await page.goto(`${baseUrl}/sign-in`)
+    await handoff({ page, relayUrl: RELAY, message: 'Type your email here.', target: page.locator('#email') })
+    const wait = waitForHandoff({ page, until: /\/home$/, timeout: 10_000 })
+    await page.locator(`${HOST} .close`).click()
+    await expect(wait).rejects.toThrowErrorMatchingInlineSnapshot(`[Error: waitForHandoff: the user closed the Playwriter card without finishing. Ask them in chat what to do.]`)
+    expect(await page.locator(`${HOST}, ${RING}`).count()).toBe(0)
+  })
+
   it('ends on a page function', async () => {
     await page.goto(`${baseUrl}/sign-in`)
-    await handoff({ page, message: 'Type anything in the email box.' })
+    await handoff({ page, relayUrl: RELAY, message: 'Type anything in the email box.' })
     const wait = waitForHandoff({
       page,
       until: () => document.querySelector('#email').value.length > 0,
@@ -145,7 +157,7 @@ describe('handoff', () => {
 
   it('accepts a RegExp built in the execute sandbox', async () => {
     await page.goto(`${baseUrl}/sign-in`)
-    await handoff({ page, message: 'Press Continue.' })
+    await handoff({ page, relayUrl: RELAY, message: 'Press Continue.' })
     // sandbox code runs in its own vm context, so its RegExp is not an instance of this realm's RegExp
     const until = vm.runInNewContext('/\\/home$/')
     expect(until instanceof RegExp).toBe(false)
@@ -155,12 +167,22 @@ describe('handoff', () => {
     expect(await page.locator(HOST).count()).toBe(0)
   })
 
+  it('returns a focus link that works until the handoff ends', async () => {
+    await page.goto(`${baseUrl}/sign-in`)
+    const { link } = await handoff({ page, relayUrl: RELAY, message: 'Sign in with your own account.' })
+    expect(link).toMatch(/^http:\/\/127\.0\.0\.1:19988\/handoff\/[0-9a-f-]{36}$/)
+    const token = link.split('/').pop()!
+    expect(await focusHandoff({ token })).toBe(true)
+    await clearHandoff({ page })
+    expect(await focusHandoff({ token })).toBe(false)
+  })
+
   it('needs a handoff, and `until` unless it is manual', async () => {
     await page.goto(`${baseUrl}/sign-in`)
     await expect(waitForHandoff({ page, until: /x/ })).rejects.toThrowErrorMatchingInlineSnapshot(
       `[Error: waitForHandoff: no handoff is showing on this page. Call handoff({ page, message }) first.]`,
     )
-    await handoff({ page, message: 'Sign in with your own account.' })
+    await handoff({ page, relayUrl: RELAY, message: 'Sign in with your own account.' })
     await expect(waitForHandoff({ page })).rejects.toThrowErrorMatchingInlineSnapshot(
       `[Error: waitForHandoff needs \`until\` (a URL RegExp or a page function), or a handoff with \`manual: true\`]`,
     )
