@@ -44,6 +44,7 @@ import { createRecordingApi, createStreamApi } from './screen-recording.js'
 import { createDemoVideo } from './ffmpeg.js'
 import { type GhostCursorClientOptions } from './ghost-cursor.js'
 import { GhostCursorController } from './ghost-cursor-controller.js'
+import { clearHandoff, handoff, waitForHandoff, type HandoffOptions, type WaitForHandoffOptions } from './handoff.js'
 import { createCloudScope } from './cloud-scope.js'
 import { challengeWarning, detectChallenge, MAX_CHALLENGE_WAIT_MS, PROBE_TIMEOUT_MS } from './challenge-detection.js'
 import type { CloudAuth } from './cloud-client.js'
@@ -2062,6 +2063,18 @@ export class PlaywrightExecutor {
         ghostCursor: {
           show: showGhostCursor,
           hide: hideGhostCursor,
+        },
+        handoff: (options: HandoffOptions) => {
+          resolveSandboxPage({ helper: 'handoff', page: options?.page })
+          return handoff(options)
+        },
+        waitForHandoff: (options: WaitForHandoffOptions) => {
+          resolveSandboxPage({ helper: 'waitForHandoff', page: options?.page })
+          return waitForHandoff(options)
+        },
+        clearHandoff: (options: { page: Page }) => {
+          resolveSandboxPage({ helper: 'clearHandoff', page: options?.page })
+          return clearHandoff(options)
         },
         recording: {
           start: recordingApi.start,

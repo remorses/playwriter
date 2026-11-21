@@ -391,7 +391,7 @@ start chrome.exe --profile-directory=Default
 Start-Process chrome.exe -ArgumentList '--profile-directory=Default'
 ```
 
-You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs.
+You can collaborate with the user - they can help with captchas, difficult elements, or reproducing bugs. For a step only they can do, hand them the tab with `handoff` (see utility functions).
 
 ## context variables
 
@@ -485,10 +485,10 @@ Writing to any other path (e.g. `~/Downloads`, `~/Desktop`) throws `EPERM: opera
 - **Initialize state.page first**: see "working with pages". There is no default `page`. At the start of a task, assign `state.page` (a new tab, or the tab the user pointed to) and use `state.page` for all automation steps.
 - **Multiple calls**: use multiple execute calls for complex logic - helps understand intermediate state and isolate which action failed
 - **Never close**: never call `browser.close()` or `context.close()`. Only close pages you created or if user asks
-- **No bringToFront**: never call unless user asks - it's disruptive and unnecessary, you can interact with background pages
+- **Hand off in the tab, not in chat**: for a sign-in, 2FA code, captcha or approval, call `handoff` and wait for the page to show it's done. Don't call `bringToFront()` otherwise unless the user asks, you can interact with background pages
 - **Click before keyboard input in extension mode.** Call `click()` on the target field immediately before `fill()` or `keyboard` methods. CDP sends keyboard input to the browser's OS-focused surface, so DOM focus and `bringToFront()` can still leave text in Chrome's omnibox.
 - **Check state after actions**: always verify page state after clicking/submitting (see next section)
-- **Verification pages**: when a navigation lands on a verification or block page, execute prints a `[WARNING]` and already waited for checks that clear by themselves. Never reload or retry in a loop; ask the user to complete it in the tab, or stop on a block.
+- **Verification pages**: when a navigation lands on a verification or block page, execute prints a `[WARNING]` and already waited for checks that clear by themselves. Never reload or retry in a loop; hand it to the user with `handoff`, or stop on a block.
 - **Clean up only your listeners**: remove listeners you added by event name or handler reference. Never call `removeAllListeners()` because it also removes Playwriter's page error and console listeners.
 - **Tracked page errors are automatic**: uncaught errors from pages assigned directly to `state` keys appear in the current or next execute output as `[PAGE ERROR]`. Errors from pages tracked by other sessions are excluded.
 - **Always print page logs after every action**: call `getLatestLogs({ page: state.page, sinceLastCall: true })` after every goto, click, or submit to catch console errors and warnings. Do not manually collect `page.on('console')` events; manual listeners miss logs emitted before the listener is attached. The first `sinceLastCall` call returns all buffered logs including startup and hydration errors. `getLatestLogs` needs `page`. `snapshot` needs `page`, or a `locator`/`frame` from your tab.
@@ -927,7 +927,7 @@ console.log(snap)
 // Then re-snapshot to confirm the modal is gone before proceeding
 ```
 
-If the page requires login and the user is already logged into Chrome, their session cookies are available — just navigate and the page should load authenticated. If not, ask the user for help or use their existing logged-in tab via `context.pages()`.
+If the page requires login and the user is already logged into Chrome, their session cookies are available — just navigate and the page should load authenticated. If not, hand the tab to the user with `handoff` to sign in, or use their existing logged-in tab via `context.pages()`.
 
 **Extracting and downloading media (images, videos)** - use `page.evaluate()` to extract URLs from the rendered DOM, then download via Node.js in the sandbox. This is far more reliable than parsing raw HTML:
 
@@ -1188,6 +1188,24 @@ Put each action and its `wait()` in the **same execute call**, or the animation 
 ```js
 await ghostCursor.show({ page: state.page, style: 'screenstudio' }) // 'minimal' (default), 'dot', 'screenstudio'
 await ghostCursor.hide({ page: state.page }) // hide until next show() or hard navigation
+```
+
+**handoff / waitForHandoff** - hand the tab to the user for a step only they can do. The tab comes to the front with a Playwriter card showing your one-line ask, and `waitForHandoff` returns once the page shows the step is done:
+
+```js
+await handoff({ page: state.page, message: 'Sign in to Discord with your own account.' })
+// ring one element and put the card beside it
+await handoff({ page: state.page, message: 'Enter the 6-digit code.', target: state.page.locator('#otp') })
+// nothing on the page shows it's done: the card gets a Done button
+await handoff({ page: state.page, message: 'Approve the sign-in on your phone.', manual: true })
+```
+
+Wait in a separate execute with a long timeout, in the background if you can. It holds the session until it returns; on timeout the card stays, so wait again:
+
+```js
+await waitForHandoff({ page: state.page, until: /\/channels\/@me/ }) // URL RegExp, or a function run in the page
+await waitForHandoff({ page: state.page }) // manual handoff: waits for Done
+await clearHandoff({ page: state.page }) // remove the card without waiting
 ```
 
 **createDemoVideo** - for `clock: 'real'` recordings: speeds up idle sections (time between execute() calls) while keeping interactions at normal speed. Requires `ffmpeg`/`ffprobe`. Timestamps are tracked automatically during recording and returned by `state.video.stop()`. **Timeout**: can take 60–120+ seconds, always pass `--timeout 120000` or higher.
