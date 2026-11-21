@@ -88,6 +88,8 @@ pnpm reload  # builds playwriter, restarts the relay daemon, builds and opens ch
 
 then click the reload button on the extension card in Chrome. the extension has a stable dev ID (`pebbngnfojnignonigcnkdilknapkgid`) so you don't need to reconfigure anything.
 
+only when the user asks you to reload the extension, do it yourself: run `pnpm reload`, then load the `cua-driver` skill and click the `Reload` button on the Playwriter card in the Chrome `chrome://extensions` window. take a fresh window snapshot after the click and check the card shows no errors. never reload unasked.
+
 ## extension version
 
 after EVERY change made inside extension/ folder you MUST bump the manifest.json version. then create a git tag with extension@version after committing.
