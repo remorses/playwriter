@@ -287,7 +287,7 @@ export class Editor {
       throw new Error(`oldString found ${matchCount} times in ${url}. Provide more context to make it unique.`)
     }
 
-    const newSource = source.replace(oldString, newString)
+    const newSource = source.replace(oldString, () => newString)
     return this.setSource(id, newSource, dryRun)
   }
 
