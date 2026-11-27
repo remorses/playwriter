@@ -1,0 +1,51 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    #o-stage {
+      position: absolute;
+      inset: 0;
+    }
+    #o-icon {
+      position: absolute;
+      left: 540px;
+      top: 440px;
+      width: 200px;
+      height: 200px;
+    }
+    #o-wordmark {
+      position: absolute;
+      left: 780px;
+      top: 436px;
+      width: 640px;
+      height: 176px;
+    }
+  </style>
+  <div id="root" data-composition-id="outro" data-width="1920" data-height="1080" data-layout-allow-overflow>
+    <div id="o-stage">
+      <img id="o-icon" src="assets/logo.svg" alt="" />
+      <img id="o-wordmark" src="assets/wordmark.svg" alt="playwriter" />
+    </div>
+  </div>
+  <script src="assets/vo/lines.js"></script>
+  <script src="assets/timeline.js"></script>
+  <script>
+    // The mark lands on "handoff", the wordmark writes on "Playwriter". No other text.
+    ;(function () {
+      const { EV, HOSTS, word } = window.TIMELINE
+      const local = (t) => t - HOSTS.outro[0]
+      const DURATION = HOSTS.outro[1] - HOSTS.outro[0]
+      const tl = gsap.timeline({ paused: true })
+
+      tl.fromTo('#o-icon', { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.55, ease: 'back.out(1.7)' }, local(EV.logo))
+      tl.fromTo('#o-wordmark', { clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)', duration: 1.1, ease: 'power2.inOut' }, local(word('l9', 'latest')))
+      // slow push in, never still
+      tl.fromTo('#o-stage', { scale: 0.97 }, { scale: 1.04, duration: DURATION, ease: 'none', transformOrigin: '50% 50%' }, 0)
+
+      window.__timelines['outro'] = tl
+    })()
+  </script>
+</template>

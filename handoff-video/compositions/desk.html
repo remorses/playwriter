@@ -1,0 +1,825 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Geist';
+      src: url('assets/fonts/geist.woff2') format('woff2');
+      font-weight: 100 900;
+    }
+    @font-face {
+      font-family: 'Geist Mono';
+      src: url('assets/fonts/geist-mono.woff2') format('woff2');
+      font-weight: 100 900;
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      font-family: 'Geist', 'Inter', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── world: a desktop with three windows, moved by the camera ── */
+    #d-world,
+    #d-cam {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: 0 0;
+    }
+    .win {
+      position: absolute;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .lights {
+      position: absolute;
+      left: 20px;
+      top: 18px;
+      display: flex;
+      gap: 9px;
+    }
+    .lights i {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--off);
+    }
+    .lights i.on:nth-child(1) {
+      background: #ff5f57;
+    }
+    .lights i.on:nth-child(2) {
+      background: #febc2e;
+    }
+    .lights i.on:nth-child(3) {
+      background: #28c840;
+    }
+
+    /* Chrome */
+    #chrome {
+      left: 80px;
+      top: 120px;
+      width: 1180px;
+      height: 780px;
+      background: #202124;
+      --off: #5f6368;
+      z-index: 2;
+      box-shadow: 0 40px 90px rgba(9, 9, 11, 0.26), 0 8px 24px rgba(9, 9, 11, 0.16), 0 0 0 1px rgba(9, 9, 11, 0.5);
+    }
+    .tab {
+      position: absolute;
+      top: 8px;
+      height: 44px;
+      width: 250px;
+      border-radius: 10px 10px 0 0;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      color: #bdc1c6;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .tab.on {
+      background: #35363a;
+      color: #e8eaed;
+    }
+    .tab b {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      flex: none;
+      background: #4f46e5;
+    }
+    .tab img {
+      width: 18px;
+      height: 18px;
+      flex: none;
+    }
+    #toolbar {
+      position: absolute;
+      left: 0;
+      top: 52px;
+      width: 1180px;
+      height: 52px;
+      background: #35363a;
+    }
+    .nav {
+      position: absolute;
+      top: 10px;
+      font-size: 24px;
+      color: #9aa0a6;
+    }
+    #omni {
+      position: absolute;
+      left: 140px;
+      top: 9px;
+      width: 760px;
+      height: 34px;
+      border-radius: 17px;
+      background: #202124;
+      color: #e8eaed;
+      font-size: 18px;
+      line-height: 34px;
+      padding-left: 46px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    #omni::before {
+      content: '';
+      position: absolute;
+      left: 18px;
+      top: 11px;
+      width: 11px;
+      height: 9px;
+      border: 2px solid #9aa0a6;
+      border-radius: 3px;
+    }
+    #omni span {
+      position: absolute;
+      left: 46px;
+    }
+    #ext {
+      position: absolute;
+      left: 1124px;
+      top: 13px;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+    }
+    #pg {
+      position: absolute;
+      left: 0;
+      top: 104px;
+      width: 1180px;
+      height: 676px;
+      background: #f6f7f9;
+      overflow: hidden;
+    }
+    /* page content at real CSS px, scaled 1.2 into the window */
+    #pg-inner {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 983px;
+      height: 564px;
+      transform: scale(1.2);
+      transform-origin: 0 0;
+      font: 15px/22px Inter, -apple-system, system-ui, sans-serif;
+      color: #111827;
+    }
+    .page {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+    }
+    .page main {
+      position: absolute;
+      left: 110px;
+      top: 56px;
+      width: 400px;
+      padding: 40px;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 0 0 1px #e5e7eb, 0 8px 24px rgba(0, 0, 0, 0.04);
+    }
+    .brand {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+      margin-bottom: 28px;
+    }
+    .brand b {
+      color: #4f46e5;
+    }
+    .page h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      line-height: 28px;
+      letter-spacing: -0.02em;
+    }
+    .page p {
+      margin: 0;
+      color: #6b7280;
+    }
+    .field {
+      margin-top: 18px;
+    }
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+    .field div {
+      height: 40px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 0 12px;
+      line-height: 40px;
+      font-size: 15px;
+    }
+    #otp {
+      display: flex;
+      gap: 8px;
+      margin: 24px 0;
+      width: 352px;
+    }
+    #otp i {
+      width: 52px;
+      height: 60px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font: normal 600 24px/58px Inter, system-ui, sans-serif;
+      text-align: center;
+      color: #111827;
+      box-sizing: border-box;
+    }
+    .btn {
+      height: 44px;
+      border-radius: 10px;
+      background: #4f46e5;
+      color: #fff;
+      font-weight: 600;
+      text-align: center;
+      line-height: 44px;
+    }
+    .resend {
+      margin-top: 16px;
+      text-align: center;
+      font-size: 14px;
+    }
+    .resend a {
+      color: #4f46e5;
+    }
+    .gline {
+      height: 10px;
+      border-radius: 5px;
+      background: #e5e7eb;
+      margin-top: 14px;
+    }
+    .oauth {
+      height: 42px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      margin-top: 12px;
+      text-align: center;
+      line-height: 42px;
+      font-weight: 600;
+    }
+    #focus-page {
+      position: absolute;
+      left: 0;
+      top: -60px;
+      width: 983px;
+      height: 614px;
+      opacity: 0;
+    }
+    .host {
+      position: absolute;
+      display: flex;
+      align-items: center;
+    }
+    #ring {
+      position: absolute;
+      border-radius: 10px;
+      opacity: 0;
+    }
+    #a-cur {
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+    }
+    #a-cur img {
+      width: 22px;
+      height: 34px;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+    }
+    #a-tag {
+      position: absolute;
+      left: 18px;
+      top: 26px;
+      padding: 2px 8px;
+      border-radius: 7px;
+      background: #ff6a00;
+      color: #fff;
+      font-weight: 600;
+      font-size: 12px;
+      line-height: 18px;
+      white-space: nowrap;
+    }
+
+    /* Notes: the app you are typing in */
+    #notes {
+      left: 900px;
+      top: 650px;
+      width: 660px;
+      height: 360px;
+      background: #fffdf7;
+      --off: #d4d4d8;
+      z-index: 3;
+      box-shadow: 0 30px 70px rgba(9, 9, 11, 0.2), 0 6px 18px rgba(9, 9, 11, 0.12), 0 0 0 1px rgba(9, 9, 11, 0.08);
+    }
+    .wtitle {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      top: 14px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 600;
+      color: #52525b;
+    }
+    #notes-body {
+      position: absolute;
+      left: 44px;
+      top: 70px;
+      font-size: 26px;
+      line-height: 44px;
+      color: #27272a;
+    }
+    #notes-body h3 {
+      margin: 0 0 4px;
+      font-size: 30px;
+      font-weight: 700;
+    }
+    .caret {
+      display: inline-block;
+      width: 3px;
+      height: 30px;
+      margin-left: 2px;
+      vertical-align: -5px;
+      background: #f59e0b;
+    }
+
+    /* the agent chat */
+    #chat {
+      left: 1300px;
+      top: 80px;
+      width: 500px;
+      height: 560px;
+      background: #ffffff;
+      --off: #d4d4d8;
+      z-index: 1;
+      box-shadow: 0 30px 70px rgba(9, 9, 11, 0.18), 0 6px 18px rgba(9, 9, 11, 0.1), 0 0 0 1px rgba(9, 9, 11, 0.08);
+    }
+    #chat-body {
+      position: absolute;
+      left: 22px;
+      right: 22px;
+      top: 64px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .msg {
+      max-width: 400px;
+      padding: 11px 16px;
+      border-radius: 18px;
+      font-size: 19px;
+      line-height: 27px;
+    }
+    .msg.me {
+      align-self: flex-end;
+      background: #09090b;
+      color: #fff;
+      border-bottom-right-radius: 6px;
+    }
+    .msg.bot {
+      align-self: flex-start;
+      background: #f2f2f5;
+      color: #18181b;
+      border-bottom-left-radius: 6px;
+    }
+    .link {
+      display: block;
+      margin-top: 8px;
+      padding: 6px 12px;
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 0 0 1px #e4e4e7;
+      font-family: 'Geist Mono', monospace;
+      font-size: 16px;
+      line-height: 24px;
+      color: #2563eb;
+      white-space: nowrap;
+    }
+    #u-cur {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 30px;
+      height: 46px;
+      opacity: 0;
+      z-index: 9;
+      filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.25));
+    }
+
+    #verify-scroll {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 983px;
+      height: 1000px;
+    }
+    .faq {
+      position: absolute;
+      left: 150px;
+      width: 400px;
+    }
+    #m3-host {
+      background: linear-gradient(rgba(255, 106, 0, 0.18), rgba(255, 106, 0, 0.18)) no-repeat 0 0 / 0% 100%;
+      border-radius: 4px;
+    }
+  </style>
+  <div id="root" data-composition-id="desk" data-width="1920" data-height="1080" data-layout-allow-overflow data-layout-allow-overlap>
+    <div id="d-world">
+      <div id="d-cam">
+        <div id="chat" class="win">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="wtitle">Agent</div>
+          <div id="chat-body">
+            <div class="msg me">Reorder my keyboard switches on shoply.</div>
+            <div class="msg bot">On it. Signing in to shoply…</div>
+            <div id="m3" class="msg bot">shoply sent a code to your phone. Open this and type it in:<span id="m3-link" class="link"><span id="m3-host">playwriter.localhost:19988</span>/handoff/0ba4…</span></div>
+            <div id="m4" class="msg bot">Verified. Ordering the switches now.</div>
+            <div id="m5" class="msg bot">You closed the card. What should I do instead?</div>
+          </div>
+        </div>
+
+        <div id="chrome" class="win">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div id="tab1" class="tab on" style="left: 96px"><b></b><span id="tab1-title">Sign in · shoply</span></div>
+          <div class="tab" style="left: 350px"><b style="background: #ea4335"></b>Inbox · Mail</div>
+          <div class="tab" style="left: 604px"><b style="background: #4285f4"></b>Launch plan · Docs</div>
+          <div id="tab2" class="tab" style="left: 858px"><img src="assets/icon-green.png" alt="" />Playwriter</div>
+          <div id="toolbar">
+            <div class="nav" style="left: 24px">←</div>
+            <div class="nav" style="left: 62px">→</div>
+            <div class="nav" style="left: 100px">↻</div>
+            <div id="omni">
+              <span id="u-login">shoply.com/login</span><span id="u-verify" style="opacity: 0">shoply.com/verify</span><span id="u-focus" style="opacity: 0">playwriter.localhost:19988/handoff/0ba4ecef</span><span id="u-account" style="opacity: 0">shoply.com/account</span><span id="u-acme" style="opacity: 0">acme.dev/login</span>
+            </div>
+            <img id="ext" src="assets/icon-green.png" alt="" />
+          </div>
+          <div id="pg" data-layout-ignore>
+            <div id="pg-inner">
+              <div id="p-login" class="page">
+                <main>
+                  <div class="brand">shop<b>ly</b></div>
+                  <h1>Sign in</h1>
+                  <p>Welcome back. Sign in to continue.</p>
+                  <div class="field"><label>Email</label><div id="login-email"></div></div>
+                  <div class="field"><label>Password</label><div id="login-pass"></div></div>
+                  <div id="login-btn" class="btn" style="margin-top: 22px">Sign in</div>
+                </main>
+              </div>
+              <div id="p-verify" class="page">
+                <div id="verify-scroll">
+                <main id="verify-main">
+                  <div class="brand">shop<b>ly</b></div>
+                  <h1>Verify it's you</h1>
+                  <p>Enter the 6-digit code we sent to your phone ending in 42.</p>
+                  <div id="otp"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div id="verify-btn" class="btn">Verify</div>
+                  <div class="resend">Didn't get it? <a>Resend code</a></div>
+                </main>
+                <div id="ring"></div>
+                <div id="card-spot" class="host"></div>
+                <div id="card-done" class="host"></div>
+                <div class="faq" style="top: 560px">
+                  <div class="gline" style="width: 220px"></div>
+                  <div class="gline" style="width: 380px"></div>
+                  <div class="gline" style="width: 340px"></div>
+                  <div class="gline" style="width: 200px; margin-top: 30px"></div>
+                  <div class="gline" style="width: 360px"></div>
+                  <div class="gline" style="width: 300px"></div>
+                  <div class="gline" style="width: 240px; margin-top: 30px"></div>
+                  <div class="gline" style="width: 390px"></div>
+                </div>
+                </div>
+              </div>
+              <div id="p-account" class="page">
+                <main>
+                  <div class="brand">shop<b>ly</b></div>
+                  <h1>Welcome back, Tommy</h1>
+                  <p>Your orders</p>
+                  <div class="gline" style="width: 300px; margin-top: 22px"></div>
+                  <div class="gline" style="width: 240px"></div>
+                  <div class="gline" style="width: 280px"></div>
+                  <div class="gline" style="width: 200px"></div>
+                </main>
+              </div>
+              <div id="p-acme" class="page" style="background: #fff">
+                <main style="box-shadow: none">
+                  <div class="brand">acme</div>
+                  <h1>Sign in to continue</h1>
+                  <p>Use your work account.</p>
+                  <div class="oauth" style="margin-top: 22px">Continue with Google</div>
+                  <div class="oauth">Continue with SSO</div>
+                </main>
+                <div id="card-corner" class="host" style="right: 16px; top: 16px"></div>
+              </div>
+              <img id="focus-page" src="assets/card/focus-page.png" alt="" />
+              <div id="a-cur"><img src="assets/cursor.svg" alt="" /><span id="a-tag">agent</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="notes" class="win">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <div class="wtitle">Notes</div>
+          <div id="notes-body">
+            <h3>Friday launch</h3>
+            <div>- record the demo</div>
+            <div id="n1">- </div>
+            <div id="n2"></div>
+          </div>
+        </div>
+
+        <img id="u-cur" src="assets/cursor.svg" alt="" />
+      </div>
+    </div>
+
+  </div>
+  <script src="assets/card/card.js"></script>
+  <script src="assets/vo/lines.js"></script>
+  <script src="assets/timeline.js"></script>
+  <script>
+    // One desktop (Chrome, the agent chat, Notes) and one camera, under the voiceover. No text on top.
+    // Every time comes from TIMELINE (assets/timeline.js), which is keyed to the spoken words.
+    // Chrome sits behind Notes: the agent works there while you keep typing.
+    ;(function () {
+      const { everyFrame, camera, applyCamera, humanPath, track, still, handoffCard } = Kit
+      const { EV, START, HOSTS } = window.TIMELINE
+      const DURATION = HOSTS.desk[1] - HOSTS.desk[0]
+      const tl = gsap.timeline({ paused: true })
+      const $ = (id) => document.getElementById(id)
+
+      // ── geometry ───────────────────────────────────────────────────────────
+      const PG = { x: 80, y: 224, s: 1.2 } // page coords (pg-inner, real CSS px) to world coords
+      const toWorld = (p) => ({ x: PG.x + p.x * PG.s, y: PG.y + p.y * PG.s })
+      // layout offset of el inside ancestor (ignores transforms, so it is stable)
+      function offset(el, ancestor) {
+        let x = 0
+        let y = 0
+        for (let n = el; n && n !== ancestor; n = n.offsetParent) {
+          x += n.offsetLeft
+          y += n.offsetTop
+        }
+        return { x, y, w: el.offsetWidth, h: el.offsetHeight }
+      }
+
+      // ── the real card: DOM and CSS captured from handoff() ─────────────────
+      handoffCard($('card-spot'), 'spot')
+      const doneCard = handoffCard($('card-done'), 'done')
+      const cornerCard = handoffCard($('card-corner'), 'corner')
+      const inner = $('pg-inner')
+      const otp = offset($('otp'), inner)
+      // beside the target, centered on it, 14px away (handoff's position-area: right)
+      for (const id of ['card-spot', 'card-done']) {
+        Object.assign($(id).style, { left: `${otp.x + otp.w + 14}px`, top: `${otp.y - 100}px`, height: `${otp.h + 200}px` })
+      }
+      Object.assign($('ring').style, {
+        left: `${otp.x - 4}px`,
+        top: `${otp.y - 4}px`,
+        width: `${otp.w + 8}px`,
+        height: `${otp.h + 8}px`,
+        boxShadow: window.HANDOFF_CARD.ringShadow,
+      })
+      gsap.set(['#card-spot', '#card-done', '#card-corner'], { opacity: 0 })
+      const OTP_W = toWorld({ x: otp.x + otp.w / 2, y: otp.y + otp.h / 2 })
+      // the field plus its card, framed together
+      const SPOT_W = toWorld({ x: otp.x + otp.w / 2 + 190, y: otp.y + otp.h / 2 })
+
+      // ── focus: which window is in front ────────────────────────────────────
+      const FOCUS = [
+        [-1, 'notes'],
+        [EV.steal, 'chrome'],
+        [EV.unsteal, 'notes'],
+        [EV.front, 'chrome'],
+      ]
+      const focusAt = (t) => FOCUS.filter(([s]) => t >= s).pop()[1]
+      function drawFocus(t) {
+        const f = focusAt(t)
+        for (const id of ['chrome', 'notes', 'chat']) {
+          for (const dot of $(id).querySelectorAll('.lights i')) dot.classList.toggle('on', id === f)
+        }
+        $('chrome').style.zIndex = f === 'chrome' ? 5 : 2
+      }
+
+      // ── typing: text is a function of t, so carets sit right after the last key ─
+      const typedCount = (e, t) => (t < e.start ? 0 : Math.min(e.text.length, Math.floor((t - e.start) / e.gap) + 1))
+      const lastKey = (e, t) => e.start + e.gap * (typedCount(e, t) - 1)
+      // Notes: one line is cut off when Chrome jumps in front, then resumes after the rewind
+      const NOTES = [
+        { el: $('n1'), prefix: '- ', parts: [EV.notesA, EV.notesB] },
+        { el: $('n2'), prefix: '', parts: [EV.notesC] },
+      ]
+      const caret = document.createElement('span')
+      caret.className = 'caret'
+      function drawNotes(t) {
+        let active = NOTES[0]
+        let last = -1
+        for (const line of NOTES) {
+          let text = line.prefix
+          for (const part of line.parts) {
+            const n = typedCount(part, t)
+            text += part.text.slice(0, n)
+            if (n > 0) {
+              active = line
+              last = Math.max(last, lastKey(part, t))
+            }
+          }
+          line.el.textContent = text
+        }
+        // caret: only while Notes has focus, solid while typing, blinking otherwise
+        const blink = t - last < 0.5 || Math.floor(t * 1.9) % 2 === 0
+        if (focusAt(t) === 'notes' && blink) active.el.appendChild(caret)
+        else caret.remove()
+      }
+      function drawTyping(t) {
+        $('login-email').textContent = EV.email.text.slice(0, typedCount(EV.email, t))
+        $('login-pass').textContent = EV.pass.text.slice(0, typedCount(EV.pass, t))
+        // OTP: you type the code from your phone; the box being typed gets a focus border
+        const boxes = $('otp').children
+        const next = EV.digits.findIndex((x) => t < x)
+        const typingNow = t >= EV.digits[0] - 0.4 && t < EV.digits[5] + 0.2
+        EV.digits.forEach((d, i) => {
+          boxes[i].textContent = t >= d ? '482917'[i] : ''
+          boxes[i].style.borderColor = typingNow && i === (next === -1 ? 5 : next) ? '#4f46e5' : '#d1d5db'
+        })
+      }
+
+      // ── pages ─────────────────────────────────────────────────────────────
+      const URLS = ['u-login', 'u-verify', 'u-focus', 'u-account', 'u-acme']
+      const TAB_TITLES = [[-1, 'Sign in · shoply']]
+      function page(time, id, url, tab) {
+        tl.set('.page', { opacity: 0 }, time)
+        tl.set(`#${id}`, { opacity: 1 }, time)
+        tl.set(URLS.map((u) => `#${u}`), { opacity: 0 }, time)
+        tl.set(`#${url}`, { opacity: 1 }, time)
+        TAB_TITLES.push([time, tab])
+      }
+      gsap.set('#p-login', { opacity: 1 })
+
+      // ── cursors ───────────────────────────────────────────────────────────
+      const agent = track({ x: 700, y: 420 }) // page coords
+      const vmain = offset($('verify-main'), inner)
+      const LOGIN_EMAIL = { x: 300, y: 228 }
+      const LOGIN_BTN = { x: 330, y: 352 }
+      const vbtn = offset($('verify-btn'), inner)
+      const VBTN = { x: vbtn.x + 180, y: vbtn.y + 24 }
+      const PARK = { x: vmain.x + 70, y: vmain.y + vmain.h + 30 }
+      const you = track({ x: 1250, y: 840 }) // world coords
+      function click(sel, time, origin = '4px 4px') {
+        tl.to(sel, { scale: 0.82, duration: 0.07, ease: 'power2.in', transformOrigin: origin }, time)
+        tl.to(sel, { scale: 1, duration: 0.22, ease: 'power2.out' }, time + 0.1)
+      }
+      const press = (sel, time) => tl.fromTo(sel, { scale: 1 }, { scale: 0.97, duration: 0.08, yoyo: true, repeat: 1, immediateRender: false }, time)
+      const bubble = (sel, time) =>
+        tl.fromTo(sel, { opacity: 0, y: 30, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: 'expo.out', transformOrigin: '0 100%' }, time)
+      gsap.set(['#m3', '#m4', '#m5'], { opacity: 0 })
+
+      // ── l1: the agent signs in ─────────────────────────────────────────────
+      tl.fromTo('#d-world', { y: 900, opacity: 0 }, { y: 0, opacity: 1, duration: 1.3, ease: 'expo.out' }, 0)
+      tl.to('#a-cur', { opacity: 1, duration: 0.3 }, EV.agentIn)
+      agent.move(humanPath({ x: 700, y: 420 }, LOGIN_EMAIL, 0.25), EV.agentIn, EV.emailClick - EV.agentIn - 0.05)
+      click('#a-cur img', EV.emailClick, '3px 3px')
+      agent.move(humanPath(LOGIN_EMAIL, LOGIN_BTN, -0.3), EV.signinMove, EV.signinClick - EV.signinMove - 0.1)
+      click('#a-cur img', EV.signinClick, '3px 3px')
+      press('#login-btn', EV.signinClick)
+      page(EV.verifyAt, 'p-verify', 'u-verify', "Verify it's you · shoply")
+
+      // ── l2: it stops at the code ───────────────────────────────────────────
+      agent.move(humanPath(LOGIN_BTN, PARK, 0.2), EV.verifyAt + 0.25, 0.8)
+      tl.to('#a-cur', { opacity: 0.4, duration: 0.6 }, EV.waiting)
+
+      // ── l3: the obvious fix takes your screen, then rewinds ────────────────
+      tl.fromTo('#chrome', { scale: 1 }, { scale: 1.035, duration: 0.5, ease: 'expo.out', transformOrigin: '50% 50%', immediateRender: false }, EV.steal)
+      tl.to('#chrome', { scale: 1, duration: 0.6, ease: 'power2.inOut' }, EV.steal + 0.5)
+      tl.fromTo('#chrome', { x: 0, filter: 'blur(0px)' }, { x: -24, filter: 'blur(3px)', duration: 0.18, yoyo: true, repeat: 3, ease: 'sine.inOut', immediateRender: false }, EV.rewind)
+
+      // ── l4: the real card appears beside the field, Notes keeps typing ─────
+      // the card's own entrance: translateY(-8px) scale(0.96) to rest
+      tl.fromTo('#card-spot', { opacity: 0, y: -8, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.6, ease: 'expo.out' }, EV.cardIn)
+      tl.fromTo('#ring', { opacity: 0, scale: 1.05 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'expo.out' }, EV.cardIn + 0.08)
+
+      // ── l5: the agent sends a link to localhost ────────────────────────────
+      // the tab drifts away from the field in the background, so the link has somewhere to scroll back to
+      tl.fromTo('#verify-scroll', { y: 0 }, { y: -430, duration: 1.0, ease: 'power2.inOut' }, EV.scrollAway)
+      bubble('#m3', EV.linkMsg)
+      tl.to('#m3-host', { backgroundSize: '100% 100%', duration: 0.7, ease: 'power2.out' }, EV.linkHighlight)
+      tl.to('#m3-host', { backgroundSize: '0% 100%', duration: 0.4, ease: 'power2.in' }, EV.linkClick + 0.6)
+
+      // ── l6: one click brings the right tab to the front, at the right spot ─
+      const linkOff = offset($('m3-link'), $('chat'))
+      const LINK = { x: 1300 + linkOff.x + 150, y: 80 + linkOff.y + 14 }
+      tl.fromTo('#u-cur', { opacity: 0 }, { opacity: 1, duration: 0.25 }, EV.youIn)
+      you.move(humanPath({ x: 1250, y: 840 }, LINK, 0.25), EV.youIn + 0.1, EV.linkClick - EV.youIn - 0.2)
+      click('#u-cur', EV.linkClick)
+      tl.to('#m3-link', { backgroundColor: '#eff6ff', duration: 0.12, yoyo: true, repeat: 1 }, EV.linkClick)
+      // Chrome comes forward on the focus page, which focuses the handoff tab and closes itself
+      tl.fromTo('#chrome', { scale: 0.985 }, { scale: 1, duration: 0.7, ease: 'expo.out', transformOrigin: '50% 50%', immediateRender: false }, EV.front)
+      tl.set('#focus-page', { opacity: 1 }, EV.front)
+      tl.set('#a-cur', { opacity: 0 }, EV.front)
+      tl.set('#u-verify', { opacity: 0 }, EV.front)
+      tl.set('#u-focus', { opacity: 1 }, EV.front)
+      tl.set('#focus-page', { opacity: 0 }, EV.back)
+      tl.set('#u-focus', { opacity: 0 }, EV.back)
+      tl.set('#u-verify', { opacity: 1 }, EV.back)
+      tl.to('#verify-scroll', { y: 0, duration: 0.8, ease: 'power3.inOut' }, EV.scrollBack)
+      tl.fromTo('#ring', { scale: 1 }, { scale: 1.035, duration: 0.25, yoyo: true, repeat: 1, ease: 'sine.inOut', immediateRender: false }, EV.scrollBack + 0.8)
+      tl.to('#u-cur', { opacity: 0, duration: 0.3 }, EV.back + 0.4)
+
+      // ── l7: you type the code, the card confirms, the agent carries on ─────
+      tl.to('#ring', { opacity: 0, duration: 0.25 }, EV.got)
+      tl.to('#card-spot', { opacity: 0, duration: 0.2 }, EV.got)
+      tl.fromTo('#card-done', { opacity: 0, scale: 0.985 }, { opacity: 1, scale: 1, duration: 0.35, ease: 'expo.out' }, EV.got)
+      const check = doneCard.querySelector('.check')
+      if (check) tl.fromTo(check, { scale: 0.3 }, { scale: 1, duration: 0.4, ease: 'back.out(2.2)' }, EV.got + 0.05)
+      tl.to('#card-done', { opacity: 0, duration: 0.2 }, EV.cleared)
+      tl.to('#a-cur', { opacity: 1, duration: 0.25 }, EV.cleared)
+      agent.move(humanPath(PARK, VBTN, 0.3), EV.cleared + 0.15, EV.verifyClick - EV.cleared - 0.25)
+      click('#a-cur img', EV.verifyClick, '3px 3px')
+      press('#verify-btn', EV.verifyClick)
+      page(EV.verifyClick + 0.35, 'p-account', 'u-account', 'Account · shoply')
+      bubble('#m4', EV.verifiedMsg)
+      tl.to('#a-cur', { opacity: 0, duration: 0.4 }, EV.verifiedMsg + 0.6)
+
+      // ── l8: close the card, the agent asks in chat ─────────────────────────
+      // the agent moves on to another site in the same tab, and needs you again
+      page(EV.nextSite, 'p-acme', 'u-acme', 'Sign in · acme')
+      tl.fromTo('#card-corner', { opacity: 0, y: -8, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.6, ease: 'expo.out' }, EV.cornerIn)
+      const closeBtn = cornerCard.querySelector('.close')
+      const hostOff = offset($('card-corner'), inner)
+      // the X sits at the top right of the card (handoff.ts CSS: 14px padding, 22px button)
+      const X = toWorld({ x: hostOff.x + hostOff.w - 14 - 9, y: hostOff.y + (hostOff.h - cornerCard.offsetHeight) / 2 + 14 + 10 })
+      const FROM = { x: 1120, y: 620 }
+      const X_MOVE = EV.xClick - 1.05
+      tl.set('#u-cur', { opacity: 1 }, X_MOVE - 0.1)
+      you.move(still(FROM), X_MOVE - 0.11, 0.01)
+      you.move(humanPath(FROM, X, -0.25), X_MOVE, 0.9)
+      click('#u-cur', EV.xClick)
+      if (closeBtn) tl.to(closeBtn, { scale: 0.94, duration: 0.08, yoyo: true, repeat: 1 }, EV.xClick)
+      // the card's own leaving style: opacity 0, scale 0.96, 180 ms
+      tl.to('#card-corner', { opacity: 0, scale: 0.96, duration: 0.18, ease: 'power1.out' }, EV.xClick + 0.08)
+      bubble('#m5', EV.askMsg)
+      tl.to('#u-cur', { opacity: 0, duration: 0.3 }, EV.askMsg + 0.6)
+      tl.to('#d-world', { x: -2600, duration: 0.55, ease: 'power3.in' }, EV.deskOut)
+
+      // ── camera: world point (x, y) at the screen center, zoom z ────────────
+      const CHAT = { x: 1550, y: 330 }
+      const CAM = [
+        { t: 0, x: 690, y: 500, z: 1.3 },
+        { t: EV.signinClick, x: 660, y: 490, z: 1.42 },
+        { t: START.l2 + 0.3, x: OTP_W.x + 40, y: OTP_W.y, z: 1.6 },
+        { t: START.l3 - 0.2, x: OTP_W.x + 20, y: OTP_W.y, z: 1.82 },
+        { t: START.l3 + 0.9, x: 950, y: 560, z: 0.92 },
+        { t: EV.unsteal, x: 950, y: 570, z: 0.98 },
+        { t: START.l4 + 0.6, x: 880, y: 620, z: 1.0 },
+        { t: EV.cardIn + 0.5, x: SPOT_W.x, y: SPOT_W.y + 40, z: 1.45 },
+        { t: START.l5 - 0.1, x: SPOT_W.x + 20, y: SPOT_W.y + 50, z: 1.5 },
+        { t: EV.linkMsg + 0.6, x: CHAT.x, y: CHAT.y, z: 1.45 },
+        { t: EV.linkHighlight - 0.3, x: CHAT.x - 10, y: CHAT.y + 20, z: 1.55 },
+        { t: EV.linkHighlight + 0.6, x: LINK.x - 40, y: LINK.y, z: 2.5 },
+        { t: START.l6 - 0.5, x: LINK.x - 30, y: LINK.y, z: 2.6 },
+        { t: EV.youIn + 0.5, x: 1260, y: 420, z: 1.22 },
+        { t: EV.linkClick + 0.05, x: 1250, y: 410, z: 1.26 },
+        { t: EV.back, x: 640, y: 460, z: 1.3 },
+        { t: EV.scrollBack + 1.0, x: SPOT_W.x, y: SPOT_W.y, z: 1.45 },
+        { t: START.l7 + 0.2, x: SPOT_W.x, y: SPOT_W.y, z: 1.75 },
+        { t: EV.got + 0.6, x: SPOT_W.x + 10, y: SPOT_W.y, z: 1.85 },
+        { t: EV.verifyClick, x: 660, y: 480, z: 1.4 },
+        { t: EV.verifiedMsg + 0.4, x: 1000, y: 440, z: 0.86 },
+        { t: EV.nextSite - 0.2, x: 1000, y: 430, z: 0.9 },
+        { t: EV.cornerIn + 0.4, x: 1200, y: 360, z: 1.3 },
+        { t: EV.xClick, x: 1230, y: 360, z: 1.38 },
+        { t: EV.askMsg + 0.6, x: 1420, y: 360, z: 1.4 },
+        { t: DURATION, x: 1440, y: 370, z: 1.44 },
+      ]
+
+      everyFrame(tl, DURATION, (t) => {
+        applyCamera($('d-cam'), camera(CAM, t, { ax: 960, ay: 540 }))
+        drawFocus(t)
+        drawNotes(t)
+        drawTyping(t)
+        // the focus page opens in its own tab, then closes after focusing the handoff tab
+        const focusTab = t >= EV.front && t < EV.back
+        $('tab2').style.opacity = focusTab ? 1 : 0
+        $('tab2').classList.toggle('on', focusTab)
+        $('tab1').classList.toggle('on', !focusTab)
+        $('tab1-title').textContent = TAB_TITLES.filter(([s]) => t >= s).pop()[1]
+        const a = agent.at(t)
+        gsap.set('#a-cur', { x: a.x - 3, y: a.y - 2 })
+        const u = you.at(t)
+        gsap.set('#u-cur', { x: u.x - 4, y: u.y - 3 })
+      })
+
+      window.__timelines['desk'] = tl
+    })()
+  </script>
+</template>

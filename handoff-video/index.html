@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <script src="assets/kit.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #f7f7f5;
+      }
+      body {
+        font-family: 'Geist', 'Inter', sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Times in seconds, from assets/timeline.js (HOSTS, FILM). Music is mixed in by scripts/master.ts. -->
+    <div id="root" data-composition-id="main" data-start="0.000" data-duration="41.112" data-width="1920" data-height="1080">
+      <div id="desk" class="clip" data-composition-id="desk" data-composition-src="compositions/desk.html" data-start="0.000" data-duration="37.393" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080" style="z-index: 1"></div>
+      <div id="outro" class="clip" data-composition-id="outro" data-composition-src="compositions/outro.html" data-start="36.493" data-duration="4.619" data-track-index="2" data-track-kind="graphics" data-width="1920" data-height="1080" style="z-index: 2"></div>
+
+      <!-- AUDIO:BEGIN -->
+      <!-- vo: Your agent can use a browser on its own. It signs in, fills in forms, clicks through. -->
+      <audio id="vo-l1" src="assets/vo/l1.wav" data-start="0.600" data-duration="3.928" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: Until it reaches a step only you can do. Like a code sent to your phone. -->
+      <audio id="vo-l2" src="assets/vo/l2.wav" data-start="4.928" data-duration="2.840" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: The obvious fix is to pull that tab in front of you. But you were busy. -->
+      <audio id="vo-l3" src="assets/vo/l3.wav" data-start="8.368" data-duration="2.721" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: So instead, Playwriter leaves your focus alone. It puts a small card next to the field, and waits. -->
+      <audio id="vo-l4" src="assets/vo/l4.wav" data-start="12.489" data-duration="4.467" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: Then the agent sends you a link. It points to Playwriter, running on localhost, on your own machine. -->
+      <audio id="vo-l5" src="assets/vo/l5.wav" data-start="17.456" data-duration="4.686" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: Click it, and the right tab comes to the front, scrolled to the exact spot that needs you. -->
+      <audio id="vo-l6" src="assets/vo/l6.wav" data-start="22.642" data-duration="3.780" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: You type the code. The card says got it, and the agent carries on. Nothing to type in chat. -->
+      <audio id="vo-l7" src="assets/vo/l7.wav" data-start="27.322" data-duration="3.590" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: Rather not? Close the card, and the agent asks you in chat instead. -->
+      <audio id="vo-l8" src="assets/vo/l8.wav" data-start="31.812" data-duration="4.281" data-track-index="10" data-volume="1"></audio>
+      <!-- vo: That's handoff, in the latest Playwriter. -->
+      <audio id="vo-l9" src="assets/vo/l9.wav" data-start="37.293" data-duration="1.619" data-track-index="10" data-volume="1"></audio>
+      <!-- desktop rises -->
+      <audio id="sfx-01" src="assets/sfx/whoosh-riser.mp3" data-start="0.000" data-duration="0.586" data-track-index="20" data-volume="0.359"></audio>
+      <!-- agent clicks email -->
+      <audio id="sfx-02" src="assets/sfx/tap.mp3" data-start="1.295" data-duration="0.455" data-track-index="20" data-volume="0.305"></audio>
+      <!-- agent types email -->
+      <audio id="sfx-03" src="assets/sfx/typing.mp3" data-start="1.450" data-duration="0.685" data-track-index="21" data-volume="0.157"></audio>
+      <!-- agent types password -->
+      <audio id="sfx-04" src="assets/sfx/typing.mp3" data-start="2.250" data-duration="0.520" data-track-index="20" data-volume="0.157"></audio>
+      <!-- agent clicks Sign in -->
+      <audio id="sfx-05" src="assets/sfx/tap.mp3" data-start="3.365" data-duration="0.455" data-track-index="20" data-volume="0.305"></audio>
+      <!-- you type in Notes -->
+      <audio id="sfx-06" src="assets/sfx/typing.mp3" data-start="8.768" data-duration="1.180" data-track-index="20" data-volume="0.111"></audio>
+      <!-- camera pulls back to the desktop -->
+      <audio id="sfx-07" src="assets/sfx/whoosh-soft.mp3" data-start="8.493" data-duration="1.487" data-track-index="21" data-volume="0.355"></audio>
+      <!-- Chrome jumps in front of Notes -->
+      <audio id="sfx-08" src="assets/sfx/thud.mp3" data-start="9.913" data-duration="0.141" data-track-index="22" data-volume="0.407"></audio>
+      <!-- rewind -->
+      <audio id="sfx-09" src="assets/sfx/whoosh-digital.mp3" data-start="10.583" data-duration="0.920" data-track-index="20" data-volume="0.078"></audio>
+      <!-- you keep typing in Notes -->
+      <audio id="sfx-10" src="assets/sfx/typing.mp3" data-start="13.189" data-duration="2.200" data-track-index="20" data-volume="0.111"></audio>
+      <!-- the real card slides in, ring draws -->
+      <audio id="sfx-11" src="assets/sfx/card.mp3" data-start="15.274" data-duration="0.526" data-track-index="21" data-volume="0.069"></audio>
+      <!-- chat: the link -->
+      <audio id="sfx-12" src="assets/sfx/text-tap-down4.mp3" data-start="18.221" data-duration="0.587" data-track-index="20" data-volume="0.127"></audio>
+      <!-- camera to the chat -->
+      <audio id="sfx-13" src="assets/sfx/whoosh-slide.mp3" data-start="18.081" data-duration="0.955" data-track-index="21" data-volume="0.148"></audio>
+      <!-- push in on the localhost link -->
+      <audio id="sfx-14" src="assets/sfx/whoosh-air.mp3" data-start="20.701" data-duration="0.875" data-track-index="20" data-volume="0.153"></audio>
+      <!-- your cursor goes to the link -->
+      <audio id="sfx-15" src="assets/sfx/whoosh-zip.mp3" data-start="22.327" data-duration="0.887" data-track-index="20" data-volume="0.115"></audio>
+      <!-- click the link -->
+      <audio id="sfx-16" src="assets/sfx/tap.mp3" data-start="22.637" data-duration="0.455" data-track-index="21" data-volume="0.610"></audio>
+      <!-- handoff tab comes to the front -->
+      <audio id="sfx-17" src="assets/sfx/whoosh-swing.mp3" data-start="23.337" data-duration="0.899" data-track-index="20" data-volume="0.412"></audio>
+      <!-- tab scrolls back to the field -->
+      <audio id="sfx-18" src="assets/sfx/whoosh-short.mp3" data-start="24.687" data-duration="0.665" data-track-index="20" data-volume="0.164"></audio>
+      <!-- digit 1 -->
+      <audio id="sfx-19" src="assets/sfx/tick.mp3" data-start="27.397" data-duration="0.009" data-track-index="20" data-volume="1.000"></audio>
+      <!-- digit 2 -->
+      <audio id="sfx-20" src="assets/sfx/tick.mp3" data-start="27.707" data-duration="0.009" data-track-index="20" data-volume="1.000"></audio>
+      <!-- digit 3 -->
+      <audio id="sfx-21" src="assets/sfx/tick.mp3" data-start="27.977" data-duration="0.009" data-track-index="20" data-volume="1.000"></audio>
+      <!-- digit 4 -->
+      <audio id="sfx-22" src="assets/sfx/tick.mp3" data-start="28.337" data-duration="0.009" data-track-index="20" data-volume="1.000"></audio>
+      <!-- Got it, carrying on. -->
+      <audio id="sfx-23" src="assets/sfx/sparkle.mp3" data-start="28.357" data-duration="2.677" data-track-index="20" data-volume="0.126"></audio>
+      <!-- digit 5 -->
+      <audio id="sfx-24" src="assets/sfx/tick.mp3" data-start="28.587" data-duration="0.009" data-track-index="21" data-volume="1.000"></audio>
+      <!-- digit 6 -->
+      <audio id="sfx-25" src="assets/sfx/tick.mp3" data-start="28.887" data-duration="0.009" data-track-index="21" data-volume="1.000"></audio>
+      <!-- agent clicks Verify -->
+      <audio id="sfx-26" src="assets/sfx/tap.mp3" data-start="30.607" data-duration="0.455" data-track-index="21" data-volume="0.305"></audio>
+      <!-- chat: verified -->
+      <audio id="sfx-27" src="assets/sfx/text-tap-down2.mp3" data-start="30.647" data-duration="0.523" data-track-index="22" data-volume="0.133"></audio>
+      <!-- camera pulls back to the chat -->
+      <audio id="sfx-28" src="assets/sfx/whoosh-sub.mp3" data-start="31.067" data-duration="1.367" data-track-index="20" data-volume="0.224"></audio>
+      <!-- camera to the acme tab -->
+      <audio id="sfx-29" src="assets/sfx/whoosh-wipe.mp3" data-start="31.337" data-duration="0.927" data-track-index="21" data-volume="0.138"></audio>
+      <!-- corner card slides in -->
+      <audio id="sfx-30" src="assets/sfx/card.mp3" data-start="32.117" data-duration="0.526" data-track-index="22" data-volume="0.055"></audio>
+      <!-- click X -->
+      <audio id="sfx-31" src="assets/sfx/tap.mp3" data-start="32.747" data-duration="0.455" data-track-index="20" data-volume="0.684"></audio>
+      <!-- chat: what should I do instead? -->
+      <audio id="sfx-32" src="assets/sfx/text-tap-up2.mp3" data-start="34.507" data-duration="0.415" data-track-index="20" data-volume="0.129"></audio>
+      <!-- desktop slides out -->
+      <audio id="sfx-33" src="assets/sfx/whoosh-deep.mp3" data-start="36.788" data-duration="2.910" data-track-index="20" data-volume="0.172"></audio>
+      <!-- mark lands -->
+      <audio id="sfx-34" src="assets/sfx/impact.mp3" data-start="37.538" data-duration="0.785" data-track-index="21" data-volume="0.232"></audio>
+      <!-- AUDIO:END -->
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {}
+      window.__timelines['main'] = gsap.timeline({ paused: true })
+    </script>
+  </body>
+</html>
