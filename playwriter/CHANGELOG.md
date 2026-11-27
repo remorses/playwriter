@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.13.0
+
+1. **Hand the tab to the user with `handoff()`**: for a step only the user can do, like a sign-in, a 2FA code, a captcha or a phone approval. `handoff` shows a Playwriter card in the tab without stealing focus and returns a link for the chat. Opening the link brings the tab to the front and scrolls to the step.
+
+   ```js
+   const { link } = await handoff({ page: state.page, message: 'Sign in to Discord with your own account.' })
+   await handoff({ page: state.page, message: 'Enter the 6-digit code.', target: state.page.locator('#otp') }) // rings the field
+   await handoff({ page: state.page, message: 'Approve the sign-in on your phone.', manual: true }) // adds a Done button
+
+   await waitForHandoff({ page: state.page, until: /\/channels\/@me/ }) // URL RegExp, or a function run in the page
+   await waitForHandoff({ page: state.page }) // manual: waits for Done
+   await clearHandoff({ page: state.page }) // remove the card without waiting
+   ```
+
+   The card shows one line saying what to do, in the top-right corner or beside a `target` element with a ring around it. If the user closes the card with its X, `waitForHandoff` throws so the agent can ask in chat. The card works on pages with a strict CSP and Trusted Types, lets clicks through, follows the system light or dark mode, and comes back after navigations until the handoff ends.
+
+   Watch how it works: https://playwriter.dev/assets/handoff-explainer.mp4
+
+2. **`releasePage({ page })` hands a tab back to the user without closing it**: the tab stays open, Playwriter detaches the debugger from it and takes it out of the tab group, and no session can see it anymore. Chrome hides the "started debugging this browser" banner once no tab is attached. For Playwright the page is closed. It is a global in `execute` and an export of the `playwriter` package:
+
+   ```ts
+   import { releasePage } from 'playwriter'
+
+   await releasePage({ page })
+   ```
+
+   Needs extension 0.0.180 or newer. With an older extension `releasePage` throws and the tab stays attached.
+
+3. **`Authorization: Bearer <token>` on the `/cdp` WebSocket**: with `playwriter serve --token`, the `/cdp` WebSocket only read the token from `?token=`, where other local users can read it with `ps`. The relay now also accepts the header, like the HTTP routes do. `?token=` keeps working, and a traforo tunnel still needs it.
+
+   ```ts
+   const browser = await chromium.connectOverCDP('ws://127.0.0.1:19988/cdp/session1', {
+     headers: { Authorization: `Bearer ${process.env.PLAYWRITER_TOKEN}` },
+   })
+   ```
+
+4. **Agents use headless Chrome only when the user asks**: the skill, the CLI `--browser` help and the MCP `session_new` description say this. The skill also says to never use headless on live production sites like x.com, Google or Reddit unless asked.
+
+5. **Attach Playwriter's own pages with an icon click**: extension 0.0.175 blocked every `chrome-extension://` page, so a click on the welcome or tutorial page did nothing. Now a user click attaches the tab. Agents still cannot open or navigate to these pages, and automatic attach paths (popups, tabs dragged into a Playwriter group) still skip them. Remote control peers cannot send commands to a tab attached this way.
+
+6. **Tabs attach reliably when another extension's iframe is still loading**: pages with iframes from extensions like LastPass or 1Password could fail to attach with "Cannot access a chrome-extension:// URL of different extension". The extension now removes these iframes before every attach attempt, not only after a failed attach.
+
+7. **The extension no longer keeps Chrome busy when pages change their title**: every tab update made the extension set the icon, title and badge of every open tab again. With 20 tabs that update their title every second, Chrome used about 1.5 CPU cores and attaching a new tab could time out. Now only the tabs whose state changed are updated. Icons, titles and badges look the same as before.
+
+8. **`editor.edit()` writes `newString` as is**: a `newString` with `$$`, `$&`, `` $` `` or `$'` was rewritten. `$$('a')` became `$('a')` and `$&` became the replaced text.
+
 ## 0.12.0
 
 1. **MCP sessions work like the CLI**: the MCP now runs code in relay sessions. MCP tabs belong to their session, survive relay upgrades and show in `playwriter session list`. Cancelling a tool call in the client stops the running execute. New MCP tools:
