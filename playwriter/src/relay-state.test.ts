@@ -768,4 +768,12 @@ describe('Host header validation (DNS rebinding protection)', () => {
       expect(res.status, `Expected 200 for Host: ${hostValue}`).toBe(200)
     }
   })
+
+  test('playwriter.localhost only serves handoff focus links', async () => {
+    const host = `playwriter.localhost:${TEST_PORT}`
+    expect((await httpGet({ port: TEST_PORT, path: '/handoff/some-token', host })).status).toBe(200)
+    // a resolver that sends *.localhost to network DNS must not open the privileged routes to rebinding
+    expect((await httpGet({ port: TEST_PORT, path: '/cli/sessions', host })).status).toBe(403)
+    expect((await httpGet({ port: TEST_PORT, path: '/version', host })).status).toBe(403)
+  })
 })

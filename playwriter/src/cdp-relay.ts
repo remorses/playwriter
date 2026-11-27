@@ -1436,12 +1436,13 @@ export async function startPlayWriterCDPRelayServer({
   // allow through regardless of Host since remote clients use real hostnames.
   const ALLOWED_HOSTS = new Set([
     'localhost',
-    // handoff focus links; *.localhost always resolves to loopback (RFC 6761)
-    'playwriter.localhost',
     '127.0.0.1',
     '[::1]',
     '::1',
   ])
+  // Name in handoff focus links. Browsers resolve *.localhost to loopback (RFC 6761), but some system
+  // resolvers ask network DNS, so it only opens /handoff/*, never the privileged routes.
+  const HANDOFF_HOST = 'playwriter.localhost'
 
   // Parse the Host header into just the hostname, handling IPv6 brackets and
   // port suffixes. Returns null for missing or malformed values.
@@ -1517,6 +1518,9 @@ export async function startPlayWriterCDPRelayServer({
   app.use('*', async (c, next) => {
     const hostname = parseHostname(c.req.header('host'))
     if (hostname && ALLOWED_HOSTS.has(hostname)) {
+      return next()
+    }
+    if (hostname === HANDOFF_HOST && c.req.path.startsWith('/handoff/')) {
       return next()
     }
     // Remote clients with a valid token are allowed regardless of Host
