@@ -15,6 +15,16 @@ Add to your MCP client settings:
 }
 ```
 
+## Autohand Code
+
+Add Playwriter from the command line:
+
+```bash
+autohand mcp add playwriter npx -y playwriter@latest
+```
+
+Add `--scope project` after `add` to keep the server configuration in the current project. See [Autohand Code](https://github.com/autohandai/code-cli/) for current installation and CLI details.
+
 Or auto-configure:
 
 ```sh
