@@ -1,0 +1,153 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'IvarText';
+      src: url('assets/fonts/ivartext-regular.woff2') format('woff2');
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    #m-left {
+      position: absolute;
+      left: 110px;
+      top: 300px;
+      width: 560px;
+    }
+    #m-count {
+      font-family: 'IvarText', serif;
+      font-size: 300px;
+      line-height: 1;
+      color: #ff6a00;
+      letter-spacing: -0.04em;
+    }
+    #m-label {
+      margin-top: 10px;
+      font-family: 'IvarText', serif;
+      font-size: 72px;
+      line-height: 1.05;
+      color: #09090b;
+    }
+    #m-list {
+      position: absolute;
+      left: 760px;
+      top: 0;
+      width: 1100px;
+      height: 1080px;
+    }
+    .m-row {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1100px;
+      height: 92px;
+      font-family: 'IvarText', serif;
+      font-size: 60px;
+      line-height: 92px;
+      white-space: nowrap;
+      transform-origin: 0 50%;
+    }
+    .m-row code {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 48px;
+    }
+  </style>
+  <div id="root" data-composition-id="more" data-width="1920" data-height="1080" data-layout-allow-overflow data-layout-allow-overlap>
+    <div id="m-left">
+      <div id="m-count">0</div>
+      <div id="m-label">more in 0.11</div>
+    </div>
+    <div id="m-list">
+      <div class="m-row">Focus only while an agent works</div>
+      <div class="m-row">Warnings on verification pages</div>
+      <div class="m-row"><code>snapshot()</code> shows <code>[checked]</code></div>
+      <div class="m-row">Web workers work</div>
+      <div class="m-row">Safe CLI upgrades</div>
+      <div class="m-row">Session ids are never reused</div>
+      <div class="m-row">Relay survives a missing await</div>
+      <div class="m-row">Execute output keeps the result</div>
+      <div class="m-row">Clear steps for crashed tabs</div>
+      <div class="m-row">Cookies and <code>route.fetch()</code> work</div>
+      <div class="m-row"><code>page.evaluate()</code> up to 5 minutes</div>
+      <div class="m-row">New CDP clients never break sessions</div>
+      <div class="m-row"><code>targetInfoChanged</code> for raw CDP</div>
+      <div class="m-row"><code>refToLocator</code> for labelled screenshots</div>
+      <div class="m-row">Welcome page checks the pin</div>
+      <div class="m-row">Playwright 1.64.1</div>
+    </div>
+  </div>
+  <script>
+    ;(function () {
+      const { everyFrame, clamp01 } = Kit
+      const at = Kit.beats(53)
+      const DURATION = at(69)
+      const ROW = 92
+      const CENTER = 540 - ROW / 2
+      const rows = [...document.querySelectorAll('#m-list .m-row')]
+      const count = document.getElementById('m-count')
+
+      // [time, list index at the centre line]: slows on the first three, rushes the middle,
+      // settles on the last. A monotone cubic keeps it moving through every key.
+      const KEYS = [
+        [at(54.1), -2.2],
+        [at(55), -0.1],
+        [at(57.2), 1],
+        [at(59.2), 2],
+        [at(61), 3.2],
+        [at(64.6), 13.6],
+        [at(67.4), 15],
+        [at(69), 15.2],
+      ]
+      const slopes = KEYS.map((k, i) => {
+        const prev = KEYS[Math.max(0, i - 1)]
+        const next = KEYS[Math.min(KEYS.length - 1, i + 1)]
+        const d0 = i > 0 ? (k[1] - prev[1]) / (k[0] - prev[0]) : 0
+        const d1 = i < KEYS.length - 1 ? (next[1] - k[1]) / (next[0] - k[0]) : 0
+        if (i === 0 || i === KEYS.length - 1) return i === 0 ? d1 : d0
+        return d0 * d1 <= 0 ? 0 : (2 * d0 * d1) / (d0 + d1)
+      })
+      function indexAt(t) {
+        if (t <= KEYS[0][0]) return KEYS[0][1] + (t - KEYS[0][0]) * slopes[0]
+        for (let i = 1; i < KEYS.length; i++) {
+          if (t <= KEYS[i][0]) {
+            const [t0, v0] = KEYS[i - 1]
+            const [t1, v1] = KEYS[i]
+            const h = t1 - t0
+            const s = (t - t0) / h
+            const s2 = s * s
+            const s3 = s2 * s
+            return (
+              (2 * s3 - 3 * s2 + 1) * v0 + (s3 - 2 * s2 + s) * h * slopes[i - 1] + (-2 * s3 + 3 * s2) * v1 + (s3 - s2) * h * slopes[i]
+            )
+          }
+        }
+        return KEYS[KEYS.length - 1][1]
+      }
+
+      const tl = gsap.timeline({ paused: true })
+      // enter from the right as the browser leaves left
+      tl.fromTo('#m-list', { x: 900, opacity: 0 }, { x: 0, opacity: 1, duration: 1.1, ease: 'expo.out' }, at(54.1))
+      tl.fromTo('#m-left', { opacity: 0, x: 200, filter: 'blur(10px)' }, { opacity: 1, x: 0, filter: 'blur(0px)', duration: 1.0, ease: 'expo.out' }, at(54.2))
+      // leave: everything falls back and blurs as the mark arrives
+      tl.to(['#m-left', '#m-list'], { opacity: 0, scale: 0.9, filter: 'blur(14px)', duration: 0.45, ease: 'power3.in', stagger: 0.05 }, at(68) - 0.2)
+
+      everyFrame(tl, DURATION, (t) => {
+        const index = indexAt(t)
+        rows.forEach((row, i) => {
+          const d = i - index
+          const ad = Math.abs(d)
+          const ink = clamp01(1 - ad * 1.6)
+          const g = Math.round(212 - ink * 203)
+          row.style.color = `rgb(${g}, ${g}, ${Math.round(216 - ink * 205)})`
+          row.style.opacity = String(clamp01(1.15 - ad * 0.2))
+          row.style.transform = `translateY(${CENTER + d * ROW}px) scale(${1 - Math.min(ad, 4) * 0.05})`
+        })
+        count.textContent = String(Math.max(1, Math.min(16, Math.floor(index + 0.5) + 1)))
+      })
+
+      window.__timelines['more'] = tl
+    })()
+  </script>
+</template>

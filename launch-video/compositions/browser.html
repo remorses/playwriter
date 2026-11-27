@@ -1,0 +1,926 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'IvarText';
+      src: url('assets/fonts/ivartext-regular.woff2') format('woff2');
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── world: the Chrome window, moved by the camera ── */
+    #b-world {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: 0 0;
+    }
+    #b-win {
+      position: absolute;
+      left: 660px;
+      top: 170px;
+      width: 1180px;
+      height: 780px;
+      border-radius: 16px;
+      background: #202124;
+      overflow: hidden;
+      box-shadow: 0 40px 90px rgba(9, 9, 11, 0.28), 0 8px 24px rgba(9, 9, 11, 0.18), 0 0 0 1px rgba(9, 9, 11, 0.5);
+    }
+    .b-dots {
+      position: absolute;
+      left: 22px;
+      top: 20px;
+      display: flex;
+      gap: 9px;
+    }
+    .b-dots i {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #5f6368;
+    }
+    #b-strip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1180px;
+      height: 52px;
+    }
+    .b-chip {
+      position: absolute;
+      top: 13px;
+      height: 28px;
+      padding: 0 12px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 28px;
+      color: #202124;
+    }
+    .b-tab {
+      position: absolute;
+      top: 8px;
+      height: 44px;
+      width: 220px;
+      border-radius: 10px 10px 0 0;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      color: #bdc1c6;
+      white-space: nowrap;
+    }
+    .b-tab.on {
+      background: #35363a;
+      color: #e8eaed;
+    }
+    .b-tab b {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      flex: none;
+    }
+    .b-line {
+      position: absolute;
+      top: 49px;
+      height: 3px;
+      border-radius: 2px;
+    }
+    #b-toolbar {
+      position: absolute;
+      left: 0;
+      top: 52px;
+      width: 1180px;
+      height: 52px;
+      background: #35363a;
+    }
+    .b-nav {
+      position: absolute;
+      top: 10px;
+      font-size: 24px;
+      color: #9aa0a6;
+    }
+    #b-omni {
+      position: absolute;
+      left: 140px;
+      top: 9px;
+      width: 760px;
+      height: 34px;
+      border-radius: 17px;
+      background: #202124;
+      color: #e8eaed;
+      font-size: 18px;
+      line-height: 34px;
+      padding-left: 46px;
+    }
+    #b-omni::before {
+      content: '';
+      position: absolute;
+      left: 18px;
+      top: 11px;
+      width: 11px;
+      height: 9px;
+      border: 2px solid #9aa0a6;
+      border-radius: 3px;
+    }
+    #b-ext {
+      position: absolute;
+      left: 1124px;
+      top: 13px;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+    }
+    #b-rec {
+      position: absolute;
+      right: 16px;
+      top: 14px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #f2463b;
+      box-shadow: 0 0 0 5px rgba(242, 70, 59, 0.3);
+      opacity: 0;
+    }
+    #b-page {
+      position: absolute;
+      left: 0;
+      top: 104px;
+      width: 1180px;
+      height: 676px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    /* ── shop page ── */
+    #b-shop,
+    #b-docs {
+      position: absolute;
+      inset: 0;
+    }
+    #b-shop-scroll {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1180px;
+      height: 1100px;
+      background: #f6f7f9;
+    }
+    .s-head {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1180px;
+      height: 64px;
+      background: #111827;
+      color: #fff;
+      font-weight: 800;
+      font-size: 26px;
+      line-height: 64px;
+      padding-left: 40px;
+      letter-spacing: -0.02em;
+    }
+    .s-head span {
+      position: absolute;
+      right: 40px;
+      font-weight: 500;
+      font-size: 20px;
+      color: #9ca3af;
+      letter-spacing: 0;
+    }
+    .s-card {
+      position: absolute;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    }
+    .s-label {
+      position: absolute;
+      left: 32px;
+      font-size: 20px;
+      font-weight: 600;
+      color: #374151;
+    }
+    .s-input {
+      position: absolute;
+      left: 32px;
+      width: 616px;
+      height: 56px;
+      border-radius: 10px;
+      border: 2px solid #d1d5db;
+      font-size: 24px;
+      line-height: 52px;
+      padding-left: 18px;
+      color: #111827;
+    }
+    .s-input.ph {
+      color: #9ca3af;
+    }
+    #b-email-ring {
+      position: absolute;
+      left: 26px;
+      top: 104px;
+      width: 628px;
+      height: 68px;
+      border-radius: 14px;
+      border: 3px solid #ff6a00;
+      opacity: 0;
+    }
+    .s-opt {
+      position: absolute;
+      top: 470px;
+      width: 298px;
+      height: 70px;
+      border-radius: 10px;
+      border: 2px solid #d1d5db;
+      font-size: 20px;
+      font-weight: 600;
+      padding: 10px 16px;
+      color: #111827;
+    }
+    .s-opt small {
+      display: block;
+      font-weight: 400;
+      font-size: 17px;
+      color: #6b7280;
+    }
+    #b-pay {
+      position: absolute;
+      left: 32px;
+      top: 640px;
+      width: 616px;
+      height: 68px;
+      border-radius: 12px;
+      background: #4f46e5;
+      color: #fff;
+      font-size: 24px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 68px;
+      overflow: hidden;
+    }
+    #b-paid {
+      position: absolute;
+      inset: 0;
+      background: #16a34a;
+      opacity: 0;
+    }
+    .s-line {
+      position: absolute;
+      height: 14px;
+      border-radius: 7px;
+      background: #e5e7eb;
+    }
+
+    /* ── docs page ── */
+    #b-docs {
+      opacity: 0;
+      background: #fff;
+    }
+    #b-docs-scroll {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1180px;
+      height: 1600px;
+    }
+    .d-side {
+      position: absolute;
+      left: 40px;
+      height: 14px;
+      border-radius: 7px;
+      background: #ececef;
+    }
+    .d-h1 {
+      position: absolute;
+      left: 330px;
+      top: 60px;
+      font-family: 'IvarText', serif;
+      font-size: 64px;
+      color: #09090b;
+    }
+    .d-h2 {
+      position: absolute;
+      left: 330px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 30px;
+      color: #ff6a00;
+    }
+    .d-p {
+      position: absolute;
+      left: 330px;
+      height: 14px;
+      border-radius: 7px;
+      background: #e4e4e7;
+    }
+
+    /* ── devtools console ── */
+    #b-console {
+      position: absolute;
+      left: 0;
+      top: 330px;
+      width: 1180px;
+      height: 346px;
+      background: #202124;
+      border-top: 1px solid #3c4043;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .c-tabs {
+      height: 44px;
+      border-bottom: 1px solid #3c4043;
+      display: flex;
+      gap: 34px;
+      padding-left: 24px;
+      font-family: 'Inter', sans-serif;
+      font-size: 18px;
+      color: #9aa0a6;
+      line-height: 44px;
+    }
+    .c-tabs .on {
+      color: #e8eaed;
+      box-shadow: inset 0 -3px 0 #8ab4f8;
+    }
+    .c-row {
+      position: absolute;
+      left: 24px;
+      font-size: 26px;
+      white-space: pre;
+    }
+    .c-in {
+      color: #e8eaed;
+    }
+    .c-in::before {
+      content: '> ';
+      color: #8ab4f8;
+    }
+    .c-out {
+      color: #9aa0a6;
+    }
+    .c-num {
+      color: #9980ff;
+    }
+
+    /* ── cursor and trails, in the page viewport ── */
+    #b-trails {
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+    #b-cursor {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 34px;
+      height: 53px;
+      transform-origin: 6px 6px;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+    }
+
+    /* ── screen-space text column ── */
+    .col {
+      position: absolute;
+      left: 110px;
+      width: 520px;
+    }
+    .title {
+      font-family: 'IvarText', serif;
+      font-size: 80px;
+      line-height: 1.04;
+      letter-spacing: -0.02em;
+      color: #09090b;
+    }
+    .cmd {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 26px;
+      line-height: 1.45;
+      color: #09090b;
+      white-space: pre;
+    }
+    .cmd em {
+      font-style: normal;
+      color: #ff6a00;
+    }
+    .sub {
+      opacity: 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 28px;
+      color: #09090b;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .sub::before {
+      content: '';
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ff6a00;
+      flex: none;
+    }
+    #b-ticks {
+      position: absolute;
+      left: 136px;
+      top: 0;
+      width: 400px;
+      height: 34px;
+    }
+    #b-ticks i {
+      position: absolute;
+      top: 0;
+      width: 4px;
+      height: 34px;
+      border-radius: 2px;
+      background: #ff6a00;
+      opacity: 0;
+    }
+    #b-tick-axis {
+      position: absolute;
+      left: 136px;
+      top: 42px;
+      width: 400px;
+      height: 2px;
+      background: #d4d4d8;
+    }
+    #b-tick-label {
+      position: absolute;
+      left: 136px;
+      top: 54px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px;
+      color: #71717a;
+    }
+    .term {
+      position: absolute;
+      left: 110px;
+      width: 820px;
+      border-radius: 14px;
+      background: #0c0c0e;
+      box-shadow: 0 24px 60px rgba(9, 9, 11, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06);
+      padding: 18px 26px 22px 34px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 26px;
+      line-height: 1.5;
+      color: #e4e4e7;
+      overflow: hidden;
+    }
+    .term::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      background: var(--group);
+    }
+    .term .who {
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+      font-size: 22px;
+      color: var(--group);
+      margin-bottom: 4px;
+    }
+    .term .ln {
+      white-space: pre;
+    }
+    .term .ln::before {
+      content: '❯ ';
+      color: #71717a;
+    }
+    .term .res {
+      color: var(--group);
+      white-space: pre;
+    }
+    .stat {
+      display: flex;
+      align-items: baseline;
+      gap: 22px;
+    }
+    .stat .num {
+      font-family: 'IvarText', serif;
+      font-size: 150px;
+      line-height: 1;
+      color: #ff6a00;
+      width: 220px;
+      flex: none;
+    }
+    .stat .lbl {
+      font-size: 34px;
+      font-weight: 600;
+      line-height: 1.15;
+      color: #09090b;
+    }
+    .note {
+      font-size: 30px;
+      line-height: 1.3;
+      color: #52525b;
+    }
+  </style>
+  <div id="root" data-composition-id="browser" data-width="1920" data-height="1080" data-layout-allow-overflow data-layout-allow-overlap>
+    <div id="b-world">
+      <div id="b-win">
+        <div id="b-strip">
+          <div class="b-dots"><i></i><i></i><i></i></div>
+          <div id="b-shop-chip" class="b-chip" style="left: 96px; background: #fcad70">shop</div>
+          <div id="b-tab-checkout" class="b-tab on" style="left: 168px"><b style="background: #111827"></b>Checkout · shoply</div>
+          <div id="b-shop-line" class="b-line" style="left: 96px; width: 292px; background: #fcad70"></div>
+          <div id="b-docs-chip" class="b-chip" style="left: 404px; background: #8ab4f8">docs</div>
+          <div id="b-tab-api" class="b-tab" style="left: 478px"><b style="background: #ff6a00"></b>API reference</div>
+          <div id="b-tab-log" class="b-tab" style="left: 698px"><b style="background: #ff6a00"></b>Changelog<i id="b-rec"></i></div>
+          <div id="b-docs-line" class="b-line" style="left: 404px; width: 514px; background: #8ab4f8"></div>
+        </div>
+        <div id="b-toolbar">
+          <div class="b-nav" style="left: 24px">←</div>
+          <div class="b-nav" style="left: 62px">→</div>
+          <div class="b-nav" style="left: 100px">↻</div>
+          <div id="b-omni"><span id="b-url-shop">shoply.com/checkout</span><span id="b-url-docs" style="position: absolute; left: 46px; opacity: 0">playwriter.dev/changelog</span></div>
+          <img id="b-ext" src="assets/icon-green.png" alt="" />
+        </div>
+        <div id="b-page" data-layout-ignore>
+          <div id="b-shop">
+            <div id="b-shop-scroll">
+              <div class="s-head">shoply<span>Checkout</span></div>
+              <div class="s-card" style="left: 40px; top: 100px; width: 680px; height: 960px">
+                <div class="s-label" style="top: 70px">Email</div>
+                <div id="b-email-ring"></div>
+                <div class="s-input" style="top: 110px"><span id="b-email">agent@shoply.com</span></div>
+                <div class="s-label" style="top: 196px">Card number</div>
+                <div class="s-input ph" style="top: 236px">4242 4242 4242 4242</div>
+                <div class="s-label" style="top: 322px">Name on card</div>
+                <div class="s-input ph" style="top: 362px">Tommaso De Rossi</div>
+                <div class="s-label" style="top: 436px; display: none"></div>
+                <div class="s-opt" style="left: 32px; border-color: #4f46e5; background: #eef2ff">Standard<small>5-7 days · free</small></div>
+                <div class="s-opt" style="left: 350px">Express<small>1-2 days · $12</small></div>
+                <div class="s-label" style="top: 574px; font-weight: 500; color: #6b7280">Billing address same as shipping</div>
+                <div id="b-pay">Pay $249.00<div id="b-paid">Paid ✓</div></div>
+                <div class="s-line" style="left: 32px; top: 760px; width: 520px"></div>
+                <div class="s-line" style="left: 32px; top: 790px; width: 420px"></div>
+                <div class="s-line" style="left: 32px; top: 820px; width: 480px"></div>
+              </div>
+              <div class="s-card" style="left: 760px; top: 100px; width: 380px; height: 330px">
+                <div style="position: absolute; left: 28px; top: 28px; width: 76px; height: 76px; border-radius: 12px; background: #1f2937"></div>
+                <div style="position: absolute; left: 122px; top: 34px; font-size: 21px; font-weight: 700; color: #111827">Mechanical keyboard</div>
+                <div style="position: absolute; left: 122px; top: 66px; font-size: 18px; color: #6b7280">75%, brown switches</div>
+                <div style="position: absolute; left: 28px; right: 28px; top: 150px; font-size: 20px; color: #6b7280; display: flex; justify-content: space-between"><span>Subtotal</span><span>$249.00</span></div>
+                <div style="position: absolute; left: 28px; right: 28px; top: 192px; font-size: 20px; color: #6b7280; display: flex; justify-content: space-between"><span>Shipping</span><span>Free</span></div>
+                <div style="position: absolute; left: 28px; right: 28px; top: 250px; font-size: 24px; font-weight: 800; color: #111827; display: flex; justify-content: space-between"><span>Total</span><span>$249.00</span></div>
+              </div>
+            </div>
+          </div>
+          <div id="b-docs">
+            <div id="b-docs-scroll">
+              <div class="d-side" style="top: 70px; width: 180px"></div>
+              <div class="d-side" style="top: 110px; width: 140px"></div>
+              <div class="d-side" style="top: 150px; width: 200px"></div>
+              <div class="d-side" style="top: 190px; width: 120px"></div>
+              <div class="d-side" style="top: 230px; width: 170px"></div>
+              <div class="d-side" style="top: 270px; width: 150px"></div>
+              <div class="d-h1">Changelog</div>
+              <div class="d-h2" style="top: 180px">0.11.0</div>
+              <div class="d-p" style="top: 250px; width: 760px"></div>
+              <div class="d-p" style="top: 282px; width: 700px"></div>
+              <div class="d-p" style="top: 314px; width: 740px"></div>
+              <div class="d-p" style="top: 346px; width: 420px"></div>
+              <div class="d-p" style="top: 410px; width: 760px"></div>
+              <div class="d-p" style="top: 442px; width: 650px"></div>
+              <div class="d-p" style="top: 474px; width: 720px"></div>
+              <div class="d-p" style="top: 506px; width: 300px"></div>
+              <div class="d-p" style="top: 570px; width: 740px"></div>
+              <div class="d-p" style="top: 602px; width: 690px"></div>
+              <div class="d-p" style="top: 634px; width: 520px"></div>
+              <div class="d-h2" style="top: 720px">0.10.0</div>
+              <div class="d-p" style="top: 790px; width: 760px"></div>
+              <div class="d-p" style="top: 822px; width: 610px"></div>
+              <div class="d-p" style="top: 854px; width: 720px"></div>
+              <div class="d-p" style="top: 886px; width: 380px"></div>
+              <div class="d-p" style="top: 950px; width: 700px"></div>
+              <div class="d-p" style="top: 982px; width: 750px"></div>
+              <div class="d-p" style="top: 1014px; width: 460px"></div>
+            </div>
+          </div>
+          <div id="b-console">
+            <div class="c-tabs"><span>Elements</span><span class="on">Console</span><span>Sources</span><span>Network</span></div>
+            <div id="b-c1" class="c-row c-in" style="top: 66px">window.__playwriterGhostCursor</div>
+            <div id="b-c2" class="c-row c-out" style="top: 108px">undefined</div>
+            <div id="b-c3" class="c-row c-in" style="top: 168px">document.querySelectorAll('[class*=playwriter]').length</div>
+            <div id="b-c4" class="c-row c-num" style="top: 210px">0</div>
+          </div>
+          <svg id="b-trails" width="1180" height="676" viewBox="0 0 1180 676">
+            <path id="b-straight" d="" fill="none" stroke="#a1a1aa" stroke-width="3" stroke-dasharray="8 10" stroke-linecap="round" />
+            <path id="b-trail" d="" fill="none" stroke="#ff6a00" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <img id="b-cursor" src="assets/cursor.svg" alt="" />
+        </div>
+      </div>
+    </div>
+
+    <!-- human input -->
+    <div id="b-h-cmd" class="col cmd" style="top: 150px">playwriter session new
+  --tab-group shop
+  --patchright</div>
+    <div id="b-h-title" class="col title" style="top: 330px">Moves like a human.</div>
+    <div id="b-h-s1" class="col sub" style="top: 560px">curved mouse paths</div>
+    <div id="b-h-s2" class="col sub" style="top: 630px">human key timing</div>
+    <div id="b-h-ticks" class="col" style="top: 684px; height: 90px">
+      <div id="b-ticks"></div>
+      <div id="b-tick-axis"></div>
+      <div id="b-tick-label">30-110 ms apart</div>
+    </div>
+    <div id="b-h-s3" class="col sub" style="top: 800px">wheel-flick scrolling</div>
+
+    <!-- tabs per session -->
+    <div id="b-t-title" class="col title" style="top: 110px; width: 700px; font-size: 72px">Each agent sees only its own tabs.</div>
+    <div id="b-term-a" data-layout-allow-occlusion class="term" style="top: 560px; --group: #f5913c">
+      <div class="who">agent 1</div>
+      <div class="ln">playwriter session new --tab-group shop</div>
+      <div id="b-a2" class="ln">playwriter -s 1 -e "context.pages()"</div>
+      <div id="b-a3" class="res">→ shoply.com/checkout</div>
+    </div>
+    <div id="b-term-b" data-layout-allow-occlusion class="term" style="top: 800px; --group: #5b8def">
+      <div class="who">agent 2</div>
+      <div id="b-b1" class="ln">playwriter session new --tab-group docs</div>
+      <div id="b-b2" class="ln">playwriter -s 2 -e "context.pages()"</div>
+      <div id="b-b3" class="res">→ playwriter.dev/api, /changelog</div>
+    </div>
+
+    <!-- native recording -->
+    <div id="b-r-title" class="col title" style="top: 130px">Native screen recording.</div>
+    <div id="b-r-s1" class="col stat" style="top: 400px"><span id="b-r-n1" class="num">4×</span><span class="lbl">less Chrome CPU</span></div>
+    <div id="b-r-s2" class="col stat" style="top: 580px"><span id="b-r-n2" class="num">15×</span><span class="lbl">less CDP traffic</span></div>
+    <div id="b-r-s3" class="col sub" style="top: 800px">60 fps · H.264 MP4</div>
+
+    <!-- invisible -->
+    <div id="b-i-title" class="col title" style="top: 200px">Invisible to the page.</div>
+    <div id="b-i-note" class="col note" style="top: 430px">Its scripts run in a private isolated world.</div>
+  </div>
+  <script>
+    ;(function () {
+      const { BEAT, EXIT_S, everyFrame, random, camera, applyCamera, typeText, blurWords, bezier, humanPath, pathD } = Kit
+      const at = Kit.beats(7)
+      const DURATION = at(55)
+      const tl = gsap.timeline({ paused: true })
+      const $ = (id) => document.getElementById(id)
+
+      // window rect in world coords; page viewport starts 104 px below its top
+      const WIN = { x: 660, y: 170 }
+      const PAGE = { x: WIN.x, y: WIN.y + 104 }
+      const page = (x, y) => ({ x: PAGE.x + x, y: PAGE.y + y })
+
+      // ── initial states ─────────────────────────────────────────────────────
+      gsap.set(['#b-shop-chip', '#b-tab-checkout', '#b-shop-line'], { opacity: 0 })
+      gsap.set(['#b-docs-chip', '#b-tab-api', '#b-tab-log', '#b-docs-line'], { opacity: 0 })
+      gsap.set('#b-console', { y: 360 })
+      gsap.set('#b-cursor', { x: 900, y: 560, opacity: 0 })
+
+      // ── camera: world point (x, y) at anchor, zoom z ──────────────────────
+      const W = (x, y) => page(x, y)
+      const CAM = [
+        { t: 0, ...{ x: 1250, y: 600 }, z: 0.86 },
+        { t: at(9), x: 1250, y: 570, z: 0.98 },
+        { t: at(11.5), ...W(330, 190), z: 1.28 },
+        { t: at(15.5), ...W(360, 200), z: 1.32 },
+        { t: at(17), x: 1250, y: 570, z: 1.02 },
+        { t: at(19.5), ...W(330, 420), z: 1.2 },
+        { t: at(21.5), ...W(330, 380), z: 1.16 },
+        // tab strip
+        { t: at(23.2), x: WIN.x + 420, y: WIN.y + 30, z: 1.5, ax: 1290, ay: 330 },
+        { t: at(35), x: WIN.x + 470, y: WIN.y + 34, z: 1.56, ax: 1290, ay: 330 },
+        // recording: full window, then the REC badge, then back
+        { t: at(37), x: 1250, y: 560, z: 0.98 },
+        { t: at(38.5), x: WIN.x + 700, y: WIN.y + 300, z: 1.12, ax: 1440, ay: 470 },
+        { t: at(42), x: WIN.x + 640, y: WIN.y + 320, z: 1.06, ax: 1400, ay: 500 },
+        { t: at(45.5), x: 1260, y: 570, z: 1.04 },
+        // console
+        { t: at(48.5), ...W(420, 450), z: 1.3, ax: 1300, ay: 620 },
+        { t: at(53.2), ...W(460, 470), z: 1.36, ax: 1300, ay: 620 },
+      ]
+      // anchors default to the right of the text column
+      for (const k of CAM) {
+        k.ax ??= 1260
+        k.ay ??= 560
+      }
+      function cameraAt(t) {
+        const base = camera(CAM.map((k) => ({ ...k, x: k.x - (k.ax - 1260) / k.z, y: k.y - (k.ay - 560) / k.z })), t, { ax: 1260, ay: 560 })
+        return base
+      }
+
+      // ── human input (beats 8-22) ──────────────────────────────────────────
+      // rises as the intro page scrolls away (Kit.intro.T.exit), mirrored ease
+      tl.fromTo('#b-world', { y: 900 }, { y: 0, duration: 1.2, ease: 'expo.out' }, Kit.intro.T.exit + 0.08 - 7 * BEAT)
+      typeText(tl, $('b-h-cmd'), at(8), 0.022)
+      // the --tab-group flag makes the shop group
+      tl.fromTo('#b-shop-chip', { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(2)' }, at(9))
+      tl.fromTo('#b-tab-checkout', { opacity: 0, x: -40 }, { opacity: 1, x: 0, duration: 0.8, ease: 'expo.out' }, at(9) + 0.1)
+      tl.fromTo('#b-shop-line', { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 0.8, ease: 'expo.out', transformOrigin: '0 50%' }, at(9) + 0.15)
+      blurWords(tl, $('b-h-title'), at(10))
+
+      // cursor 1: curved path to the email field
+      const START = { x: 900, y: 600 }
+      const EMAIL = { x: 420, y: 238 }
+      tl.to('#b-cursor', { opacity: 1, duration: 0.3 }, at(10.6))
+      // Cursor track: one entry per move, a function of t only. Holds at the end of each move.
+      const MOVES = []
+      function moveCursor(path, start, duration, trail = false) {
+        MOVES.push({ path, start, duration, trail })
+      }
+      function drawCursor(t) {
+        let m = MOVES[0]
+        for (const move of MOVES) if (t >= move.start) m = move
+        const u = Kit.easeInOut((t - m.start) / m.duration)
+        const q = bezier(m.path, u)
+        gsap.set('#b-cursor', { x: q.x - 6, y: q.y - 6 })
+        if (m.trail) {
+          const pts = []
+          for (let i = 0; i <= 40; i++) pts.push(bezier(m.path, (u * i) / 40))
+          $('b-trail').setAttribute('d', 'M' + pts.map((v) => `${v.x} ${v.y}`).join(' L'))
+        }
+      }
+      const still = (p) => [p, p, p, p]
+      function click(time, target) {
+        tl.to('#b-cursor', { scale: 0.82, duration: 0.07, ease: 'power2.in' }, time)
+        tl.to('#b-cursor', { scale: 1, duration: 0.22, ease: 'power2.out' }, time + 0.12)
+        if (target) tl.fromTo(target, { scale: 1 }, { scale: 0.97, duration: 0.08, yoyo: true, repeat: 1, ease: 'power1.inOut' }, time)
+      }
+      const path1 = humanPath(START, EMAIL, 0.3)
+      $('b-straight').setAttribute('d', `M${START.x} ${START.y} L${EMAIL.x} ${EMAIL.y}`)
+      tl.fromTo('#b-straight', { opacity: 0 }, { opacity: 1, duration: 0.3 }, at(10.8))
+      tl.set('#b-h-s1', { opacity: 1 }, at(11))
+      blurWords(tl, $('b-h-s1'), at(11))
+      moveCursor(still(START), 0, 1)
+      moveCursor(path1, at(11), 1.05, true)
+      const CLICK1 = at(11) + 1.15
+      click(CLICK1)
+      tl.fromTo('#b-email-ring', { opacity: 0, scale: 1.04 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'expo.out' }, CLICK1 + 0.08)
+      tl.to(['#b-trail', '#b-straight'], { opacity: 0, duration: 0.6, ease: 'power2.out' }, at(14))
+
+      // typing with human key spacing, 30-110 ms
+      const rnd = random(7)
+      const email = $('b-email').textContent
+      const gaps = [...email].map(() => 0.03 + rnd() * 0.08)
+      const TYPE0 = at(13)
+      const typed = typeText(tl, $('b-email'), TYPE0, gaps)
+      tl.set('#b-h-s2', { opacity: 1 }, TYPE0 - 0.25)
+      tl.fromTo('#b-h-ticks', { opacity: 0 }, { opacity: 1, duration: 0.3 }, TYPE0 - 0.2)
+      blurWords(tl, $('b-h-s2'), TYPE0 - 0.25)
+      tl.fromTo('#b-h-ticks', { opacity: 0 }, { opacity: 1, duration: 0.3 }, TYPE0 - 0.2)
+      {
+        let t = TYPE0
+        const span = typed.end - TYPE0
+        const ticks = $('b-ticks')
+        ;[...email].forEach((_, i) => {
+          const tick = document.createElement('i')
+          tick.style.left = `${((t - TYPE0) / span) * 396}px`
+          ticks.appendChild(tick)
+          tl.fromTo(tick, { opacity: 0, scaleY: 0.2 }, { opacity: 1, scaleY: 1, duration: 0.25, ease: 'back.out(2)', transformOrigin: '50% 100%' }, t)
+          t += gaps[i]
+        })
+      }
+
+      // three wheel flicks
+      const FLICK0 = at(16)
+      tl.set('#b-h-s3', { opacity: 1 }, FLICK0 - 0.2)
+      blurWords(tl, $('b-h-s3'), FLICK0 - 0.2)
+      moveCursor(humanPath(EMAIL, { x: 640, y: 380 }, 0.15), FLICK0 - 0.6, 0.7)
+      ;[0, 1, 2].forEach((i) => {
+        tl.to('#b-shop-scroll', { y: -(i + 1) * 110, duration: 0.42, ease: 'power3.out' }, FLICK0 + i * 0.32)
+      })
+
+      // cursor 2: to the Pay button (page y 740 - 330 scroll = 410), click, paid
+      const PAY = { x: 380, y: 140 + 640 + 34 - 330 }
+      moveCursor(humanPath({ x: 640, y: 380 }, PAY, -0.25), at(18.2), 0.95)
+      const CLICK2 = at(18.2) + 1.05
+      click(CLICK2, '#b-pay')
+      tl.to('#b-paid', { opacity: 1, duration: 0.25, ease: 'power2.out' }, CLICK2 + 0.12)
+
+      // leave: text column slides out left
+      const H_OUT = at(22) - EXIT_S
+      tl.to(['#b-h-cmd', '#b-h-title', '#b-h-s1', '#b-h-s2', '#b-h-ticks', '#b-h-s3'], { x: -260, opacity: 0, duration: EXIT_S, ease: 'power3.in', stagger: 0.03 }, H_OUT - 0.1)
+      tl.to('#b-cursor', { opacity: 0, duration: 0.3 }, at(21.5))
+
+      // ── tabs per session (beats 22-34) ─────────────────────────────────────
+      const T = at(22)
+      // grey to ink, word by word
+      {
+        const el = $('b-t-title')
+        const words = el.textContent.split(' ')
+        el.innerHTML = words.map((w) => `<span style="display:inline-block">${w}</span>`).join(' ')
+        tl.fromTo(el.children, { color: '#d4d4d8', opacity: 0 }, { color: '#09090b', opacity: 1, duration: 0.45, stagger: 0.09, ease: 'power2.out' }, T + 0.15)
+      }
+      tl.fromTo('#b-term-a', { y: 320, opacity: 0 }, { y: 0, opacity: 1, duration: 1.0, ease: 'expo.out' }, at(22.6))
+      tl.fromTo('#b-term-b', { y: 320, opacity: 0 }, { y: 0, opacity: 1, duration: 1.0, ease: 'expo.out' }, at(23.2))
+      gsap.set(['#b-a2', '#b-a3', '#b-b3', '#b-b2'], { opacity: 0 })
+      const B1_END = typeText(tl, $('b-b1'), at(23.8), 0.026).end
+      // agent 2's group appears
+      tl.fromTo('#b-docs-chip', { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(2)' }, B1_END + 0.15)
+      tl.fromTo(['#b-tab-api', '#b-tab-log'], { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.8, ease: 'expo.out', stagger: 0.12 }, B1_END + 0.25)
+      tl.fromTo('#b-docs-line', { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 0.9, ease: 'expo.out', transformOrigin: '0 50%' }, B1_END + 0.3)
+
+      // agent 1 lists its pages: only the shop tab
+      const A = at(27.2)
+      tl.set('#b-a2', { opacity: 1 }, A - 0.01)
+      const A2_END = typeText(tl, $('b-a2'), A, 0.022).end
+      tl.fromTo('#b-a3', { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.5, ease: 'expo.out' }, A2_END + 0.15)
+      tl.to(['#b-docs-chip', '#b-tab-api', '#b-tab-log', '#b-docs-line'], { opacity: 0.22, duration: 0.35, ease: 'power2.out' }, A2_END + 0.15)
+      // agent 2 lists its pages: only the docs tabs
+      const Bt = at(30.8)
+      tl.set('#b-b2', { opacity: 1 }, Bt - 0.01)
+      tl.to(['#b-docs-chip', '#b-tab-api', '#b-tab-log', '#b-docs-line'], { opacity: 1, duration: 0.3, ease: 'power2.out' }, Bt - 0.2)
+      tl.to(['#b-shop-chip', '#b-tab-checkout', '#b-shop-line'], { opacity: 0.22, duration: 0.3, ease: 'power2.out' }, Bt - 0.2)
+      const B2_END = typeText(tl, $('b-b2'), Bt, 0.022).end
+      tl.fromTo('#b-b3', { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.5, ease: 'expo.out' }, B2_END + 0.15)
+      tl.to(['#b-shop-chip', '#b-tab-checkout', '#b-shop-line'], { opacity: 1, duration: 0.4 }, at(34.6))
+
+      // leave: terminals drop, title out left
+      const T_OUT = at(36) - EXIT_S
+      tl.to('#b-term-a', { opacity: 0, y: 360, duration: EXIT_S, ease: 'power3.in' }, T_OUT)
+      tl.to('#b-term-b', { opacity: 0, y: 360, duration: EXIT_S, ease: 'power3.in' }, T_OUT - 0.06)
+      tl.to('#b-t-title', { opacity: 0, x: -240, duration: EXIT_S, ease: 'power3.in' }, T_OUT)
+
+      // ── native recording (beats 34-44) ─────────────────────────────────────
+      const R = at(36)
+      // the Changelog tab becomes active
+      tl.set('#b-tab-checkout', { backgroundColor: 'rgba(53, 54, 58, 0)', color: '#bdc1c6' }, R + 0.2)
+      tl.set('#b-tab-log', { backgroundColor: '#35363a', color: '#e8eaed' }, R + 0.2)
+      tl.set('#b-docs', { opacity: 1 }, R + 0.2)
+      tl.set('#b-url-shop', { opacity: 0 }, R + 0.2)
+      tl.set('#b-url-docs', { opacity: 1 }, R + 0.2)
+      tl.fromTo('#b-r-title', { opacity: 0, x: 120, filter: 'blur(8px)' }, { opacity: 1, x: 0, filter: 'blur(0px)', duration: 1.0, ease: 'expo.out' }, R + 0.15)
+      const REC = at(37.6)
+      tl.fromTo('#b-rec', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.45, ease: 'back.out(1.8)' }, REC)
+      function counter(el, to, start) {
+        const v = { n: 1 }
+        tl.fromTo(
+          v,
+          { n: 1 },
+          {
+            n: to,
+            duration: 1.1,
+            ease: 'expo.out',
+            immediateRender: false,
+            onUpdate: () => {
+              el.textContent = v.n > to - 0.05 ? `${to}×` : `${Math.round(v.n)}×`
+            },
+          },
+          start,
+        )
+      }
+      tl.fromTo('#b-r-s1', { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.9, ease: 'expo.out' }, at(39))
+      counter($('b-r-n1'), 4, at(39))
+      tl.fromTo('#b-r-s2', { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.9, ease: 'expo.out' }, at(40.4))
+      counter($('b-r-n2'), 15, at(40.4))
+      tl.set('#b-r-s3', { opacity: 1 }, at(42))
+      blurWords(tl, $('b-r-s3'), at(42))
+      $('b-r-n1').textContent = '1×'
+      $('b-r-n2').textContent = '1×'
+
+      const R_OUT = at(46) - EXIT_S
+      tl.to(['#b-r-title', '#b-r-s1', '#b-r-s2', '#b-r-s3'], { opacity: 0, y: -80, duration: EXIT_S, ease: 'power3.in', stagger: 0.04 }, R_OUT - 0.1)
+
+      // ── invisible to the page (beats 44-52) ────────────────────────────────
+      const I = at(46)
+      tl.to('#b-console', { y: 0, duration: 0.9, ease: 'expo.out' }, I)
+      tl.fromTo('#b-i-title', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 1.0, ease: 'expo.out' }, I + 0.2)
+      gsap.set(['#b-c2', '#b-c4'], { opacity: 0 })
+      const C1 = typeText(tl, $('b-c1'), at(47.2), 0.03).end
+      tl.set('#b-c2', { opacity: 1 }, C1 + 0.25)
+      const C3 = typeText(tl, $('b-c3'), C1 + 0.7, 0.018).end
+      tl.set('#b-c4', { opacity: 1 }, C3 + 0.25)
+      blurWords(tl, $('b-i-note'), at(48.5), { stagger: 0.05 })
+      // the ghost cursor glides over the page the whole time: visible to you, not to the page
+      tl.to('#b-cursor', { opacity: 1, duration: 0.3 }, I + 0.4)
+      moveCursor(still({ x: 900, y: 120 }), I - 0.3, 1)
+      moveCursor(humanPath({ x: 900, y: 120 }, { x: 560, y: 240 }, 0.25), I + 0.5, 1.4)
+      moveCursor(humanPath({ x: 560, y: 240 }, { x: 760, y: 190 }, -0.3), at(50.5), 2.4)
+
+      // leave: the world and the text slide out left, fast
+      const OUT = at(54) - 0.55
+      tl.to('#b-world', { x: -2600, duration: 0.55, ease: 'power3.in' }, OUT)
+      tl.to(['#b-i-title', '#b-i-note'], { x: -700, opacity: 0, duration: 0.5, ease: 'power3.in', stagger: 0.04 }, OUT - 0.05)
+
+      // ── every frame: camera, REC timer, slow docs scroll ───────────────────
+      const camEl = $('b-world')
+      const inner = document.createElement('div')
+      // camera on an inner wrapper so the world's own entrance/exit tweens stay separate
+      inner.id = 'b-cam'
+      inner.style.cssText = 'position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0'
+      while (camEl.firstChild) inner.appendChild(camEl.firstChild)
+      camEl.appendChild(inner)
+      everyFrame(tl, DURATION, (t) => {
+        applyCamera(inner, cameraAt(t))
+        drawCursor(t)
+        const docsY = -Math.max(0, t - R) * 34
+        $('b-docs-scroll').style.transform = `translateY(${docsY}px)`
+      })
+
+      window.__timelines['browser'] = tl
+    })()
+  </script>
+</template>

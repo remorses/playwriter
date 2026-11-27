@@ -1,0 +1,120 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'IvarText';
+      src: url('assets/fonts/ivartext-regular.woff2') format('woff2');
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    #o-stage {
+      position: absolute;
+      inset: 0;
+    }
+    #o-icon {
+      position: absolute;
+      left: 540px;
+      top: 300px;
+      width: 200px;
+      height: 200px;
+    }
+    #o-wordmark {
+      position: absolute;
+      left: 780px;
+      top: 296px;
+      width: 640px;
+      height: 176px;
+    }
+    #o-version {
+      position: absolute;
+      left: 1300px;
+      top: 452px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 48px;
+      color: #ff6a00;
+    }
+    #o-cmd {
+      position: absolute;
+      left: 0;
+      width: 1920px;
+      top: 620px;
+      text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 48px;
+      color: #09090b;
+      white-space: pre;
+    }
+    #o-url {
+      position: absolute;
+      left: 0;
+      width: 1920px;
+      top: 720px;
+      text-align: center;
+      font-family: 'IvarText', serif;
+      font-size: 64px;
+      color: #52525b;
+    }
+    #o-cursor {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 44px;
+      height: 68px;
+      transform-origin: 8px 8px;
+      filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.25));
+    }
+  </style>
+  <div id="root" data-composition-id="outro" data-width="1920" data-height="1080">
+    <div id="o-stage">
+      <img id="o-icon" src="assets/logo.svg" alt="" />
+      <img id="o-wordmark" src="assets/wordmark.svg" alt="playwriter" />
+      <div id="o-version">0.11</div>
+      <div id="o-cmd">npm i -g playwriter@latest</div>
+      <div id="o-url">playwriter.dev</div>
+    </div>
+    <img id="o-cursor" src="assets/cursor.svg" alt="" />
+  </div>
+  <script>
+    ;(function () {
+      const { everyFrame, bezier, humanPath, easeInOut, typeText } = Kit
+      const at = Kit.beats(68)
+      const DURATION = at(80)
+      const tl = gsap.timeline({ paused: true })
+
+      // the cursor curves in and clicks where the mark appears
+      const FROM = { x: 1500, y: 1000 }
+      const MARK = { x: 640, y: 400 }
+      const path = humanPath(FROM, MARK, 0.25)
+      const away = humanPath(MARK, { x: 1080, y: 1180 }, -0.2)
+      const ARRIVE = at(68) + 0.1
+      const CLICK = ARRIVE + 0.95
+      const LEAVE = at(71.5)
+      gsap.set('#o-cursor', { x: FROM.x, y: FROM.y })
+      tl.fromTo('#o-cursor', { opacity: 0 }, { opacity: 1, duration: 0.2 }, ARRIVE)
+      tl.to('#o-cursor', { scale: 0.82, duration: 0.07, ease: 'power2.in' }, CLICK)
+      tl.to('#o-cursor', { scale: 1, duration: 0.22, ease: 'power2.out' }, CLICK + 0.12)
+
+      tl.fromTo('#o-icon', { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(1.7)' }, CLICK + 0.06)
+      tl.fromTo('#o-wordmark', { clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)', duration: 1.1, ease: 'power2.inOut' }, CLICK + 0.3)
+      tl.fromTo('#o-version', { opacity: 0, filter: 'blur(8px)' }, { opacity: 1, filter: 'blur(0px)', duration: 0.6, ease: 'expo.out' }, CLICK + 1.2)
+      typeText(tl, document.getElementById('o-cmd'), at(72), 0.035)
+      tl.fromTo('#o-url', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: 'expo.out' }, at(74))
+      // slow push in, never still
+      tl.fromTo('#o-stage', { scale: 0.98 }, { scale: 1.04, duration: DURATION, ease: 'none', transformOrigin: '50% 48%' }, 0)
+
+      everyFrame(tl, DURATION, (t) => {
+        const leaving = t >= LEAVE
+        const p = leaving ? away : path
+        const u = easeInOut(leaving ? (t - LEAVE) / 0.9 : (t - ARRIVE) / 0.9)
+        const q = bezier(p, u)
+        gsap.set('#o-cursor', { x: q.x - 8, y: q.y - 8 })
+      })
+
+      window.__timelines['outro'] = tl
+    })()
+  </script>
+</template>

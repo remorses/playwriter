@@ -1,0 +1,138 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'IvarText';
+      src: url('assets/fonts/ivartext-regular.woff2') format('woff2');
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    #intro-stage {
+      position: absolute;
+      inset: 0;
+    }
+    #intro-lockup {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+    }
+    #intro-wordmark {
+      position: absolute;
+      left: 430px;
+      top: 330px;
+      width: 1000px;
+      height: 275px;
+    }
+    #intro-version {
+      position: absolute;
+      left: 1390px;
+      top: 520px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 64px;
+      color: #ff6a00;
+      letter-spacing: -0.02em;
+    }
+    #intro-line {
+      position: absolute;
+      left: 0;
+      width: 1920px;
+      top: 630px;
+      text-align: center;
+      font-family: 'IvarText', serif;
+      font-size: 100px;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      color: #09090b;
+      white-space: nowrap;
+    }
+    .intro-mask {
+      display: inline-block;
+      overflow: hidden;
+      vertical-align: top;
+      padding: 0 0.04em;
+    }
+    .intro-mask span {
+      display: inline-block;
+    }
+    #intro-human {
+      color: #ff6a00;
+    }
+    #intro-cursor {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 52px;
+      height: 81px;
+      transform-origin: 9px 9px;
+      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.25));
+    }
+  </style>
+  <div id="root" data-composition-id="intro" data-width="1920" data-height="1080" data-layout-allow-overflow>
+    <div id="intro-stage">
+      <div id="intro-lockup">
+        <img id="intro-wordmark" src="assets/wordmark.svg" alt="playwriter" />
+        <div id="intro-version">0.11</div>
+      </div>
+      <div id="intro-line"><span class="intro-mask"><span>Your agent</span></span> <span class="intro-mask"><span>now moves</span></span> <span class="intro-mask"><span>like a</span></span> <span class="intro-mask"><span id="intro-human">human.</span></span></div>
+    </div>
+    <img id="intro-cursor" src="assets/cursor.svg" alt="" />
+  </div>
+  <script>
+    // The ghost cursor writes the wordmark, clicks "0.11" out of the page, then scrolls the
+    // intro away with wheel flicks: the three human inputs of the release, before it is named.
+    ;(function () {
+      const { BEAT, everyFrame } = Kit
+      const { T, cursorAt, scrollAt } = Kit.intro
+      const b = (n) => n * BEAT
+      const END = b(8)
+      const tl = gsap.timeline({ paused: true })
+      const $ = (id) => document.getElementById(id)
+
+      // cursor arrives, presses on the downbeat, leaves when the page scrolls away
+      tl.fromTo('#intro-cursor', { opacity: 0 }, { opacity: 1, duration: 0.15 }, T.enter)
+      tl.to('#intro-cursor', { scale: 0.8, duration: 0.07, ease: 'power2.in' }, T.click - 0.07)
+      tl.to('#intro-cursor', { scale: 1, duration: 0.25, ease: 'power2.out' }, T.click + 0.06)
+      tl.to('#intro-cursor', { opacity: 0, duration: 0.25, ease: 'power2.in' }, T.exit + 0.1)
+
+      // "0.11" pops out of the click
+      tl.fromTo(
+        '#intro-version',
+        { opacity: 0, scale: 0.2, rotation: -10 },
+        { opacity: 1, scale: 1, rotation: 0, duration: 0.55, ease: 'back.out(2.2)', transformOrigin: '40% 60%' },
+        T.click,
+      )
+
+      // the lockup lifts to make room, then keeps creeping closer
+      tl.fromTo('#intro-lockup', { y: 0, scale: 1 }, { y: -200, scale: 0.7, duration: 1.0, ease: 'expo.inOut', transformOrigin: '50% 45%' }, T.lift)
+      tl.to('#intro-lockup', { scale: 0.73, duration: END - T.lift - 1.0, ease: 'none', transformOrigin: '50% 45%' }, T.lift + 1.0)
+
+      // the line rises out of four masks, one group per half beat, "human." last in orange
+      const groups = [...document.querySelectorAll('#intro-line .intro-mask > span')]
+      groups.forEach((g, i) => {
+        tl.fromTo(
+          g,
+          { yPercent: 115, rotation: 6, filter: 'blur(6px)' },
+          { yPercent: 0, rotation: 0, filter: 'blur(0px)', duration: 0.85, ease: 'expo.out', transformOrigin: '0% 100%' },
+          b(4.6 + i * 0.4),
+        )
+      })
+      tl.fromTo('#intro-human', { scale: 1.25 }, { scale: 1, duration: 0.9, ease: 'expo.out', transformOrigin: '50% 80%' }, b(5.8))
+
+      everyFrame(tl, END, (t) => {
+        const p = cursorAt(t)
+        gsap.set('#intro-cursor', { x: p.x - 9, y: p.y - 9 })
+        // ink follows the pen tip
+        const inked = t < T.write ? 0 : t >= T.written ? 1 : (cursorAt(t).x - 430 + 16) / 1000
+        $('intro-wordmark').style.clipPath = `inset(-10% ${(1 - Math.min(1, Math.max(0, inked))) * 100}% -10% 0)`
+        $('intro-stage').style.transform = `translateY(${-scrollAt(t)}px)`
+      })
+
+      window.__timelines['intro'] = tl
+    })()
+  </script>
+</template>

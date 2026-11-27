@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <script src="assets/kit.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #ffffff;
+      }
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 113.97 BPM, BEAT = 0.52643 s. Scene slots in beats: field 0-80, intro 0-8, browser 7-55,
+         more 53-69, outro 68-80. Overlaps let one scene leave while the next arrives. -->
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0.000"
+      data-duration="42.1146"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div
+        id="field"
+        data-composition-id="field"
+        data-composition-src="compositions/field.html"
+        data-start="0.000"
+        data-duration="42.1146"
+        data-track-index="0"
+        data-track-kind="graphics"
+        data-width="1920"
+        data-height="1080"
+        style="z-index: 0"
+      ></div>
+      <div
+        id="intro"
+        data-composition-id="intro"
+        data-composition-src="compositions/intro.html"
+        data-start="0.000"
+        data-duration="4.2115"
+        data-track-index="1"
+        data-track-kind="graphics"
+        data-width="1920"
+        data-height="1080"
+        style="z-index: 2"
+      ></div>
+      <div
+        id="browser"
+        data-composition-id="browser"
+        data-composition-src="compositions/browser.html"
+        data-start="3.685"
+        data-duration="25.2688"
+        data-track-index="2"
+        data-track-kind="graphics"
+        data-width="1920"
+        data-height="1080"
+        style="z-index: 1"
+      ></div>
+      <div
+        id="more"
+        data-composition-id="more"
+        data-composition-src="compositions/more.html"
+        data-start="27.901"
+        data-duration="8.4229"
+        data-track-index="1"
+        data-track-kind="graphics"
+        data-width="1920"
+        data-height="1080"
+        style="z-index: 2"
+      ></div>
+      <div
+        id="outro"
+        data-composition-id="outro"
+        data-composition-src="compositions/outro.html"
+        data-start="35.797"
+        data-duration="6.3172"
+        data-track-index="3"
+        data-track-kind="graphics"
+        data-width="1920"
+        data-height="1080"
+        style="z-index: 3"
+      ></div>
+
+      <audio id="music" src="assets/music.mp3" data-start="0.000" data-duration="42.1146" data-track-index="10" data-volume="0.72"></audio>
+      <!-- SFX: one cue per visible action, volume from measured loudness (assets/sfx/analysis.json) -->
+      <!-- intro: cursor flies in -->
+      <audio id="sfx-i01" src="assets/sfx/whoosh-air.mp3" data-start="0.195" data-duration="0.875" data-track-index="20" data-volume="0.305"></audio>
+      <!-- intro: cursor writes the wordmark -->
+      <audio id="sfx-i02" src="assets/sfx/sparkle.mp3" data-start="0.737" data-duration="1.700" data-track-index="21" data-volume="0.158"></audio>
+      <!-- intro: click: 0.11 pops, ring -->
+      <audio id="sfx-i03" src="assets/sfx/card.mp3" data-start="2.050" data-duration="0.526" data-track-index="20" data-volume="0.098"></audio>
+      <!-- intro: line group 1 -->
+      <audio id="sfx-i04" src="assets/sfx/text-tap-down2.mp3" data-start="2.436" data-duration="0.523" data-track-index="22" data-volume="0.376"></audio>
+      <!-- intro: line group 2 -->
+      <audio id="sfx-i05" src="assets/sfx/text-tap.mp3" data-start="2.617" data-duration="0.466" data-track-index="20" data-volume="0.335"></audio>
+      <!-- intro: line group 3 -->
+      <audio id="sfx-i06" src="assets/sfx/text-tap-up2.mp3" data-start="2.838" data-duration="0.415" data-track-index="21" data-volume="0.363"></audio>
+      <!-- intro: human. -->
+      <audio id="sfx-i07" src="assets/sfx/text-tap-up4.mp3" data-start="3.079" data-duration="0.370" data-track-index="22" data-volume="0.385"></audio>
+      <!-- intro: wheel flick -->
+      <audio id="sfx-i08" src="assets/sfx/thud.mp3" data-start="3.354" data-duration="0.141" data-track-index="20" data-volume="0.324"></audio>
+      <!-- intro: wheel flick -->
+      <audio id="sfx-i09" src="assets/sfx/thud.mp3" data-start="3.565" data-duration="0.141" data-track-index="20" data-volume="0.324"></audio>
+      <!-- intro: page scrolls away, browser rises -->
+      <audio id="sfx-i10" src="assets/sfx/whoosh-riser.mp3" data-start="3.695" data-duration="0.586" data-track-index="21" data-volume="0.507"></audio>
+      <!-- command types -->
+      <audio id="sfx-06" src="assets/sfx/typing.mp3" data-start="4.211" data-duration="1.150" data-track-index="12" data-volume="0.313"></audio>
+      <!-- shop group appears -->
+      <audio id="sfx-07" src="assets/sfx/card.mp3" data-start="4.783" data-duration="0.526" data-track-index="11" data-volume="0.098"></audio>
+      <!-- title -->
+      <audio id="sfx-08" src="assets/sfx/text-tap-down2.mp3" data-start="5.329" data-duration="0.523" data-track-index="11" data-volume="0.299"></audio>
+      <!-- cursor curve -->
+      <audio id="sfx-09" src="assets/sfx/whoosh-zip.mp3" data-start="6.026" data-duration="0.887" data-track-index="11" data-volume="0.162"></audio>
+      <!-- email types -->
+      <audio id="sfx-10" src="assets/sfx/typing.mp3" data-start="6.844" data-duration="1.450" data-track-index="12" data-volume="0.313"></audio>
+      <!-- click email -->
+      <audio id="sfx-11" src="assets/sfx/tap.mp3" data-start="6.938" data-duration="0.455" data-track-index="11" data-volume="0.684"></audio>
+      <!-- wheel flicks -->
+      <audio id="sfx-12" src="assets/sfx/whoosh-short.mp3" data-start="8.398" data-duration="0.665" data-track-index="11" data-volume="0.232"></audio>
+      <!-- click pay -->
+      <audio id="sfx-13" src="assets/sfx/tap.mp3" data-start="10.628" data-duration="0.455" data-track-index="11" data-volume="0.684"></audio>
+      <!-- paid -->
+      <audio id="sfx-14" src="assets/sfx/sparkle.mp3" data-start="10.678" data-duration="1.400" data-track-index="12" data-volume="0.158"></audio>
+      <!-- camera to tabs -->
+      <audio id="sfx-15" src="assets/sfx/whoosh-sub.mp3" data-start="11.837" data-duration="1.367" data-track-index="11" data-volume="0.316"></audio>
+      <!-- agent 1 card -->
+      <audio id="sfx-16" src="assets/sfx/card.mp3" data-start="12.043" data-duration="0.526" data-track-index="13" data-volume="0.078"></audio>
+      <!-- agent 2 card -->
+      <audio id="sfx-17" src="assets/sfx/thud.mp3" data-start="12.399" data-duration="0.141" data-track-index="12" data-volume="0.407"></audio>
+      <!-- agent 2 types -->
+      <audio id="sfx-18" src="assets/sfx/typing.mp3" data-start="12.529" data-duration="1.050" data-track-index="14" data-volume="0.313"></audio>
+      <!-- docs group and tabs -->
+      <audio id="sfx-19" src="assets/sfx/icons-grow.mp3" data-start="13.666" data-duration="0.577" data-track-index="11" data-volume="0.146"></audio>
+      <!-- agent 1 types -->
+      <audio id="sfx-20" src="assets/sfx/typing.mp3" data-start="14.319" data-duration="0.800" data-track-index="12" data-volume="0.313"></audio>
+      <!-- agent 1 result -->
+      <audio id="sfx-21" src="assets/sfx/text-tap-up4.mp3" data-start="15.236" data-duration="0.370" data-track-index="11" data-volume="0.305"></audio>
+      <!-- agent 2 types -->
+      <audio id="sfx-22" src="assets/sfx/typing.mp3" data-start="16.214" data-duration="0.800" data-track-index="12" data-volume="0.313"></audio>
+      <!-- agent 2 result -->
+      <audio id="sfx-23" src="assets/sfx/text-tap-down4.mp3" data-start="17.071" data-duration="0.587" data-track-index="11" data-volume="0.285"></audio>
+      <!-- to recording -->
+      <audio id="sfx-24" src="assets/sfx/whoosh-digital.mp3" data-start="18.686" data-duration="0.920" data-track-index="11" data-volume="0.219"></audio>
+      <!-- rec dot -->
+      <audio id="sfx-25" src="assets/sfx/thud.mp3" data-start="19.879" data-duration="0.141" data-track-index="11" data-volume="0.513"></audio>
+      <!-- 4x -->
+      <audio id="sfx-26" src="assets/sfx/text-tap-up2.mp3" data-start="20.526" data-duration="0.415" data-track-index="11" data-volume="0.288"></audio>
+      <!-- 15x -->
+      <audio id="sfx-27" src="assets/sfx/text-tap-up4.mp3" data-start="21.293" data-duration="0.370" data-track-index="11" data-volume="0.305"></audio>
+      <!-- 60 fps -->
+      <audio id="sfx-28" src="assets/sfx/text-tap.mp3" data-start="22.096" data-duration="0.466" data-track-index="11" data-volume="0.266"></audio>
+      <!-- console rises -->
+      <audio id="sfx-29" src="assets/sfx/whoosh-slide.mp3" data-start="22.887" data-duration="0.955" data-track-index="11" data-volume="0.166"></audio>
+      <!-- console line 1 -->
+      <audio id="sfx-30" src="assets/sfx/typing.mp3" data-start="23.795" data-duration="0.900" data-track-index="12" data-volume="0.313"></audio>
+      <!-- note -->
+      <audio id="sfx-31" src="assets/sfx/text-tap-down2.mp3" data-start="24.494" data-duration="0.523" data-track-index="11" data-volume="0.299"></audio>
+      <!-- console line 2 -->
+      <audio id="sfx-32" src="assets/sfx/typing.mp3" data-start="25.399" data-duration="1.000" data-track-index="12" data-volume="0.313"></audio>
+      <!-- browser leaves, list enters -->
+      <audio id="sfx-33" src="assets/sfx/whoosh-swing.mp3" data-start="28.071" data-duration="0.899" data-track-index="11" data-volume="0.733"></audio>
+      <!-- list blurs out -->
+      <audio id="sfx-34" src="assets/sfx/whoosh-wipe.mp3" data-start="35.371" data-duration="0.927" data-track-index="11" data-volume="0.275"></audio>
+      <!-- cursor clicks the mark -->
+      <audio id="sfx-35" src="assets/sfx/tap.mp3" data-start="36.844" data-duration="0.455" data-track-index="11" data-volume="0.684"></audio>
+      <!-- mark lands -->
+      <audio id="sfx-36" src="assets/sfx/impact.mp3" data-start="36.894" data-duration="0.785" data-track-index="12" data-volume="0.327"></audio>
+      <!-- wordmark writes -->
+      <audio id="sfx-37" src="assets/sfx/sparkle.mp3" data-start="37.095" data-duration="1.600" data-track-index="13" data-volume="0.158"></audio>
+      <!-- install command -->
+      <audio id="sfx-38" src="assets/sfx/typing.mp3" data-start="37.904" data-duration="0.950" data-track-index="14" data-volume="0.313"></audio>
+      <!-- url -->
+      <audio id="sfx-39" src="assets/sfx/text-tap-down4.mp3" data-start="38.921" data-duration="0.587" data-track-index="11" data-volume="0.285"></audio>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {}
+      window.__timelines['main'] = gsap.timeline({ paused: true })
+    </script>
+  </body>
+</html>
