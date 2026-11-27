@@ -1,20 +1,20 @@
 /**
  * Hands a tab to the user for a step only they can do (a sign-in, a 2FA code, a captcha, an approval).
  *
- * handoff() brings the tab to the front and shows a Playwriter card saying what to do: in the top-right
- * corner, or beside a `target` element with a ring around it. waitForHandoff() then waits for the page to
- * show the step is done, so the user's own action is what resumes the agent.
+ * handoff() shows a Playwriter card saying what to do: in the top-right corner, or beside a `target` element
+ * with a ring around it. It never steals focus; it returns a link that brings the tab to the front when the
+ * user opens it. waitForHandoff() then waits for the page to show the step is done, so the user's own action
+ * is what resumes the agent.
  *
  * The card has to work on any page, so:
  * - it lives in a shadow root, and its styles are a constructed stylesheet: a strict `style-src` CSP blocks
  *   a <style> element
  * - every node, SVGs included, is built with createElement(NS): a page enforcing Trusted Types refuses innerHTML
- * - clicks pass through it everywhere except its Done button
+ * - clicks pass through it everywhere except its close and Done buttons
  * - the ring and the spotlight card follow the target with CSS anchor positioning, so nothing reads the
  *   scroll position. An anchor name does not resolve from inside a shadow root, so the card's host and the
  *   ring are light-DOM elements positioned with inline !important styles
- * - each wait is one function predicate: Playwright polls a string predicate with eval, which a strict
- *   CSP refuses
+ * - each wait is one function predicate that also watches the close button, so closing the card ends any wait
  */
 
 import type { Locator, Page } from '@xmorse/playwright-core'
@@ -53,36 +53,138 @@ const TARGET_ATTR = 'data-playwriter-handoff-target'
 const CONFIRM_MS = 1200
 
 const handoffs = new WeakMap<Page, { spec: CardSpec; rerender: () => void }>()
+// token → tab for the focus link, served by the relay at /handoff/:token
+const focusTokens = new Map<string, Page>()
 
-export async function handoff({ page, message, target, manual = false }: HandoffOptions): Promise<void> {
+/**
+ * Shows the card without stealing focus. Returns a link for the chat: opening it brings the tab to the front,
+ * so focus only changes when the user asks for it.
+ */
+export async function handoff({
+  page,
+  message,
+  target,
+  manual = false,
+  relayUrl,
+}: HandoffOptions & { relayUrl: string }): Promise<{ link: string }> {
   await clearTarget({ page })
   if (target) {
     await target.evaluate((el, attr) => el.setAttribute(attr, ''), TARGET_ATTR)
   }
   await showCard({ page, spec: { message, manual, spot: Boolean(target), done: false } })
-  await page.bringToFront()
+  await scrollToTarget({ page })
+  forgetFocusTokens({ page })
+  const token = crypto.randomUUID()
+  focusTokens.set(token, page)
+  return { link: `${relayUrl}/handoff/${token}` }
 }
 
-/** Waits for Done on a manual card, or for `until` on any other, shows a short confirmation, then clears the card. */
+/** The relay calls this when the user opens a focus link. Returns false for an unknown or ended handoff. */
+export async function focusHandoff({ token }: { token: string }): Promise<boolean> {
+  const page = focusTokens.get(token)
+  if (!page || page.isClosed()) {
+    return false
+  }
+  await page.bringToFront()
+  // the user may have scrolled since the handoff started
+  await scrollToTarget({ page })
+  return true
+}
+
+async function scrollToTarget({ page }: { page: Page }): Promise<void> {
+  await evaluateIsolated({
+    target: page,
+    fn: (attr: string) => {
+      const el = document.querySelector(`[${attr}]`)
+      const rect = el?.getBoundingClientRect()
+      if (!el || (rect.top >= 0 && rect.bottom <= window.innerHeight)) return
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    },
+    arg: TARGET_ATTR,
+  }).catch(() => {})
+}
+
+function forgetFocusTokens({ page }: { page: Page }): void {
+  for (const [token, tokenPage] of focusTokens) {
+    if (tokenPage === page) focusTokens.delete(token)
+  }
+}
+
+/**
+ * Page the focus link opens. It asks the relay to bring the handoff tab to the front, then closes itself:
+ * Chrome lets a script close a tab with one history entry, which a tab opened from another app has.
+ * Focusing first matters: closing the active tab would make Chrome pick a neighbour tab.
+ */
+export function focusPageHtml(): string {
+  const logo = `<svg viewBox="${ICON.viewBox}" aria-hidden="true">${ICON.parts
+    .map(([tag, attrs]) => `<${tag} ${Object.entries(attrs).map(([key, value]) => `${key}="${value}"`).join(' ')}/>`)
+    .join('')}</svg>`
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playwriter</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #000; --muted: #666; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --fg: #ededed; --muted: #a1a1a1; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+    font: 14px/20px Geist, "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { display: grid; justify-items: center; gap: 12px; text-align: center; padding: 24px; }
+  svg { width: 32px; height: 32px; margin-bottom: 4px; }
+  h1 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0; color: var(--muted); }
+</style>
+</head><body><main>
+${logo}
+<h1 id="title">Opening tab…</h1>
+<p id="text"></p>
+</main>
+<script>
+const show = (title, text) => {
+  document.getElementById('title').textContent = title
+  document.getElementById('text').textContent = text
+}
+fetch(location.pathname, { method: 'POST' }).then((res) => {
+  if (res.ok) {
+    show('Tab opened', 'You can close this page.')
+    window.close()
+    return
+  }
+  show('Handoff ended', 'Ask the agent for a new link.')
+}).catch(() => {
+  show('Playwriter is not running', 'Ask the agent to start again.')
+})
+</script></body></html>`
+}
+
+/**
+ * Waits for Done on a manual card, or for `until` on any other, shows a short confirmation, then clears the card.
+ * Throws if the user closes the card instead.
+ */
 export async function waitForHandoff({ page, until, timeout = 0 }: WaitForHandoffOptions): Promise<void> {
   const current = handoffs.get(page)
   if (!current) {
     throw new Error('waitForHandoff: no handoff is showing on this page. Call handoff({ page, message }) first.')
   }
-  const options = { polling: 500, timeout }
+  // the buttons set data-state on the host ("done" or "closed"), `until` covers everything else
+  let finished: string
   if (current.spec.manual) {
-    await page.waitForFunction((id) => document.getElementById(id)?.dataset.done === '1', HOST_ID, options)
+    finished = 'false'
   } else if (util.types.isRegExp(until)) {
     // sandbox code builds its RegExp in another realm, so `instanceof RegExp` would be false
-    await page.waitForFunction(
-      ({ source, flags }) => new RegExp(source, flags).test(window.location.href),
-      { source: until.source, flags: until.flags },
-      options,
-    )
+    finished = `new RegExp(${JSON.stringify(until.source)}, ${JSON.stringify(until.flags)}).test(location.href)`
   } else if (typeof until === 'function') {
-    await page.waitForFunction(until, undefined, options)
+    finished = `Boolean((${until.toString()})())`
   } else {
     throw new Error('waitForHandoff needs `until` (a URL RegExp or a page function), or a handoff with `manual: true`')
+  }
+  // a function built from source, not a string predicate: Playwright evals a string on every poll, which a
+  // strict CSP refuses, but compiles a function once
+  const predicate = new Function(
+    `return document.getElementById(${JSON.stringify(HOST_ID)})?.dataset.state || (${finished} && 'done')`,
+  ) as () => string | false
+  const handle = await page.waitForFunction(predicate, undefined, { polling: 500, timeout })
+  if ((await handle.jsonValue()) === 'closed') {
+    await clearHandoff({ page })
+    throw new Error('waitForHandoff: the user closed the Playwriter card without finishing. Ask them in chat what to do.')
   }
   await showCard({ page, spec: { ...current.spec, done: true } })
   await sleep(CONFIRM_MS)
@@ -96,6 +198,7 @@ export async function clearHandoff({ page }: { page: Page }): Promise<void> {
     page.off('domcontentloaded', current.rerender)
     handoffs.delete(page)
   }
+  forgetFocusTokens({ page })
   await evaluateIsolated({
     target: page,
     fn: (ids: string[]) => ids.forEach((id) => document.getElementById(id)?.remove()),
@@ -122,6 +225,7 @@ async function showCard({ page, spec }: { page: Page; spec: CardSpec }): Promise
     place: PLACE,
     icon: ICON,
     check: CHECK,
+    cross: CROSS,
   }
   const previous = handoffs.get(page)
   if (previous) {
@@ -150,6 +254,7 @@ interface RenderArg {
   place: Record<'corner' | 'spot' | 'ring', Record<string, string>>
   icon: SvgArt
   check: SvgArt
+  cross: SvgArt
 }
 
 /** Runs in the page: (re)builds the card from its spec. */
@@ -178,6 +283,18 @@ function renderCard(arg: RenderArg): void {
   const pin = (node, props: Record<string, string>) => {
     for (const [key, value] of Object.entries(props)) node.style.setProperty(key, value, 'important')
   }
+  const button = ({ cls, label, state }: { cls: string; label: string; state: 'done' | 'closed' }) => {
+    const node = el('button', cls)
+    node.type = 'button'
+    node.setAttribute('aria-label', label)
+    node.addEventListener('click', () => {
+      host.dataset.state = state
+      if (state !== 'closed') return
+      card.classList.add('leaving')
+      document.getElementById(arg.ringId)?.remove()
+    })
+    return node
+  }
 
   document.getElementById(arg.hostId)?.remove()
   document.getElementById(arg.ringId)?.remove()
@@ -193,35 +310,30 @@ function renderCard(arg: RenderArg): void {
   root.adoptedStyleSheets = [sheet]
   anchor?.style.setProperty('anchor-name', '--playwriter-handoff')
 
-  const app = el('div', 'app')
-  if (spot) app.append(svg(arg.icon, 'icon'))
-  app.append('Playwriter')
-  const body = [app]
-  if (spec.done) {
-    const got = el('div', 'ask got')
-    got.append(svg(arg.check, 'check'), 'Got it, carrying on.')
-    body.push(got)
-  } else {
-    const foot = el('div', 'foot')
-    foot.append(
-      el('span', 'hint', spec.manual ? "Press Done once you've finished." : "Continues by itself once you're done."),
-    )
-    if (spec.manual) {
-      const button = el('button', '', 'Done')
-      button.type = 'button'
-      button.addEventListener('click', () => {
-        host.dataset.done = '1'
-      })
-      foot.append(button)
-    }
-    body.push(el('div', 'ask', spec.message), foot)
-  }
-  const text = el('div', 'text')
-  text.append(...body)
   const card = el('div', `card ${spot ? 'spot' : 'corner'}${spec.done ? ' done' : ''}`)
   card.setAttribute('role', 'status')
-  if (!spot) card.append(svg(arg.icon, 'icon'))
-  card.append(text)
+  const head = el('div', 'head')
+  head.append(el('span', 'app', 'Playwriter'))
+  if (!spec.done) {
+    const close = button({ cls: 'close', label: 'Close', state: 'closed' })
+    close.append(svg(arg.cross, 'cross'))
+    head.append(close)
+  }
+  card.append(svg(arg.icon, 'icon'), head)
+  if (spec.done) {
+    const got = el('div', 'got')
+    got.append(svg(arg.check, 'check'), 'Got it, carrying on.')
+    card.append(got)
+  } else {
+    const foot = el('div', 'foot')
+    foot.append(el('span', 'hint', spec.manual ? "Press Done when finished." : "Continues by itself once you're done."))
+    if (spec.manual) {
+      const done = button({ cls: 'done-button', label: 'Done', state: 'done' })
+      done.textContent = 'Done'
+      foot.append(done)
+    }
+    card.append(el('div', 'ask', spec.message), foot)
+  }
   root.append(card)
   document.documentElement.appendChild(host)
   if (spot && !spec.done) {
@@ -235,13 +347,14 @@ function renderCard(arg: RenderArg): void {
 const SHELL = { display: 'block', position: 'fixed', 'z-index': '2147483647', margin: '0', 'pointer-events': 'none' }
 
 const PLACE: RenderArg['place'] = {
-  corner: { ...SHELL, top: '12px', right: '12px' },
+  corner: { ...SHELL, top: '16px', right: '16px' },
+  // beside the target so it never covers the next field, or below it when there is no room
   spot: {
     ...SHELL,
+    margin: '14px',
     'position-anchor': '--playwriter-handoff',
-    top: 'calc(anchor(bottom) + 14px)',
-    left: 'calc(anchor(left) - 4px)',
-    'position-try-fallbacks': 'flip-block',
+    'position-area': 'right',
+    'position-try-fallbacks': 'flip-inline, bottom span-right, top span-right',
   },
   ring: {
     ...SHELL,
@@ -251,44 +364,59 @@ const PLACE: RenderArg['place'] = {
     left: 'calc(anchor(left) - 4px)',
     right: 'calc(anchor(right) - 4px)',
     bottom: 'calc(anchor(bottom) - 4px)',
-    'border-radius': '9px',
+    'border-radius': '10px',
     background: 'none',
     border: '0',
-    'box-shadow': '0 0 0 2px #83c995, 0 0 0 6px rgba(131, 201, 149, 0.28)',
+    'box-shadow': '0 0 0 2px #83c995, 0 0 0 6px rgba(131, 201, 149, 0.3)',
   },
 }
 
-const FONT = `-apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif`
+const FONT = `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif`
 
+// iOS notification look: translucent material over a backdrop blur, light or dark with the system
 const CSS = `
   :host { all: initial; }
-  .card { display: flex; align-items: flex-start; gap: 12px;
-    box-sizing: border-box; width: 340px; max-width: calc(100vw - 24px); padding: 12px 14px 12px 12px; border-radius: 14px;
-    font: 13px/20px ${FONT}; color: #f4f4f5; -webkit-font-smoothing: antialiased; background: rgba(28, 28, 30, 0.94);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 14px 36px rgba(0, 0, 0, 0.32);
-    animation: enter 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-  .spot { padding: 10px 12px 12px; border-radius: 12px; }
-  .corner > .icon { flex: none; width: 32px; height: 32px; }
-  .icon svg, .check svg { display: block; width: 100%; height: 100%; }
-  .text { flex: 1; display: grid; gap: 2px; min-width: 0; }
-  .spot .text { gap: 4px; }
-  .app { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; font-weight: 600; color: #fff; }
-  /* optical alignment: a 16px icon beside 12px text reads 0.25px low */
-  .app > .icon { flex: none; width: 16px; height: 16px; transform: translateY(-0.25px); }
-  .foot { display: flex; align-items: center; gap: 12px; padding-top: 6px; }
-  .spot .foot { padding-top: 4px; }
-  .hint { font-size: 12px; line-height: 16px; color: #a1a1aa; }
-  button { all: unset; pointer-events: auto; cursor: pointer; margin-left: auto; height: 24px; padding: 0 10px;
-    border-radius: 6px; font: 600 12px/24px ${FONT}; color: #0a0a0a; background: #83c995; }
-  button:hover { background: #95d4a5; }
+  .card {
+    --label: #1d1d1f; --secondary: rgba(60, 60, 67, 0.62); --material: rgba(246, 246, 248, 0.78);
+    --hairline: rgba(0, 0, 0, 0.08); --fill: rgba(120, 120, 128, 0.14); --fill-hover: rgba(120, 120, 128, 0.24);
+    --button: #1d1d1f; --button-label: #fff;
+    box-sizing: border-box; width: 344px; max-width: calc(100vw - 32px);
+    display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; align-items: start;
+    padding: 14px 14px 14px 14px; border-radius: 24px;
+    font: 15px/20px ${FONT}; letter-spacing: -0.01em; color: var(--label); -webkit-font-smoothing: antialiased;
+    background: var(--material);
+    -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: 0 0 0 0.5px var(--hairline), 0 2px 6px rgba(0, 0, 0, 0.06), 0 16px 40px rgba(0, 0, 0, 0.16);
+    transition: opacity 180ms ease, transform 180ms ease;
+    animation: enter 460ms cubic-bezier(0.32, 0.72, 0, 1); }
+  @media (prefers-color-scheme: dark) {
+    .card { --label: #f5f5f7; --secondary: rgba(235, 235, 245, 0.6); --material: rgba(28, 28, 30, 0.82);
+      --hairline: rgba(255, 255, 255, 0.12); --fill: rgba(120, 120, 128, 0.3); --fill-hover: rgba(120, 120, 128, 0.42);
+      --button: #f5f5f7; --button-label: #1d1d1f; } }
+  .icon { grid-row: 1 / span 3; width: 28px; height: 28px; margin-top: 2px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.12)); }
+  .icon svg, .check svg, .cross svg { display: block; width: 100%; height: 100%; }
+  .head { grid-column: 2; display: flex; align-items: center; gap: 8px; height: 20px; }
+  .app { flex: 1; font-size: 13px; line-height: 18px; font-weight: 600; letter-spacing: 0; color: var(--secondary); }
+  .ask { grid-column: 2; margin-top: 1px; font-weight: 600; overflow-wrap: anywhere; }
+  .foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 4px; min-height: 18px; }
+  .hint { flex: 1; font-size: 13px; line-height: 18px; letter-spacing: 0; color: var(--secondary); }
+  button { all: unset; pointer-events: auto; cursor: pointer; flex: none; -webkit-tap-highlight-color: transparent;
+    transition: background-color 150ms ease, opacity 150ms ease, transform 150ms ease; }
+  button:active { transform: scale(0.94); }
   button:focus-visible { outline: 2px solid #83c995; outline-offset: 2px; }
-  .got { display: flex; align-items: flex-start; gap: 6px; }
-  /* optical alignment: the 16px check reads 0.44px high beside 13px text */
-  .check { flex: none; width: 16px; height: 16px; margin-top: 2px; transform: translateY(0.4375px); }
-  @keyframes enter { from { opacity: 0; transform: translateY(-6px); } }
+  .close { display: grid; place-items: center; width: 22px; height: 22px; margin-right: -2px; border-radius: 50%;
+    color: var(--secondary); background: var(--fill); }
+  .close:hover { background: var(--fill-hover); }
+  .cross { width: 8px; height: 8px; }
+  .done-button { height: 30px; padding: 0 16px; border-radius: 15px; font: 600 14px/30px ${FONT};
+    color: var(--button-label); background: var(--button); }
+  .done-button:hover { opacity: 0.86; }
+  .got { grid-column: 2; display: flex; align-items: center; gap: 6px; margin-top: 1px; font-weight: 600; }
+  .check { flex: none; width: 18px; height: 18px; }
+  .card.leaving { opacity: 0; transform: scale(0.96); }
+  @keyframes enter { from { opacity: 0; transform: translateY(-8px) scale(0.96); } }
   .card.done { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .card { animation: none; transition: opacity 180ms ease; } }
 `
 
 /** The extension icon (extension/icons), in the green the toolbar shows while a tab is attached. */
@@ -328,4 +456,9 @@ const CHECK: SvgArt = {
       },
     ],
   ],
+}
+
+const CROSS: SvgArt = {
+  viewBox: '0 0 10 10',
+  parts: [['path', { d: 'M1.5 1.5l7 7M8.5 1.5l-7 7', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round' }]],
 }

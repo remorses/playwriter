@@ -359,8 +359,14 @@ export interface ExecuteResult {
 
 interface OutputEvent {
   id: number
-  type: 'warning' | 'page-error'
+  type: 'warning' | 'page-error' | 'hint'
   message: string
+}
+
+const OUTPUT_EVENT_LABELS: Record<OutputEvent['type'], string> = {
+  warning: 'WARNING',
+  'page-error': 'PAGE ERROR',
+  hint: 'HINT',
 }
 
 interface OutputScope {
@@ -881,6 +887,10 @@ export class PlaywrightExecutor {
     this.enqueueOutputEvent({ type: 'warning', message })
   }
 
+  enqueueHint(message: string) {
+    this.enqueueOutputEvent({ type: 'hint', message })
+  }
+
   private enqueueOutputEvent(event: Omit<OutputEvent, 'id'>) {
     this.nextOutputEventId += 1
     this.outputEvents.push({ id: this.nextOutputEventId, ...event })
@@ -921,7 +931,7 @@ export class PlaywrightExecutor {
     }
 
     return `${relevantEvents
-      .map((event) => `[${event.type === 'warning' ? 'WARNING' : 'PAGE ERROR'}] ${event.message}`)
+      .map((event) => `[${OUTPUT_EVENT_LABELS[event.type]}] ${event.message}`)
       .join('\n')}\n`
   }
 
@@ -2065,9 +2075,18 @@ export class PlaywrightExecutor {
           show: showGhostCursor,
           hide: hideGhostCursor,
         },
-        handoff: (options: HandoffOptions) => {
+        handoff: async (options: HandoffOptions) => {
           resolveSandboxPage({ helper: 'handoff', page: options?.page })
-          return handoff(options)
+          const { host = '127.0.0.1', port = 19988 } = this.cdpConfig
+          // a readable name for the chat link: Chrome, Firefox and macOS resolve *.localhost to loopback
+          const isLocal = ['127.0.0.1', 'localhost'].includes(host)
+          const relayUrl = isLocal ? `http://playwriter.localhost:${port}` : parseRelayHost(host, port).httpBaseUrl
+          const result = await handoff({ ...options, relayUrl })
+          this.enqueueHint(
+            `Playwriter card shown in the tab, focus unchanged. Send the user this link in chat: opening it brings the tab to the front and scrolls to the step. ${result.link}\n` +
+              'Then wait with waitForHandoff in a separate execute with a long --timeout, in the background if you can.',
+          )
+          return result
         },
         waitForHandoff: (options: WaitForHandoffOptions) => {
           resolveSandboxPage({ helper: 'waitForHandoff', page: options?.page })
